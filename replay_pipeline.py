@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from strategy_config import CONFIGS_DIR, list_available_configs, resolve_config_file
+from strategy_config import CONFIGS_DIR, ConfigResolutionError, list_available_configs, resolve_config_file
 
 
 ROOT = Path(__file__).resolve().parent
@@ -32,6 +32,69 @@ def _normalize_signature(df: pd.DataFrame) -> pd.Series:
         + "|" + line_text.astype(str)
     )
 
+
+
+
+def _normalize_family_signature(df: pd.DataFrame) -> pd.Series:
+    return (
+        df.get("match_name", pd.Series([""] * len(df))).fillna("").astype(str).str.strip().str.lower()
+        + "|" + df.get("market_type", pd.Series([""] * len(df))).fillna("").astype(str).str.strip().str.lower()
+        + "|" + df.get("side", pd.Series([""] * len(df))).fillna("").astype(str).str.strip().str.lower()
+        + "|" + df.get("target_team_role", pd.Series([""] * len(df))).fillna("").astype(str).str.strip().str.lower()
+        + "|" + df.get("target_team_name", pd.Series([""] * len(df))).fillna("").astype(str).str.strip().str.lower()
+    )
+
+
+def _asian_total_line_drift(reference_df: pd.DataFrame, candidate_df: pd.DataFrame) -> dict[str, Any]:
+    ref = reference_df.loc[reference_df.get("market_type", pd.Series(dtype=object)).eq("asian_total")].copy()
+    cand = candidate_df.loc[candidate_df.get("market_type", pd.Series(dtype=object)).eq("asian_total")].copy()
+    if ref.empty or cand.empty:
+        return {
+            "shifted_line_matches_total": 0,
+            "delta_counts": {},
+            "examples": [],
+        }
+
+    ref["family_sig"] = _normalize_family_signature(ref)
+    cand["family_sig"] = _normalize_family_signature(cand)
+    ref["line_num"] = pd.to_numeric(ref.get("line"), errors="coerce")
+    cand["line_num"] = pd.to_numeric(cand.get("line"), errors="coerce")
+    delta_counts: Counter[str] = Counter()
+    examples: list[dict[str, Any]] = []
+
+    for _, row in ref.iterrows():
+        if pd.isna(row["line_num"]):
+            continue
+        family = cand.loc[cand["family_sig"] == row["family_sig"]].copy()
+        if family.empty:
+            continue
+        exact = family.loc[(family["selection_raw"].astype(str).str.lower() == str(row.get("selection_raw", "")).lower()) & (family["line_num"] == row["line_num"])]
+        if not exact.empty:
+            continue
+        family = family.dropna(subset=["line_num"])
+        if family.empty:
+            continue
+        family["line_delta"] = (family["line_num"] - float(row["line_num"])).abs()
+        best = family.sort_values(["line_delta", "confidence_score", "ev_percent"], ascending=[True, False, False]).iloc[0]
+        delta = round(float(best["line_num"]) - float(row["line_num"]), 2)
+        if abs(delta) > 1.0:
+            continue
+        delta_counts[f"{delta:+.2f}"] += 1
+        if len(examples) < 20:
+            examples.append({
+                "match_name": row.get("match_name"),
+                "reference_selection": row.get("selection_raw"),
+                "reference_line": float(row["line_num"]),
+                "candidate_selection": best.get("selection_raw"),
+                "candidate_line": float(best["line_num"]),
+                "delta": delta,
+            })
+
+    return {
+        "shifted_line_matches_total": int(sum(delta_counts.values())),
+        "delta_counts": dict(sorted(delta_counts.items())),
+        "examples": examples,
+    }
 
 def _compare_pick_sets(reference_df: pd.DataFrame, candidate_df: pd.DataFrame) -> dict[str, Any]:
     if reference_df.empty and candidate_df.empty:
@@ -119,7 +182,10 @@ def _load_picks_csv(path: Path) -> pd.DataFrame:
 
 def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_root: Path, alias_file: str, python_bin: str) -> dict[str, Any]:
     possible_path = Path(config_ref)
-    config_path = resolve_config_file(config_file=possible_path) if possible_path.exists() else resolve_config_file(config_name=config_ref)
+    if possible_path.exists():
+        config_path = resolve_config_file(config_file=possible_path, strict=True)
+    else:
+        config_path = resolve_config_file(config_name=config_ref, strict=True)
     config_name = Path(config_path).stem if config_path else config_ref
     replay_run_id = f"replay_{source_info['run_id']}_{config_name}"
     replay_target_date = str(source_info["target_date"])
@@ -153,6 +219,7 @@ def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_r
     candidate_df = _load_picks_csv(replay_picks)
     reference_df = _load_picks_csv(Path(source_info["picks_path"]))
     comparison = _compare_pick_sets(reference_df, candidate_df)
+    asian_total_line_drift = _asian_total_line_drift(reference_df, candidate_df)
 
     quality_report = _load_json(replay_dir / "quality_report.json")
     payload = {
@@ -165,6 +232,7 @@ def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_r
         "picks_total": int(len(candidate_df)),
         "picks_by_market": dict(Counter(candidate_df.get("market_type", pd.Series(dtype=object)).fillna("missing"))),
         "comparison": comparison,
+        "asian_total_line_drift": asian_total_line_drift,
         "quality_report_file": str(replay_dir / "quality_report.json") if (replay_dir / "quality_report.json").exists() else None,
         "quality_processing": quality_report.get("processing", {}),
         "quality_outputs": quality_report.get("outputs", {}),
@@ -215,6 +283,7 @@ def replay_configs_for_run(*, source_run_dir: Path, config_refs: list[str], outp
             "jaccard_percent": comp["jaccard"],
             "edge_below_min_discards": item["quality_processing"].get("discard_reason_counts", {}).get("pick_filter_edge_below_min", 0),
             "odd_out_of_range_discards": item["quality_processing"].get("discard_reason_counts", {}).get("pick_filter_odd_out_of_range", 0),
+            "asian_total_shifted_lines": item.get("asian_total_line_drift", {}).get("shifted_line_matches_total", 0),
         })
     pd.DataFrame(rows).sort_values(["jaccard_percent", "overlap", "picks_total"], ascending=[False, False, False]).to_csv(
         comparison_dir / "comparison_summary.csv",
@@ -245,4 +314,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConfigResolutionError as exc:
+        raise SystemExit(f"[ERRO_CONFIG] {exc}")

@@ -331,7 +331,13 @@ def processar_pipeline(
     print(f" -> Fila manual de aliases: {alias_pending_file}")
 
     df_candidates = pd.DataFrame(candidate_rows)
-    df_final = select_top_picks(df_candidates) if not df_candidates.empty else pd.DataFrame()
+    pick_filter_approved_file = run_dir / "pick_filter_approved.csv"
+    portfolio_rejected_file = run_dir / "portfolio_rejected.csv"
+    if not df_candidates.empty:
+        df_final, df_portfolio_rejected = select_top_picks(df_candidates, return_meta=True)
+    else:
+        df_final = pd.DataFrame()
+        df_portfolio_rejected = pd.DataFrame()
 
     print(
         "[4] Pricing/Filtro: "
@@ -412,6 +418,8 @@ def processar_pipeline(
             "priced_candidates_by_market_type": to_sorted_dict(priced_market_counts),
             "pick_filter_approved_total": int(len(df_candidates)),
             "pick_filter_approved_by_market_type": to_sorted_dict(approved_market_counts),
+            "portfolio_rejected_total": int(len(df_portfolio_rejected)),
+            "portfolio_rejected_by_reason": to_sorted_dict(Counter(df_portfolio_rejected.get("portfolio_reject_reason", pd.Series(dtype=object)).fillna("missing"))) if not df_portfolio_rejected.empty else {},
             "discard_reason_counts": to_sorted_dict(processing_discard_counts),
         },
         "outputs": {
@@ -420,6 +428,8 @@ def processar_pipeline(
             "final_picks_by_league": to_sorted_dict(final_picks_by_league),
             "final_picks_by_confidence": to_sorted_dict(final_picks_by_confidence),
             "alias_pending_file": str(alias_pending_file),
+            "pick_filter_approved_file": str(pick_filter_approved_file),
+            "portfolio_rejected_file": str(portfolio_rejected_file),
             "picks_file": str(picks_file),
         },
     }

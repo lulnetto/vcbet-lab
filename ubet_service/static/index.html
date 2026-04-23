@@ -3,365 +3,436 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>UBET Service</title>
+  <title>UBET Control Center</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --card: #161b22;
-      --muted: #8b949e;
-      --line: #30363d;
-      --text: #e6edf3;
-      --green: #238636;
-      --blue: #1f6feb;
-      --yellow: #d29922;
-      --red: #da3633;
+      --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#9da7b3;
+      --green:#238636; --blue:#1f6feb; --amber:#d29922; --danger:#da3633;
     }
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; margin: 24px; background: var(--bg); color: var(--text); }
-    h1, h2, h3 { margin: 0 0 12px; }
-    p, small, label { color: var(--muted); }
-    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-    .grid-4 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-    .kpi { padding: 14px; border-radius: 12px; background: #11161d; border: 1px solid var(--line); }
-    .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-    .kpi .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
-    .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .section { margin-top: 18px; }
-    label { display: block; margin: 10px 0 4px; }
-    input, select { width: 100%; padding: 8px 10px; background: #0d1117; color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
-    button { margin-top: 12px; padding: 10px 14px; border-radius: 8px; border: none; background: var(--green); color: white; cursor: pointer; }
-    button.secondary { background: var(--blue); }
-    button.ghost { background: transparent; border: 1px solid var(--line); }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .row > * { flex: 1; min-width: 140px; }
-    pre { white-space: pre-wrap; word-break: break-word; background: #0d1117; border: 1px solid var(--line); border-radius: 8px; padding: 12px; max-height: 360px; overflow: auto; }
-    .jobs { margin-top: 24px; }
-    .job { padding: 12px 0; border-bottom: 1px solid var(--line); }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
-    .table-wrap { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
-    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
-    .success { color: #3fb950; }
-    .danger { color: #f85149; }
-    .warning { color: #d29922; }
-    .muted { color: var(--muted); }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { padding:20px; display:grid; gap:20px; }
+    .hero { display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap; }
+    .hero p { margin:.35rem 0 0; color:var(--muted); }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .tab-btn { background:transparent; color:var(--text); border:1px solid var(--border); padding:10px 14px; border-radius:999px; cursor:pointer; }
+    .tab-btn.active { background:var(--blue); border-color:var(--blue); }
+    .tab { display:none; }
+    .tab.active { display:block; }
+    .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; }
+    .kpis { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
+    .kpi { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:14px; padding:12px; }
+    .kpi .label { color:var(--muted); font-size:12px; }
+    .kpi .value { font-size:24px; font-weight:700; margin-top:6px; }
+    .row { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+    label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+    input, select, textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    textarea { min-height:84px; resize:vertical; }
+    button { border:none; cursor:pointer; border-radius:10px; padding:10px 14px; color:#fff; background:var(--blue); }
+    button.green { background:var(--green); }
+    button.amber { background:var(--amber); color:#111; }
+    button.ghost { background:transparent; border:1px solid var(--border); }
+    button.danger { background:var(--danger); }
+    .inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .muted { color:var(--muted); }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; }
+    pre { white-space:pre-wrap; word-break:break-word; max-height:360px; overflow:auto; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { padding:8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .table-wrap { overflow:auto; max-height:420px; }
+    .job { border-top:1px solid var(--border); padding:12px 0; }
+    .ok { color:#3fb950; } .bad { color:#ff7b72; } .warn { color:#d29922; }
+    .section-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
   </style>
 </head>
 <body>
-  <h1>UBET Service</h1>
-  <p>Painel operacional para jobs, entradas e desempenho do ledger.</p>
-
-  <div class="card">
-    <h2>Dashboard do ledger</h2>
-    <div class="grid">
+  <div class="wrap">
+    <section class="hero">
       <div>
-        <label>Ledger file</label>
-        <input id="dash-ledger" value="data/history/bets_ledger.csv" />
+        <h1>UBET Control Center</h1>
+        <p>Dashboard, operação, replay e jobs no mesmo painel.</p>
       </div>
-      <div>
-        <label>Run ID</label>
-        <select id="dash-run-id"><option value="">Todos</option></select>
+      <div class="inline muted">
+        <span id="healthText">carregando...</span>
       </div>
-      <div>
-        <label>Liga</label>
-        <select id="dash-league"><option value="">Todas</option></select>
-      </div>
-      <div>
-        <label>Mercado</label>
-        <select id="dash-market"><option value="">Todos</option></select>
-      </div>
-      <div>
-        <label>Data inicial</label>
-        <input id="dash-date-from" placeholder="2026-04-01" />
-      </div>
-      <div>
-        <label>Data final</label>
-        <input id="dash-date-to" placeholder="2026-04-30" />
-      </div>
-    </div>
-    <div class="row">
-      <label><input type="checkbox" id="dash-only-executed" /> Só executadas</label>
-      <label><input type="checkbox" id="dash-only-settled" /> Só liquidadas</label>
-      <button class="secondary" onclick="refreshDashboard()">Atualizar dashboard</button>
-    </div>
-  </div>
+    </section>
 
-  <div class="section grid-4" id="kpis"></div>
-
-  <div class="section grid">
-    <div class="card">
-      <h3>Performance por mercado</h3>
-      <div class="table-wrap"><table id="table-market"></table></div>
-    </div>
-    <div class="card">
-      <h3>Performance por faixa de odd</h3>
-      <div class="table-wrap"><table id="table-odd"></table></div>
-    </div>
-    <div class="card">
-      <h3>Performance por stake</h3>
-      <div class="table-wrap"><table id="table-stake"></table></div>
-    </div>
-    <div class="card">
-      <h3>Performance por flag</h3>
-      <div class="table-wrap"><table id="table-flag"></table></div>
-    </div>
-  </div>
-
-  <div class="section card">
-    <h3>Entradas recentes</h3>
-    <div class="table-wrap"><table id="table-entries"></table></div>
-  </div>
-
-  <div class="section grid">
-    <div class="card">
-      <h2>Daily run</h2>
-      <label>Data</label>
-      <input id="daily-date" placeholder="2026-04-23" />
-      <label>Run ID</label>
-      <input id="daily-run-id" placeholder="opcional" />
-      <label>Ledger file</label>
-      <input id="daily-ledger" value="data/history/bets_ledger.csv" />
-      <label>Results file</label>
-      <input id="daily-results" value="data/results/results_auto.csv" />
-      <button onclick="startDailyRun()">Iniciar daily run</button>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="operacao">Operação</button>
+      <button class="tab-btn" data-tab="replay">Replay</button>
+      <button class="tab-btn" data-tab="jobs">Jobs</button>
     </div>
 
-    <div class="card">
-      <h2>Coleta de resultados</h2>
-      <label>Ledger file</label>
-      <input id="results-ledger" value="data/history/bets_ledger.csv" />
-      <label>Output file</label>
-      <input id="results-output" value="data/results/results_auto.csv" />
-      <label>Source</label>
-      <input id="results-source" placeholder="auto | flashscore | browser | api" />
-      <button class="secondary" onclick="startResults()">Rodar results_collector</button>
-    </div>
-
-    <div class="card">
-      <h2>Settlement</h2>
-      <label>Ledger file</label>
-      <input id="settlement-ledger" value="data/history/bets_ledger.csv" />
-      <label>Results file</label>
-      <input id="settlement-results" value="data/results/results_auto.csv" />
-      <button class="secondary" onclick="startSettlement()">Rodar settlement</button>
-    </div>
-  </div>
-
-  <div class="jobs card">
-    <h2>Jobs</h2>
-    <button class="ghost" onclick="refreshJobs()">Atualizar</button>
-    <div id="jobs"></div>
-  </div>
-
-  <script>
-    function fmt(value, digits = 2) {
-      if (value === null || value === undefined || value === '') return '-';
-      const num = Number(value);
-      return Number.isFinite(num) ? num.toFixed(digits) : value;
-    }
-
-    function getDashParams() {
-      const params = new URLSearchParams();
-      params.set('ledger_file', document.getElementById('dash-ledger').value);
-      const runId = document.getElementById('dash-run-id').value;
-      const league = document.getElementById('dash-league').value;
-      const market = document.getElementById('dash-market').value;
-      const dateFrom = document.getElementById('dash-date-from').value;
-      const dateTo = document.getElementById('dash-date-to').value;
-      if (runId) params.set('run_id', runId);
-      if (league) params.set('league', league);
-      if (market) params.set('market_type', market);
-      if (dateFrom) params.set('date_from', dateFrom);
-      if (dateTo) params.set('date_to', dateTo);
-      if (document.getElementById('dash-only-executed').checked) params.set('only_executed', 'true');
-      if (document.getElementById('dash-only-settled').checked) params.set('only_settled', 'true');
-      return params;
-    }
-
-    async function postJson(url, payload) {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.detail || JSON.stringify(data));
-        return null;
-      }
-      refreshJobs();
-      return data;
-    }
-
-    function startDailyRun() {
-      return postJson('/jobs/daily-run', {
-        date: document.getElementById('daily-date').value || null,
-        run_id: document.getElementById('daily-run-id').value || null,
-        ledger_file: document.getElementById('daily-ledger').value,
-        results_file: document.getElementById('daily-results').value
-      });
-    }
-
-    function startResults() {
-      return postJson('/jobs/results-collection', {
-        ledger_file: document.getElementById('results-ledger').value,
-        output_file: document.getElementById('results-output').value,
-        source: document.getElementById('results-source').value || null,
-        debug: true
-      });
-    }
-
-    function startSettlement() {
-      return postJson('/jobs/settlement', {
-        ledger_file: document.getElementById('settlement-ledger').value,
-        results_file: document.getElementById('settlement-results').value
-      });
-    }
-
-    function renderKpis(summary, clv) {
-      const cards = [
-        ['Entradas totais', summary.total_entries, `${summary.open_entries} abertas / ${summary.settled_entries} liquidadas`],
-        ['Unidades modelo', fmt(summary.model_units, 2), `Stake ${fmt(summary.model_stake, 2)}u | ROI ${fmt(summary.model_roi_percent, 2)}%`],
-        ['Unidades reais', fmt(summary.real_units, 2), `Stake ${fmt(summary.real_stake, 2)}u | ROI ${fmt(summary.real_roi_percent, 2)}%`],
-        ['Hit rate', `${fmt(summary.hit_rate_percent, 2)}%`, `Wins ${summary.wins} | Half wins ${summary.half_wins} | Losses ${summary.losses}`],
-        ['Weighted hit', `${fmt(summary.weighted_hit_rate_percent, 2)}%`, `Push ${summary.pushes} | Half losses ${summary.half_losses}`],
-        ['CLV médio', fmt(clv.avg_delta, 4), `${clv.count} picks | ${fmt(clv.positive_rate_percent, 2)}% positivo`],
-        ['Executadas', summary.executed_entries, `${summary.executed_settled_entries} já liquidadas`],
-        ['Yield modelo', `${fmt(summary.model_yield_percent, 2)}%`, 'Mesmo denominador do stake em unidades']
-      ];
-      document.getElementById('kpis').innerHTML = cards.map(([label, value, sub]) => `
-        <div class="kpi">
-          <div class="label">${label}</div>
-          <div class="value">${value}</div>
-          <div class="sub">${sub}</div>
+    <section id="tab-dashboard" class="tab active">
+      <div class="card">
+        <div class="section-title">
+          <h2>Filtros da dashboard</h2>
+          <button class="ghost" onclick="loadDashboard()">Atualizar</button>
         </div>
-      `).join('');
-    }
+        <div class="row">
+          <div><label>Ledger file</label><input id="dashLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Run ID</label><select id="dashRun"><option value="">Todos</option></select></div>
+          <div><label>Liga</label><select id="dashLeague"><option value="">Todas</option></select></div>
+          <div><label>Mercado</label><select id="dashMarket"><option value="">Todos</option></select></div>
+          <div><label>Data inicial</label><input id="dashDateFrom" placeholder="2026-04-22"></div>
+          <div><label>Data final</label><input id="dashDateTo" placeholder="2026-04-23"></div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="dashExecuted"> Só executadas</label>
+          <label><input type="checkbox" id="dashSettled"> Só liquidadas</label>
+        </div>
+      </div>
 
-    function renderTable(tableId, rows, columns) {
-      const root = document.getElementById(tableId);
-      if (!rows || !rows.length) {
-        root.innerHTML = '<tbody><tr><td class="muted">Sem dados</td></tr></tbody>';
-        return;
-      }
-      const thead = `<thead><tr>${columns.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>`;
-      const tbody = `<tbody>${rows.map(row => `<tr>${columns.map(c => `<td>${c.format ? c.format(row[c.key], row) : (row[c.key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody>`;
-      root.innerHTML = thead + tbody;
-    }
+      <div class="kpis" id="kpiGrid"></div>
 
-    function renderEntries(rows) {
-      const columns = [
-        {key: 'created_at', label: 'Criada em'},
-        {key: 'run_id', label: 'Run'},
-        {key: 'league', label: 'Liga'},
-        {key: 'match_name', label: 'Jogo'},
-        {key: 'market_type', label: 'Mercado'},
-        {key: 'selection_raw', label: 'Seleção'},
-        {key: 'odd_entrada', label: 'Odd', format: v => fmt(v, 2)},
-        {key: 'ev_percent', label: 'EV%', format: v => fmt(v, 2)},
-        {key: 'stake_units', label: 'Stake', format: v => fmt(v, 2)},
-        {key: 'bet_executed', label: 'Exec.'},
-        {key: 'final_bet_status', label: 'Bet status'},
-        {key: 'final_settlement_status', label: 'Settlement'},
-        {key: 'result_units_model', label: 'U modelo', format: v => fmt(v, 2)},
-        {key: 'risk_flags', label: 'Flags'}
-      ];
-      renderTable('table-entries', rows, columns);
-    }
+      <div class="grid">
+        <div class="card">
+          <h3>Performance por mercado</h3>
+          <div class="table-wrap"><table id="tableMarket"></table></div>
+        </div>
+        <div class="card">
+          <h3>Performance por odd</h3>
+          <div class="table-wrap"><table id="tableOdd"></table></div>
+        </div>
+        <div class="card">
+          <h3>Performance por stake</h3>
+          <div class="table-wrap"><table id="tableStake"></table></div>
+        </div>
+        <div class="card">
+          <h3>Performance por flag</h3>
+          <div class="table-wrap"><table id="tableFlag"></table></div>
+        </div>
+      </div>
 
-    async function refreshDashboard() {
-      const params = getDashParams();
-      const res = await fetch(`/dashboard/summary?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.detail || JSON.stringify(data));
-        return;
-      }
+      <div class="card">
+        <div class="section-title">
+          <h2>Entradas recentes</h2>
+          <button class="ghost" onclick="loadEntries()">Recarregar tabela</button>
+        </div>
+        <div class="table-wrap"><table id="tableEntries"></table></div>
+      </div>
+    </section>
 
-      hydrateFilters(data.filters);
-      renderKpis(data.summary, data.clv);
-      renderTable('table-market', data.breakdowns.by_market, [
-        {key: 'bucket', label: 'Mercado'},
-        {key: 'picks', label: 'Picks'},
-        {key: 'stake', label: 'Stake', format: v => fmt(v, 2)},
-        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
-        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)},
-        {key: 'avg_odd', label: 'Odd média', format: v => fmt(v, 2)}
-      ]);
-      renderTable('table-odd', data.breakdowns.by_odd_bucket, [
-        {key: 'bucket', label: 'Faixa'},
-        {key: 'picks', label: 'Picks'},
-        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
-        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
-      ]);
-      renderTable('table-stake', data.breakdowns.by_stake_bucket, [
-        {key: 'bucket', label: 'Faixa'},
-        {key: 'picks', label: 'Picks'},
-        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
-        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
-      ]);
-      renderTable('table-flag', data.breakdowns.by_flag, [
-        {key: 'bucket', label: 'Flag'},
-        {key: 'picks', label: 'Picks'},
-        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
-        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
-      ]);
-      renderEntries(data.entries);
-    }
+    <section id="tab-operacao" class="tab">
+      <div class="grid">
+        <div class="card">
+          <h2>Análise</h2>
+          <div class="row">
+            <div><label>Modo</label><select id="analysisMode"><option value="full">full</option><option value="legacy">legacy</option></select></div>
+            <div><label>Data</label><input id="analysisDate" placeholder="2026-04-23"></div>
+            <div><label>Ledger file</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Config</label><select id="analysisConfig"></select></div>
+          </div>
+          <div class="inline" style="margin-top:10px;">
+            <label><input type="checkbox" id="analysisDebug"> debug</label>
+            <label><input type="checkbox" id="analysisDryRun"> dry-run</label>
+          </div>
+          <button class="green" onclick="submitAnalysis()">Rodar análise</button>
+        </div>
 
-    function hydrateFilters(filters) {
-      const configs = [
-        ['dash-run-id', filters.available_runs || [], 'Todos'],
-        ['dash-league', filters.available_leagues || [], 'Todas'],
-        ['dash-market', filters.available_markets || [], 'Todos']
-      ];
-      for (const [id, values, emptyLabel] of configs) {
-        const select = document.getElementById(id);
-        const current = select.value;
-        select.innerHTML = `<option value="">${emptyLabel}</option>` + values.map(v => `<option value="${v}">${v}</option>`).join('');
-        if (values.includes(current)) select.value = current;
-      }
-    }
+        <div class="card">
+          <h2>Daily run</h2>
+          <div class="row">
+            <div><label>Data</label><input id="dailyDate" placeholder="2026-04-23"></div>
+            <div><label>Ledger file</label><input id="dailyLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Results file</label><input id="dailyResults" value="data/results/results_auto.csv"></div>
+            <div><label>Config</label><select id="dailyConfig"></select></div>
+          </div>
+          <div class="inline" style="margin-top:10px;">
+            <label><input type="checkbox" id="dailyDebug"> debug</label>
+            <label><input type="checkbox" id="skipResults"> pular results</label>
+            <label><input type="checkbox" id="skipSettlement"> pular settlement</label>
+          </div>
+          <button onclick="submitDailyRun()">Rodar daily run</button>
+        </div>
+      </div>
+      <div class="card"><pre id="actionResult">Sem ações ainda.</pre></div>
+    </section>
 
-    async function refreshJobs() {
-      const res = await fetch('/jobs?limit=20');
-      const data = await res.json();
-      const root = document.getElementById('jobs');
-      root.innerHTML = '';
-      for (const job of data.items) {
-        const div = document.createElement('div');
-        div.className = 'job';
-        const phases = (job.phases || []).map(p => `${p.name}: ${p.status}`).join(' | ');
-        div.innerHTML = `
-          <strong>${job.title}</strong> <small>${job.id}</small><br>
-          <small>${job.status}</small><br>
-          <small>${phases}</small><br>
-          <button onclick="showLogs('${job.id}')">ver logs</button>
-          <button class="ghost" onclick="cancelJob('${job.id}')">cancelar</button>
-          <pre id="log-${job.id}" style="display:none"></pre>
-        `;
-        root.appendChild(div);
-      }
-    }
+    <section id="tab-replay" class="tab">
+      <div class="card">
+        <h2>Replay / calibração</h2>
+        <div class="row">
+          <div><label>Source run dir</label><input id="replaySourceRun" value="data/runs/2026-04-22/run_20260422_235000"></div>
+          <div><label>Config 1</label><select id="replayConfig1"></select></div>
+          <div><label>Config 2</label><select id="replayConfig2"></select></div>
+          <div><label>Config 3</label><select id="replayConfig3"></select></div>
+        </div>
+        <button class="amber" onclick="submitReplay()">Rodar replay</button>
+      </div>
+      <div class="card">
+        <h3>Presets disponíveis</h3>
+        <div id="configList" class="grid"></div>
+      </div>
+    </section>
 
-    async function showLogs(jobId) {
-      const res = await fetch(`/jobs/${jobId}/logs?lines=120`);
-      const text = await res.text();
-      const el = document.getElementById(`log-${jobId}`);
-      el.style.display = 'block';
-      el.textContent = text;
-    }
+    <section id="tab-jobs" class="tab">
+      <div class="grid">
+        <div class="card">
+          <div class="section-title">
+            <h2>Jobs</h2>
+            <button class="ghost" onclick="loadJobs()">Atualizar</button>
+          </div>
+          <div id="jobsList"></div>
+        </div>
+        <div class="card">
+          <h2>Logs</h2>
+          <pre id="jobLogs">Selecione um job.</pre>
+        </div>
+      </div>
+    </section>
+  </div>
 
-    async function cancelJob(jobId) {
-      await fetch(`/jobs/${jobId}/cancel`, {method: 'POST'});
-      refreshJobs();
-    }
+<script>
+const state = { configs: [], jobs: [], dashboard: null };
 
-    refreshDashboard();
-    refreshJobs();
-    setInterval(refreshJobs, 5000);
-  </script>
+function qs(params) {
+  const url = new URLSearchParams();
+  Object.entries(params).forEach(([k,v]) => {
+    if (v === '' || v === null || v === undefined) return;
+    url.set(k, v);
+  });
+  return url.toString();
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, options);
+  const text = await res.text();
+  let payload;
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = text; }
+  if (!res.ok) {
+    const detail = typeof payload === 'object' ? (payload.detail || JSON.stringify(payload)) : payload;
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+  return payload;
+}
+
+function bindTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+    };
+  });
+}
+
+function fillConfigSelect(id, preferred = 'legacy_v2') {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  state.configs.forEach(cfg => {
+    const opt = document.createElement('option');
+    opt.value = cfg.name;
+    opt.textContent = `${cfg.label} (${cfg.name})`;
+    if (cfg.name === preferred) opt.selected = true;
+    el.appendChild(opt);
+  });
+}
+
+function renderConfigCards() {
+  const root = document.getElementById('configList');
+  root.innerHTML = '';
+  state.configs.forEach(cfg => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<strong>${cfg.label}</strong><div class="muted">${cfg.name}</div><div class="muted">${cfg.description || ''}</div><div class="pill">${cfg.fingerprint || 'sem fingerprint'}</div>`;
+    root.appendChild(div);
+  });
+}
+
+function renderTable(id, rows, cols) {
+  const el = document.getElementById(id);
+  if (!rows || !rows.length) {
+    el.innerHTML = '<tr><td class="muted">Sem dados.</td></tr>';
+    return;
+  }
+  const head = `<tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr>`;
+  const body = rows.map(row => `<tr>${cols.map(c => `<td>${row[c.key] ?? ''}</td>`).join('')}</tr>`).join('');
+  el.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
+}
+
+function renderKpis(summary, clv) {
+  const items = [
+    ['Entradas', summary.total_entries], ['Abertas', summary.open_entries], ['Liquidadas', summary.settled_entries],
+    ['Executadas', summary.executed_entries], ['Unid. modelo', summary.model_units], ['ROI modelo %', summary.model_roi_percent],
+    ['Unid. real', summary.real_units], ['ROI real %', summary.real_roi_percent], ['Hit rate %', summary.hit_rate_percent],
+    ['Weighted HR %', summary.weighted_hit_rate_percent], ['Wins', summary.wins], ['Losses', summary.losses],
+    ['Half wins', summary.half_wins], ['Half losses', summary.half_losses], ['CLV médio', clv.avg_delta], ['CLV + %', clv.positive_rate_percent]
+  ];
+  document.getElementById('kpiGrid').innerHTML = items.map(([label, value]) => `
+    <div class="kpi"><div class="label">${label}</div><div class="value">${value ?? 0}</div></div>
+  `).join('');
+}
+
+async function loadConfigs() {
+  state.configs = await api('/configs');
+  ['analysisConfig','dailyConfig','replayConfig1','replayConfig2','replayConfig3'].forEach(id => fillConfigSelect(id));
+  if (document.getElementById('replayConfig2').options.length > 1) document.getElementById('replayConfig2').selectedIndex = 1;
+  if (document.getElementById('replayConfig3').options.length > 2) document.getElementById('replayConfig3').selectedIndex = 2;
+  renderConfigCards();
+}
+
+function dashboardParams() {
+  return {
+    ledger_file: document.getElementById('dashLedger').value,
+    run_id: document.getElementById('dashRun').value,
+    league: document.getElementById('dashLeague').value,
+    market_type: document.getElementById('dashMarket').value,
+    date_from: document.getElementById('dashDateFrom').value,
+    date_to: document.getElementById('dashDateTo').value,
+    only_executed: document.getElementById('dashExecuted').checked,
+    only_settled: document.getElementById('dashSettled').checked,
+  };
+}
+
+async function loadDashboard() {
+  try {
+    const payload = await api(`/dashboard/summary?${qs(dashboardParams())}`);
+    state.dashboard = payload;
+    renderKpis(payload.summary, payload.clv);
+    renderTable('tableMarket', payload.breakdowns.by_market, [
+      {key:'bucket', label:'Mercado'}, {key:'picks', label:'Picks'}, {key:'units_model', label:'Unid'}, {key:'roi_model_percent', label:'ROI %'}
+    ]);
+    renderTable('tableOdd', payload.breakdowns.by_odd_bucket, [
+      {key:'bucket', label:'Faixa'}, {key:'picks', label:'Picks'}, {key:'units_model', label:'Unid'}, {key:'roi_model_percent', label:'ROI %'}
+    ]);
+    renderTable('tableStake', payload.breakdowns.by_stake_bucket, [
+      {key:'bucket', label:'Faixa'}, {key:'picks', label:'Picks'}, {key:'units_model', label:'Unid'}, {key:'roi_model_percent', label:'ROI %'}
+    ]);
+    renderTable('tableFlag', payload.breakdowns.by_flag, [
+      {key:'bucket', label:'Flag'}, {key:'picks', label:'Picks'}, {key:'units_model', label:'Unid'}, {key:'roi_model_percent', label:'ROI %'}
+    ]);
+
+    const filters = payload.filters || {};
+    fillSelect('dashRun', filters.available_runs || [], true);
+    fillSelect('dashLeague', filters.available_leagues || [], true);
+    fillSelect('dashMarket', filters.available_markets || [], true);
+    loadEntries();
+  } catch (err) {
+    document.getElementById('actionResult').textContent = `Erro dashboard: ${err.message}`;
+  }
+}
+
+function fillSelect(id, values, keepEmpty = false) {
+  const el = document.getElementById(id);
+  const current = el.value;
+  el.innerHTML = keepEmpty ? '<option value="">Todos</option>' : '';
+  values.forEach(v => {
+    const opt = document.createElement('option'); opt.value = v; opt.textContent = v; el.appendChild(opt);
+  });
+  if ([...el.options].some(o => o.value === current)) el.value = current;
+}
+
+async function loadEntries() {
+  try {
+    const payload = await api(`/dashboard/entries?${qs({...dashboardParams(), limit: 100})}`);
+    renderTable('tableEntries', payload.items, [
+      {key:'created_at', label:'Criado em'}, {key:'run_id', label:'Run'}, {key:'league', label:'Liga'},
+      {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'}, {key:'selection_raw', label:'Seleção'},
+      {key:'odd_entrada', label:'Odd'}, {key:'stake_units', label:'Stake'}, {key:'final_settlement_status', label:'Status'}
+    ]);
+  } catch (err) {
+    document.getElementById('actionResult').textContent = `Erro entries: ${err.message}`;
+  }
+}
+
+async function submitAnalysis() {
+  const payload = {
+    mode: document.getElementById('analysisMode').value,
+    date: document.getElementById('analysisDate').value || null,
+    ledger_file: document.getElementById('analysisLedger').value,
+    config_name: document.getElementById('analysisConfig').value,
+    debug: document.getElementById('analysisDebug').checked,
+    dry_run: document.getElementById('analysisDryRun').checked,
+  };
+  await submitJob('/jobs/analysis', payload);
+}
+
+async function submitDailyRun() {
+  const payload = {
+    date: document.getElementById('dailyDate').value || null,
+    ledger_file: document.getElementById('dailyLedger').value,
+    results_file: document.getElementById('dailyResults').value,
+    config_name: document.getElementById('dailyConfig').value,
+    debug: document.getElementById('dailyDebug').checked,
+    skip_results_collection: document.getElementById('skipResults').checked,
+    skip_settlement: document.getElementById('skipSettlement').checked,
+  };
+  await submitJob('/jobs/daily-run', payload);
+}
+
+async function submitReplay() {
+  const configs = [document.getElementById('replayConfig1').value, document.getElementById('replayConfig2').value, document.getElementById('replayConfig3').value]
+    .filter((v, i, arr) => v && arr.indexOf(v) === i);
+  const payload = {
+    source_run_dir: document.getElementById('replaySourceRun').value,
+    configs,
+  };
+  await submitJob('/jobs/replay-run', payload);
+}
+
+async function submitJob(path, payload) {
+  try {
+    const res = await api(path, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    document.getElementById('actionResult').textContent = JSON.stringify(res, null, 2);
+    loadJobs();
+  } catch (err) {
+    document.getElementById('actionResult').textContent = `Erro: ${err.message}`;
+  }
+}
+
+function formatJob(job) {
+  const req = job.request || {};
+  const config = req.config_name ? ` | config=${req.config_name}` : '';
+  const replayCfg = req.configs ? ` | configs=${req.configs.join(',')}` : '';
+  return `
+    <div class="job">
+      <div class="inline"><strong>${job.title}</strong><span class="pill">${job.status}</span><span class="muted">${job.id}</span></div>
+      <div class="muted">${job.job_type}${config}${replayCfg}</div>
+      <div class="inline" style="margin-top:8px;">
+        <button class="ghost" onclick="viewLogs('${job.id}')">logs</button>
+        <button class="danger" onclick="cancelJob('${job.id}')">cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function loadJobs() {
+  const payload = await api('/jobs?limit=30');
+  state.jobs = payload.items || [];
+  document.getElementById('jobsList').innerHTML = state.jobs.map(formatJob).join('') || '<div class="muted">Sem jobs.</div>';
+}
+
+async function viewLogs(jobId) {
+  const res = await fetch(`/jobs/${jobId}/logs?lines=300`);
+  const text = await res.text();
+  document.getElementById('jobLogs').textContent = text || 'Sem logs.';
+}
+
+async function cancelJob(jobId) {
+  await api(`/jobs/${jobId}/cancel`, { method:'POST' });
+  await loadJobs();
+}
+
+async function loadHealth() {
+  const payload = await api('/health');
+  document.getElementById('healthText').textContent = `online | root=${payload.project_root}`;
+}
+
+async function boot() {
+  bindTabs();
+  await loadHealth();
+  await loadConfigs();
+  await loadDashboard();
+  await loadJobs();
+}
+
+boot();
+</script>
 </body>
 </html>

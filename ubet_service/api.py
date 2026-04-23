@@ -6,8 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from strategy_config import list_available_configs
-
+from strategy_config import ConfigResolutionError, list_available_configs
 from .commands import (
     build_analysis_command,
     build_closing_odds_command,
@@ -16,7 +15,7 @@ from .commands import (
     build_results_command,
     build_settlement_command,
 )
-from .dashboard import apply_filters, build_dashboard_payload, read_ledger
+from .dashboard import apply_filters, build_dashboard_payload, load_ledger
 from .job_runner import JobManager, ResourceBusyError
 from .job_store import JobStore
 from .schemas import (
@@ -38,7 +37,7 @@ store = JobStore(settings.jobs_dir)
 store.mark_interrupted_runs()
 manager = JobManager(store, settings.logs_dir)
 
-app = FastAPI(title="UBET Service", version="0.2.0")
+app = FastAPI(title="UBET Service", version="0.3.0")
 
 
 def _resource_key(project_root: Path, ledger_file: str | None) -> str | None:
@@ -48,6 +47,13 @@ def _resource_key(project_root: Path, ledger_file: str | None) -> str | None:
     if not path.is_absolute():
         path = (project_root / path).resolve()
     return str(path)
+
+
+def _resolve_project_path(path_str: str) -> Path:
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = (settings.project_root / path).resolve()
+    return path
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -62,8 +68,85 @@ def health() -> HealthResponse:
 
 
 @app.get("/configs", response_model=list[ConfigInfo])
-def configs_list() -> list[ConfigInfo]:
+def get_configs() -> list[ConfigInfo]:
     return [ConfigInfo(**item) for item in list_available_configs()]
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary(
+    ledger_file: str = Query("data/history/bets_ledger.csv"),
+    run_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    league: str | None = None,
+    market_type: str | None = None,
+    only_executed: bool = False,
+    only_settled: bool = False,
+):
+    try:
+        df = load_ledger(_resolve_project_path(ledger_file))
+        filtered = apply_filters(
+            df,
+            run_id=run_id,
+            date_from=date_from,
+            date_to=date_to,
+            league=league,
+            market_type=market_type,
+            only_executed=only_executed,
+            only_settled=only_settled,
+        )
+        payload = build_dashboard_payload(filtered)
+        payload["applied_filters"] = {
+            "ledger_file": ledger_file,
+            "run_id": run_id,
+            "date_from": date_from,
+            "date_to": date_to,
+            "league": league,
+            "market_type": market_type,
+            "only_executed": only_executed,
+            "only_settled": only_settled,
+        }
+        return payload
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao montar dashboard: {exc}")
+
+
+@app.get("/dashboard/entries")
+def dashboard_entries(
+    ledger_file: str = Query("data/history/bets_ledger.csv"),
+    run_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    league: str | None = None,
+    market_type: str | None = None,
+    only_executed: bool = False,
+    only_settled: bool = False,
+    limit: int = 100,
+):
+    try:
+        df = load_ledger(_resolve_project_path(ledger_file))
+        filtered = apply_filters(
+            df,
+            run_id=run_id,
+            date_from=date_from,
+            date_to=date_to,
+            league=league,
+            market_type=market_type,
+            only_executed=only_executed,
+            only_settled=only_settled,
+        )
+        payload = build_dashboard_payload(filtered, entries_limit=limit)
+        return {
+            "items": payload["entries"],
+            "total_filtered": int(len(filtered)),
+            "limit": limit,
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao listar entradas: {exc}")
 
 
 @app.get("/jobs", response_model=JobListResponse)
@@ -100,8 +183,8 @@ def cancel_job(job_id: str):
 
 @app.post("/jobs/analysis", response_model=JobCreatedResponse)
 def start_analysis(req: AnalysisRequest) -> JobCreatedResponse:
-    command = build_analysis_command(settings.project_root, req)
     try:
+        command = build_analysis_command(settings.project_root, req)
         job = manager.submit_command_job(
             title=f"Análise {req.mode}",
             job_type="analysis",
@@ -109,8 +192,9 @@ def start_analysis(req: AnalysisRequest) -> JobCreatedResponse:
             command=command,
             resource_key=_resource_key(settings.project_root, req.ledger_file),
         )
-    except ResourceBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ResourceBusyError, ConfigResolutionError) as exc:
+        status = 409 if isinstance(exc, ResourceBusyError) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
     return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
 
 
@@ -164,10 +248,10 @@ def start_settlement(req: SettlementRequest) -> JobCreatedResponse:
 
 @app.post("/jobs/daily-run", response_model=JobCreatedResponse)
 def start_daily_run(req: DailyRunRequest) -> JobCreatedResponse:
-    commands = build_daily_commands(settings.project_root, req)
-    if not commands:
-        raise HTTPException(status_code=400, detail="daily-run sem passos habilitados")
     try:
+        commands = build_daily_commands(settings.project_root, req)
+        if not commands:
+            raise HTTPException(status_code=400, detail="daily-run sem passos habilitados")
         job = manager.submit_pipeline_job(
             title="Daily run",
             job_type="daily_run",
@@ -175,95 +259,27 @@ def start_daily_run(req: DailyRunRequest) -> JobCreatedResponse:
             commands=commands,
             resource_key=_resource_key(settings.project_root, req.ledger_file),
         )
-    except ResourceBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ResourceBusyError, ConfigResolutionError) as exc:
+        status = 409 if isinstance(exc, ResourceBusyError) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
     return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
 
 
 @app.post("/jobs/replay-run", response_model=JobCreatedResponse)
 def start_replay_run(req: ReplayRunRequest) -> JobCreatedResponse:
-    if not req.configs:
-        raise HTTPException(status_code=400, detail="informe ao menos uma config para o replay")
-    command = build_replay_command(settings.project_root, req)
-    job = manager.submit_command_job(
-        title="Replay run",
-        job_type="replay_run",
-        request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
-        command=command,
-        resource_key=None,
-    )
+    try:
+        command = build_replay_command(settings.project_root, req)
+        job = manager.submit_command_job(
+            title="Replay run",
+            job_type="replay_run",
+            request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+            command=command,
+            resource_key=None,
+        )
+    except (ResourceBusyError, ConfigResolutionError) as exc:
+        status = 409 if isinstance(exc, ResourceBusyError) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
     return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
-
-
-@app.get("/dashboard/summary")
-def dashboard_summary(
-    ledger_file: str = Query("data/history/bets_ledger.csv"),
-    run_id: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    league: str | None = None,
-    market_type: str | None = None,
-    only_executed: bool = False,
-    only_settled: bool = False,
-):
-    ledger_path = Path(ledger_file)
-    if not ledger_path.is_absolute():
-        ledger_path = (settings.project_root / ledger_path).resolve()
-    if not ledger_path.exists():
-        raise HTTPException(status_code=404, detail="ledger não encontrado")
-    try:
-        ledger = read_ledger(ledger_path)
-        filtered = apply_filters(
-            ledger,
-            run_id=run_id,
-            date_from=date_from,
-            date_to=date_to,
-            league=league,
-            market_type=market_type,
-            only_executed=only_executed,
-            only_settled=only_settled,
-        )
-        payload = build_dashboard_payload(filtered)
-        payload["ledger_file"] = str(ledger_path)
-        return payload
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"erro ao montar dashboard: {exc}")
-
-
-@app.get("/dashboard/entries")
-def dashboard_entries(
-    ledger_file: str = Query("data/history/bets_ledger.csv"),
-    run_id: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    league: str | None = None,
-    market_type: str | None = None,
-    only_executed: bool = False,
-    only_settled: bool = False,
-    limit: int = 100,
-):
-    ledger_path = Path(ledger_file)
-    if not ledger_path.is_absolute():
-        ledger_path = (settings.project_root / ledger_path).resolve()
-    if not ledger_path.exists():
-        raise HTTPException(status_code=404, detail="ledger não encontrado")
-    try:
-        ledger = read_ledger(ledger_path)
-        filtered = apply_filters(
-            ledger,
-            run_id=run_id,
-            date_from=date_from,
-            date_to=date_to,
-            league=league,
-            market_type=market_type,
-            only_executed=only_executed,
-            only_settled=only_settled,
-        )
-        payload = build_dashboard_payload(filtered)
-        entries = payload.get("entries", [])[:limit]
-        return {"entries": entries, "count": len(entries), "ledger_file": str(ledger_path)}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"erro ao listar entradas: {exc}")
 
 
 @app.get("/", response_class=HTMLResponse)

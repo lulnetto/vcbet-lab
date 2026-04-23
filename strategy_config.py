@@ -11,6 +11,10 @@ ROOT_DIR = Path(__file__).resolve().parent
 CONFIGS_DIR = ROOT_DIR / "configs"
 
 
+class ConfigResolutionError(FileNotFoundError):
+    pass
+
+
 DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
     "metadata": {
         "name": "champion_strict",
@@ -124,6 +128,17 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
             "half_unit": 0.5,
             "zero_unit": 0.0,
         },
+        "portfolio": {
+            "max_picks_per_match": 2,
+            "asian_total_line_ladder": {
+                "enabled": False,
+                "target_gap": 0.75,
+                "tolerance": 0.26,
+                "min_gap_for_secondary": 0.5,
+                "primary_line_strategy": "lowest_line",
+                "fallback_to_highest_if_no_gap_match": True,
+            },
+        },
     },
 }
 
@@ -219,22 +234,31 @@ def _build_runtime_config(payload: dict[str, Any], source_path: str | None = Non
     )
 
 
-def resolve_config_file(config_name: str | None = None, config_file: str | Path | None = None) -> Path | None:
-    if config_file:
-        return Path(config_file).resolve()
-    if config_name:
-        candidate = CONFIGS_DIR / f"{config_name}.json"
+def resolve_config_file(config_name: str | None = None, config_file: str | Path | None = None, *, strict: bool = False) -> Path | None:
+    if config_file is not None:
+        candidate = Path(config_file).expanduser().resolve()
         if candidate.exists():
-            return candidate.resolve()
+            return candidate
+        if strict:
+            raise ConfigResolutionError(f"Arquivo de configuração não encontrado: {candidate}")
+        return None
+    if config_name:
+        candidate = (CONFIGS_DIR / f"{config_name}.json").resolve()
+        if candidate.exists():
+            return candidate
+        if strict:
+            available = ", ".join(item["name"] for item in list_available_configs())
+            raise ConfigResolutionError(
+                f"Preset de configuração não encontrado: {config_name}. Disponíveis: {available}"
+            )
     return None
 
 
 def load_config_payload(config_name: str | None = None, config_file: str | Path | None = None) -> tuple[dict[str, Any], str | None]:
-    path = resolve_config_file(config_name=config_name, config_file=config_file)
+    explicit_request = config_name is not None or config_file is not None
+    path = resolve_config_file(config_name=config_name, config_file=config_file, strict=explicit_request)
     if path is None:
         return deepcopy(DEFAULT_CONFIG_PAYLOAD), None
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo de configuração não encontrado: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     merged = _deep_merge(DEFAULT_CONFIG_PAYLOAD, payload)
     metadata = merged.setdefault("metadata", {})
@@ -278,15 +302,6 @@ def list_available_configs() -> list[dict[str, Any]]:
                 "path": str(path),
                 "fingerprint": None,
             })
-    default_runtime = _build_runtime_config(deepcopy(DEFAULT_CONFIG_PAYLOAD), source_path=None)
-    if not any(item["name"] == default_runtime.name for item in configs):
-        configs.insert(0, {
-            "name": default_runtime.name,
-            "label": default_runtime.label,
-            "description": default_runtime.description,
-            "path": None,
-            "fingerprint": default_runtime.fingerprint,
-        })
     return configs
 
 

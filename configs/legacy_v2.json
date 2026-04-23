@@ -1,0 +1,72 @@
+{
+  "metadata": {
+    "name": "legacy_v2",
+    "label": "Legacy v2",
+    "description": "Preset baseado no intermediate_balanced, mas com preferência por asian_total e ladder de linhas para aproximar a carteira lucrativa de 22/04."
+  },
+  "market_priority": {
+    "asian_total": 1,
+    "total_goals": 2,
+    "asian_handicap": 3,
+    "btts": 4,
+    "team_total": 6
+  },
+  "markets": {
+    "team_total": {
+      "odd_min": 1.70,
+      "standard_max": 2.60,
+      "extended_max": 3.00,
+      "edge_min": 0.07,
+      "edge_strong": 0.10,
+      "edge_premium_extended": 0.12
+    },
+    "btts": {
+      "odd_min": 1.65,
+      "standard_max": 2.50,
+      "extended_max": 2.85,
+      "edge_min": 0.06,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    },
+    "asian_total": {
+      "odd_min": 1.62,
+      "standard_max": 2.80,
+      "extended_max": 3.25,
+      "edge_min": 0.05,
+      "edge_strong": 0.09,
+      "edge_premium_extended": 0.105,
+      "is_primary_market": true
+    }
+  },
+  "rules": {
+    "confidence": {
+      "min_to_keep": 2,
+      "full_unit_min": 5,
+      "full_unit_requires_no_flags": false,
+      "full_unit_requires_not_extended": true
+    },
+    "extended_range": {
+      "enabled": true,
+      "min_confidence": 4,
+      "require_no_flags": false,
+      "require_no_critical_flags": true
+    },
+    "portfolio": {
+      "max_picks_per_match": 2,
+      "asian_total_line_ladder": {
+        "enabled": true,
+        "target_gap": 0.75,
+        "tolerance": 0.26,
+        "min_gap_for_secondary": 0.5,
+        "primary_line_strategy": "lowest_line",
+        "fallback_to_highest_if_no_gap_match": true
+      }
+    }
+  },
+  "confidence_caps": {
+    "CORRELACAO_JOGO": 4,
+    "LINHA_EXTREMA": 4,
+    "POISSON_MARGIN_RISK": 4,
+    "MERCADO_TIME": 4
+  }
+}

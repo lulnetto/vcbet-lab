@@ -51,7 +51,7 @@ def build_analysis_command(project_root: Path, req: AnalysisRequest) -> CommandS
     ]
     if req.config_file:
         args += ["--config-file", _resolve(project_root, req.config_file)]
-    if req.config_name:
+    elif req.config_name:
         args += ["--config-name", req.config_name]
     _append_if(args, req.json_output, "--json")
     _append_if(args, req.debug, "--debug")
@@ -104,21 +104,6 @@ def build_settlement_command(project_root: Path, req: SettlementRequest) -> Comm
         args += ["--overrides-file", _resolve(project_root, req.overrides_file)]
     _append_if(args, req.no_overrides, "--no-overrides")
     return CommandSpec(name="settlement", command=args, cwd=project_root)
-
-
-def build_replay_command(project_root: Path, req: ReplayRunRequest) -> CommandSpec:
-    script = project_root / "replay_pipeline.py"
-    args = [
-        req.python_bin,
-        str(script),
-        "--source-run-dir", _resolve(project_root, req.source_run_dir),
-        "--output-dir", _resolve(project_root, req.output_dir),
-        "--alias-file", _resolve(project_root, req.alias_file),
-        "--python-bin", req.python_bin,
-    ]
-    for config in req.configs:
-        args += ["--config", config]
-    return CommandSpec(name="replay_run", command=args, cwd=project_root)
 
 
 def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[CommandSpec]:
@@ -189,3 +174,18 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
         )
 
     return commands
+
+
+def build_replay_command(project_root: Path, req: ReplayRunRequest) -> CommandSpec:
+    script = project_root / "replay_pipeline.py"
+    args = [
+        req.python_bin,
+        str(script),
+        "--source-run-dir", _resolve(project_root, req.source_run_dir),
+        "--output-dir", _resolve(project_root, req.output_dir),
+        "--alias-file", _resolve(project_root, req.alias_file),
+        "--python-bin", req.python_bin,
+    ]
+    for config_name in req.configs:
+        args += ["--config", config_name]
+    return CommandSpec(name="replay_run", command=args, cwd=project_root)
