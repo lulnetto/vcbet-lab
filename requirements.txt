@@ -1,0 +1,22 @@
+# UBET_v2 - dependências consolidadas de runtime
+# Instalação sugerida:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   python -m pip install --upgrade pip
+#   python -m pip install -r requirements.txt
+# Depois, para o coletor com Playwright:
+#   python -m playwright install chromium
+# Em Linux/WSL, se necessário:
+#   python -m playwright install --with-deps chromium
+
+beautifulsoup4>=4.12
+curl-cffi>=0.7.0
+fastapi>=0.110
+pandas>=2.2
+playwright>=1.44
+pydantic>=2.6
+requests>=2.31
+scipy>=1.11
+thefuzz>=0.22.1
+rapidfuzz>=3.9
+uvicorn[standard]>=0.29

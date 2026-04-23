@@ -1,0 +1,68 @@
+{
+  "metadata": {
+    "name": "intermediate_balanced",
+    "label": "Intermediate Balanced",
+    "description": "Meio-termo entre o champion strict e um baseline mais permissivo."
+  },
+  "markets": {
+    "total_goals": {
+      "odd_min": 1.62,
+      "standard_max": 2.70,
+      "extended_max": 3.30,
+      "edge_min": 0.055,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    },
+    "team_total": {
+      "odd_min": 1.65,
+      "standard_max": 2.70,
+      "extended_max": 3.10,
+      "edge_min": 0.06,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    },
+    "btts": {
+      "odd_min": 1.65,
+      "standard_max": 2.55,
+      "extended_max": 2.95,
+      "edge_min": 0.06,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    },
+    "asian_total": {
+      "odd_min": 1.65,
+      "standard_max": 2.70,
+      "extended_max": 3.10,
+      "edge_min": 0.055,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    },
+    "asian_handicap": {
+      "odd_min": 1.65,
+      "standard_max": 2.70,
+      "extended_max": 3.10,
+      "edge_min": 0.06,
+      "edge_strong": 0.095,
+      "edge_premium_extended": 0.11
+    }
+  },
+  "rules": {
+    "confidence": {
+      "min_to_keep": 2,
+      "full_unit_min": 5,
+      "full_unit_requires_no_flags": false,
+      "full_unit_requires_not_extended": true
+    },
+    "extended_range": {
+      "enabled": true,
+      "min_confidence": 4,
+      "require_no_flags": false,
+      "require_no_critical_flags": true
+    }
+  },
+  "confidence_caps": {
+    "CORRELACAO_JOGO": 4,
+    "LINHA_EXTREMA": 4,
+    "POISSON_MARGIN_RISK": 4
+  }
+}

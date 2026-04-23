@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UBET Service</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --muted: #8b949e;
+      --line: #30363d;
+      --text: #e6edf3;
+      --green: #238636;
+      --blue: #1f6feb;
+      --yellow: #d29922;
+      --red: #da3633;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 24px; background: var(--bg); color: var(--text); }
+    h1, h2, h3 { margin: 0 0 12px; }
+    p, small, label { color: var(--muted); }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .grid-4 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .kpi { padding: 14px; border-radius: 12px; background: #11161d; border: 1px solid var(--line); }
+    .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .kpi .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+    .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .section { margin-top: 18px; }
+    label { display: block; margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 8px 10px; background: #0d1117; color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+    button { margin-top: 12px; padding: 10px 14px; border-radius: 8px; border: none; background: var(--green); color: white; cursor: pointer; }
+    button.secondary { background: var(--blue); }
+    button.ghost { background: transparent; border: 1px solid var(--line); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row > * { flex: 1; min-width: 140px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0d1117; border: 1px solid var(--line); border-radius: 8px; padding: 12px; max-height: 360px; overflow: auto; }
+    .jobs { margin-top: 24px; }
+    .job { padding: 12px 0; border-bottom: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
+    .table-wrap { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+    .success { color: #3fb950; }
+    .danger { color: #f85149; }
+    .warning { color: #d29922; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>UBET Service</h1>
+  <p>Painel operacional para jobs, entradas e desempenho do ledger.</p>
+
+  <div class="card">
+    <h2>Dashboard do ledger</h2>
+    <div class="grid">
+      <div>
+        <label>Ledger file</label>
+        <input id="dash-ledger" value="data/history/bets_ledger.csv" />
+      </div>
+      <div>
+        <label>Run ID</label>
+        <select id="dash-run-id"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label>Liga</label>
+        <select id="dash-league"><option value="">Todas</option></select>
+      </div>
+      <div>
+        <label>Mercado</label>
+        <select id="dash-market"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label>Data inicial</label>
+        <input id="dash-date-from" placeholder="2026-04-01" />
+      </div>
+      <div>
+        <label>Data final</label>
+        <input id="dash-date-to" placeholder="2026-04-30" />
+      </div>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="dash-only-executed" /> Só executadas</label>
+      <label><input type="checkbox" id="dash-only-settled" /> Só liquidadas</label>
+      <button class="secondary" onclick="refreshDashboard()">Atualizar dashboard</button>
+    </div>
+  </div>
+
+  <div class="section grid-4" id="kpis"></div>
+
+  <div class="section grid">
+    <div class="card">
+      <h3>Performance por mercado</h3>
+      <div class="table-wrap"><table id="table-market"></table></div>
+    </div>
+    <div class="card">
+      <h3>Performance por faixa de odd</h3>
+      <div class="table-wrap"><table id="table-odd"></table></div>
+    </div>
+    <div class="card">
+      <h3>Performance por stake</h3>
+      <div class="table-wrap"><table id="table-stake"></table></div>
+    </div>
+    <div class="card">
+      <h3>Performance por flag</h3>
+      <div class="table-wrap"><table id="table-flag"></table></div>
+    </div>
+  </div>
+
+  <div class="section card">
+    <h3>Entradas recentes</h3>
+    <div class="table-wrap"><table id="table-entries"></table></div>
+  </div>
+
+  <div class="section grid">
+    <div class="card">
+      <h2>Daily run</h2>
+      <label>Data</label>
+      <input id="daily-date" placeholder="2026-04-23" />
+      <label>Run ID</label>
+      <input id="daily-run-id" placeholder="opcional" />
+      <label>Ledger file</label>
+      <input id="daily-ledger" value="data/history/bets_ledger.csv" />
+      <label>Results file</label>
+      <input id="daily-results" value="data/results/results_auto.csv" />
+      <button onclick="startDailyRun()">Iniciar daily run</button>
+    </div>
+
+    <div class="card">
+      <h2>Coleta de resultados</h2>
+      <label>Ledger file</label>
+      <input id="results-ledger" value="data/history/bets_ledger.csv" />
+      <label>Output file</label>
+      <input id="results-output" value="data/results/results_auto.csv" />
+      <label>Source</label>
+      <input id="results-source" placeholder="auto | flashscore | browser | api" />
+      <button class="secondary" onclick="startResults()">Rodar results_collector</button>
+    </div>
+
+    <div class="card">
+      <h2>Settlement</h2>
+      <label>Ledger file</label>
+      <input id="settlement-ledger" value="data/history/bets_ledger.csv" />
+      <label>Results file</label>
+      <input id="settlement-results" value="data/results/results_auto.csv" />
+      <button class="secondary" onclick="startSettlement()">Rodar settlement</button>
+    </div>
+  </div>
+
+  <div class="jobs card">
+    <h2>Jobs</h2>
+    <button class="ghost" onclick="refreshJobs()">Atualizar</button>
+    <div id="jobs"></div>
+  </div>
+
+  <script>
+    function fmt(value, digits = 2) {
+      if (value === null || value === undefined || value === '') return '-';
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : value;
+    }
+
+    function getDashParams() {
+      const params = new URLSearchParams();
+      params.set('ledger_file', document.getElementById('dash-ledger').value);
+      const runId = document.getElementById('dash-run-id').value;
+      const league = document.getElementById('dash-league').value;
+      const market = document.getElementById('dash-market').value;
+      const dateFrom = document.getElementById('dash-date-from').value;
+      const dateTo = document.getElementById('dash-date-to').value;
+      if (runId) params.set('run_id', runId);
+      if (league) params.set('league', league);
+      if (market) params.set('market_type', market);
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
+      if (document.getElementById('dash-only-executed').checked) params.set('only_executed', 'true');
+      if (document.getElementById('dash-only-settled').checked) params.set('only_settled', 'true');
+      return params;
+    }
+
+    async function postJson(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || JSON.stringify(data));
+        return null;
+      }
+      refreshJobs();
+      return data;
+    }
+
+    function startDailyRun() {
+      return postJson('/jobs/daily-run', {
+        date: document.getElementById('daily-date').value || null,
+        run_id: document.getElementById('daily-run-id').value || null,
+        ledger_file: document.getElementById('daily-ledger').value,
+        results_file: document.getElementById('daily-results').value
+      });
+    }
+
+    function startResults() {
+      return postJson('/jobs/results-collection', {
+        ledger_file: document.getElementById('results-ledger').value,
+        output_file: document.getElementById('results-output').value,
+        source: document.getElementById('results-source').value || null,
+        debug: true
+      });
+    }
+
+    function startSettlement() {
+      return postJson('/jobs/settlement', {
+        ledger_file: document.getElementById('settlement-ledger').value,
+        results_file: document.getElementById('settlement-results').value
+      });
+    }
+
+    function renderKpis(summary, clv) {
+      const cards = [
+        ['Entradas totais', summary.total_entries, `${summary.open_entries} abertas / ${summary.settled_entries} liquidadas`],
+        ['Unidades modelo', fmt(summary.model_units, 2), `Stake ${fmt(summary.model_stake, 2)}u | ROI ${fmt(summary.model_roi_percent, 2)}%`],
+        ['Unidades reais', fmt(summary.real_units, 2), `Stake ${fmt(summary.real_stake, 2)}u | ROI ${fmt(summary.real_roi_percent, 2)}%`],
+        ['Hit rate', `${fmt(summary.hit_rate_percent, 2)}%`, `Wins ${summary.wins} | Half wins ${summary.half_wins} | Losses ${summary.losses}`],
+        ['Weighted hit', `${fmt(summary.weighted_hit_rate_percent, 2)}%`, `Push ${summary.pushes} | Half losses ${summary.half_losses}`],
+        ['CLV médio', fmt(clv.avg_delta, 4), `${clv.count} picks | ${fmt(clv.positive_rate_percent, 2)}% positivo`],
+        ['Executadas', summary.executed_entries, `${summary.executed_settled_entries} já liquidadas`],
+        ['Yield modelo', `${fmt(summary.model_yield_percent, 2)}%`, 'Mesmo denominador do stake em unidades']
+      ];
+      document.getElementById('kpis').innerHTML = cards.map(([label, value, sub]) => `
+        <div class="kpi">
+          <div class="label">${label}</div>
+          <div class="value">${value}</div>
+          <div class="sub">${sub}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderTable(tableId, rows, columns) {
+      const root = document.getElementById(tableId);
+      if (!rows || !rows.length) {
+        root.innerHTML = '<tbody><tr><td class="muted">Sem dados</td></tr></tbody>';
+        return;
+      }
+      const thead = `<thead><tr>${columns.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>`;
+      const tbody = `<tbody>${rows.map(row => `<tr>${columns.map(c => `<td>${c.format ? c.format(row[c.key], row) : (row[c.key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      root.innerHTML = thead + tbody;
+    }
+
+    function renderEntries(rows) {
+      const columns = [
+        {key: 'created_at', label: 'Criada em'},
+        {key: 'run_id', label: 'Run'},
+        {key: 'league', label: 'Liga'},
+        {key: 'match_name', label: 'Jogo'},
+        {key: 'market_type', label: 'Mercado'},
+        {key: 'selection_raw', label: 'Seleção'},
+        {key: 'odd_entrada', label: 'Odd', format: v => fmt(v, 2)},
+        {key: 'ev_percent', label: 'EV%', format: v => fmt(v, 2)},
+        {key: 'stake_units', label: 'Stake', format: v => fmt(v, 2)},
+        {key: 'bet_executed', label: 'Exec.'},
+        {key: 'final_bet_status', label: 'Bet status'},
+        {key: 'final_settlement_status', label: 'Settlement'},
+        {key: 'result_units_model', label: 'U modelo', format: v => fmt(v, 2)},
+        {key: 'risk_flags', label: 'Flags'}
+      ];
+      renderTable('table-entries', rows, columns);
+    }
+
+    async function refreshDashboard() {
+      const params = getDashParams();
+      const res = await fetch(`/dashboard/summary?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || JSON.stringify(data));
+        return;
+      }
+
+      hydrateFilters(data.filters);
+      renderKpis(data.summary, data.clv);
+      renderTable('table-market', data.breakdowns.by_market, [
+        {key: 'bucket', label: 'Mercado'},
+        {key: 'picks', label: 'Picks'},
+        {key: 'stake', label: 'Stake', format: v => fmt(v, 2)},
+        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
+        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)},
+        {key: 'avg_odd', label: 'Odd média', format: v => fmt(v, 2)}
+      ]);
+      renderTable('table-odd', data.breakdowns.by_odd_bucket, [
+        {key: 'bucket', label: 'Faixa'},
+        {key: 'picks', label: 'Picks'},
+        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
+        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
+      ]);
+      renderTable('table-stake', data.breakdowns.by_stake_bucket, [
+        {key: 'bucket', label: 'Faixa'},
+        {key: 'picks', label: 'Picks'},
+        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
+        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
+      ]);
+      renderTable('table-flag', data.breakdowns.by_flag, [
+        {key: 'bucket', label: 'Flag'},
+        {key: 'picks', label: 'Picks'},
+        {key: 'units_model', label: 'Units', format: v => fmt(v, 2)},
+        {key: 'roi_model_percent', label: 'ROI%', format: v => fmt(v, 2)}
+      ]);
+      renderEntries(data.entries);
+    }
+
+    function hydrateFilters(filters) {
+      const configs = [
+        ['dash-run-id', filters.available_runs || [], 'Todos'],
+        ['dash-league', filters.available_leagues || [], 'Todas'],
+        ['dash-market', filters.available_markets || [], 'Todos']
+      ];
+      for (const [id, values, emptyLabel] of configs) {
+        const select = document.getElementById(id);
+        const current = select.value;
+        select.innerHTML = `<option value="">${emptyLabel}</option>` + values.map(v => `<option value="${v}">${v}</option>`).join('');
+        if (values.includes(current)) select.value = current;
+      }
+    }
+
+    async function refreshJobs() {
+      const res = await fetch('/jobs?limit=20');
+      const data = await res.json();
+      const root = document.getElementById('jobs');
+      root.innerHTML = '';
+      for (const job of data.items) {
+        const div = document.createElement('div');
+        div.className = 'job';
+        const phases = (job.phases || []).map(p => `${p.name}: ${p.status}`).join(' | ');
+        div.innerHTML = `
+          <strong>${job.title}</strong> <small>${job.id}</small><br>
+          <small>${job.status}</small><br>
+          <small>${phases}</small><br>
+          <button onclick="showLogs('${job.id}')">ver logs</button>
+          <button class="ghost" onclick="cancelJob('${job.id}')">cancelar</button>
+          <pre id="log-${job.id}" style="display:none"></pre>
+        `;
+        root.appendChild(div);
+      }
+    }
+
+    async function showLogs(jobId) {
+      const res = await fetch(`/jobs/${jobId}/logs?lines=120`);
+      const text = await res.text();
+      const el = document.getElementById(`log-${jobId}`);
+      el.style.display = 'block';
+      el.textContent = text;
+    }
+
+    async function cancelJob(jobId) {
+      await fetch(`/jobs/${jobId}/cancel`, {method: 'POST'});
+      refreshJobs();
+    }
+
+    refreshDashboard();
+    refreshJobs();
+    setInterval(refreshJobs, 5000);
+  </script>
+</body>
+</html>

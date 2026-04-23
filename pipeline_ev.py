@@ -13,6 +13,7 @@ from pick_filter import evaluate_pick_candidate_with_meta, is_xg_fallback
 from pricing_engine import calculate_lambdas, expected_value_decimal, fair_odd_from_probs, price_market_selection
 from run_utils import ensure_run_dir, now_str, save_quality_report, update_manifest
 from ledger_manager import DEFAULT_LEDGER_FILE, append_new_picks_to_ledger
+from strategy_config import configure_runtime, get_runtime_config, save_runtime_snapshot
 from team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
 
 
@@ -147,7 +148,10 @@ def processar_pipeline(
     alias_file: str = "alias_times.json",
     ledger_file: str = str(DEFAULT_LEDGER_FILE),
     modo_debug: bool = False,
+    config_file: str | None = None,
+    config_name: str | None = None,
 ):
+    runtime_config = configure_runtime(config_name=config_name, config_file=config_file)
     odds_path = Path(odds_file)
     xg_path = Path(xg_file)
 
@@ -169,7 +173,10 @@ def processar_pipeline(
     run_dir = ensure_run_dir(run_id=run_id, target_date=target_date, base_output_dir=output_dir)
     alias_pending_file = run_dir / "alias_review_pending.csv"
     picks_file = run_dir / "picks_snapshot.csv"
+    config_snapshot_file = save_runtime_snapshot(run_dir)
 
+    print(f"[0] Configuração ativa: {runtime_config.label} ({runtime_config.fingerprint})")
+    print(f"    source: {runtime_config.source_path or 'default_embutida'}")
     print(f"[1] Arquivo de odds carregado: {odds_path}")
     print(f"[2] Arquivo de xG carregado: {xg_path}")
 
@@ -366,6 +373,13 @@ def processar_pipeline(
     quality_report = {
         "run_id": run_id,
         "target_date": target_date,
+        "strategy_config": {
+            "name": runtime_config.name,
+            "label": runtime_config.label,
+            "fingerprint": runtime_config.fingerprint,
+            "source_path": runtime_config.source_path,
+            "snapshot_file": str(config_snapshot_file),
+        },
         "source_files": {
             "odds_file": str(odds_path),
             "xg_file": str(xg_path),
@@ -418,7 +432,7 @@ def processar_pipeline(
                 "match_name", "market_type", "market_scope", "market_raw", "event_url", "selection_raw",
                 "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
                 "prob_model", "ev_percent", "confidence_score", "stake_units", "entry_reason",
-                "risk_flags", "odds_source_run_id", "xg_source_run_id", "correlation_level", "coexistence_status",
+                "risk_flags", "strategy_config_name", "strategy_config_fingerprint", "odds_source_run_id", "xg_source_run_id", "correlation_level", "coexistence_status",
             ]
             df_final[export_cols].to_csv(picks_file, index=False, sep=";", encoding="utf-8-sig")
             ledger_path, ledger_added_rows, ledger_total_rows = append_new_picks_to_ledger(df_final[export_cols], ledger_file)
@@ -437,6 +451,9 @@ def processar_pipeline(
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
                 quality_report_file=str(quality_report_file),
+                strategy_config_name=runtime_config.name,
+                strategy_config_fingerprint=runtime_config.fingerprint,
+                strategy_config_file=str(config_snapshot_file),
             )
         else:
             print("\n[!] MODO DEBUG: execução concluída sem salvar picks.")
@@ -449,6 +466,9 @@ def processar_pipeline(
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
                 quality_report_file=str(quality_report_file),
+                strategy_config_name=runtime_config.name,
+                strategy_config_fingerprint=runtime_config.fingerprint,
+                strategy_config_file=str(config_snapshot_file),
             )
     else:
         print(f"[+] Quality report salvo: {quality_report_file}")
@@ -460,6 +480,9 @@ def processar_pipeline(
             alias_pending_rows=len(pending_rows),
             team_match_status_counts=status_counts,
             quality_report_file=str(quality_report_file),
+            strategy_config_name=runtime_config.name,
+            strategy_config_fingerprint=runtime_config.fingerprint,
+            strategy_config_file=str(config_snapshot_file),
         )
 
 
@@ -472,6 +495,8 @@ if __name__ == "__main__":
     parser.add_argument("--alias-file", default="alias_times.json", help="Arquivo JSON com aliases aprovados manualmente")
     parser.add_argument("--ledger-file", default=str(DEFAULT_LEDGER_FILE), help="Caminho do bets_ledger.csv")
     parser.add_argument("--debug", action="store_true", help="Executa normalmente, mas não salva arquivos no final")
+    parser.add_argument("--config-file", help="Arquivo JSON de configuração de estratégia")
+    parser.add_argument("--config-name", help="Nome do preset em ./configs sem .json")
     args = parser.parse_args()
 
     processar_pipeline(
@@ -482,4 +507,6 @@ if __name__ == "__main__":
         alias_file=args.alias_file,
         ledger_file=args.ledger_file,
         modo_debug=args.debug,
+        config_file=args.config_file,
+        config_name=args.config_name,
     )

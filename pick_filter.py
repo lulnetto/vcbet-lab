@@ -5,13 +5,15 @@ from typing import Any
 
 from config_ligas import liga_eh_caotica
 from market_thresholds import (
-    ALLOWED_MARKETS,
-    CONFIDENCE_CAPS,
-    CRITICAL_FLAGS,
-    MARKET_PRIORITY,
-    PRIMARY_MARKETS,
+    get_allowed_markets,
+    get_confidence_caps,
+    get_confidence_penalties,
+    get_critical_flags,
+    get_market_priority,
     get_market_threshold,
+    get_primary_markets,
 )
+from strategy_config import get_runtime_config
 
 
 def is_xg_fallback(xg_row: Any) -> bool:
@@ -93,13 +95,16 @@ def _base_risk_flags(candidate: dict[str, Any]) -> list[str]:
 
 
 def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int, list[str], int | None]:
+    runtime = get_runtime_config()
+    rules = runtime.rules
+    bonuses = rules.get("bonuses", {})
     score = 0
     reasons: list[str] = []
     ev_decimal = float(candidate["ev_decimal"])
     market_type = candidate["market_type"]
     thresholds = get_market_threshold(market_type)
 
-    if ev_decimal >= 0.14:
+    if ev_decimal >= float(rules.get("very_strong_edge", 0.14)):
         score += 3
         reasons.append("EDGE_FORTE")
     elif ev_decimal >= thresholds.edge_strong:
@@ -109,42 +114,27 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
         score += 1
         reasons.append("EDGE_MODERADO")
 
-    if market_type in PRIMARY_MARKETS:
-        score += 1
+    if market_type in get_primary_markets():
+        score += int(bonuses.get("primary_market", 1))
         reasons.append("MERCADO_PRINCIPAL")
 
     if "DADO_INCOMPLETO_LIGA" not in flags and "FALLBACK_XG_GLOBAL" not in flags:
-        score += 1
+        score += int(bonuses.get("complete_data", 1))
         reasons.append("DADO_COMPLETO")
 
     if candidate.get("match_status_home") in {"auto_exact", "manual_approved"} and candidate.get("match_status_away") in {"auto_exact", "manual_approved"}:
-        score += 1
+        score += int(bonuses.get("reliable_match", 1))
         reasons.append("MATCH_CONFIAVEL")
 
     if not liga_eh_caotica(str(candidate.get("league", ""))):
-        score += 1
+        score += int(bonuses.get("stable_league", 1))
         reasons.append("LIGA_ESTAVEL")
 
     if not flags:
-        score += 1
+        score += int(bonuses.get("clean_setup", 1))
         reasons.append("SETUP_LIMPO")
 
-    penalties = {
-        "MATCH_FUZZY": 1,
-        "FALLBACK_XG_GLOBAL": 1,
-        "MERCADO_TIME": 1,
-        "LIGA_VOLATIL": 1,
-        "LINHA_EXTREMA": 2,
-        "DRAW_SENSITIVE_LINE": 1,
-        "LOW_SCORE_MATCH": 1,
-        "HIGH_TOTAL_MATCH": 1,
-        "POISSON_MARGIN_RISK": 2,
-        "HEAVY_FAVORITE_LINE": 1,
-        "CORRELACAO_JOGO": 2,
-        "MATCH_DUVIDOSO": 3,
-        "DADO_INCOMPLETO_LIGA": 3,
-        "ODD_ALTA_VARIANCIA": 2,
-    }
+    penalties = get_confidence_penalties()
     for flag in flags:
         score -= penalties.get(flag, 0)
 
@@ -152,8 +142,9 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
 
     cap_value = None
     for flag in flags:
-        if flag in CONFIDENCE_CAPS:
-            cap_value = CONFIDENCE_CAPS[flag] if cap_value is None else min(cap_value, CONFIDENCE_CAPS[flag])
+        if flag in get_confidence_caps():
+            value = get_confidence_caps()[flag]
+            cap_value = value if cap_value is None else min(cap_value, value)
     if cap_value is not None:
         score = min(score, cap_value)
 
@@ -162,9 +153,10 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
 
 def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     market_type = candidate["market_type"]
-    if market_type not in ALLOWED_MARKETS:
+    if market_type not in get_allowed_markets():
         return None, "unsupported_market"
 
+    runtime = get_runtime_config()
     thresholds = get_market_threshold(market_type)
     odd = float(candidate["odd_entrada"])
     ev_decimal = float(candidate["ev_decimal"])
@@ -177,22 +169,35 @@ def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[s
     flags = _base_risk_flags(candidate)
     confidence_score, reasons, cap_value = _confidence_score(candidate, flags)
 
-    critical_present = bool(CRITICAL_FLAGS.intersection(flags))
+    critical_present = bool(get_critical_flags().intersection(flags))
     in_extended = odd > thresholds.standard_max
-    if in_extended and (
-        ev_decimal < thresholds.edge_premium_extended
-        or confidence_score < 5
-        or critical_present
-        or flags
-    ):
-        return None, "extended_range_requires_premium_signal"
 
-    if critical_present or confidence_score < 3:
-        stake_units = 0.0
-    elif confidence_score == 5 and not flags and ev_decimal >= thresholds.edge_strong and not in_extended:
-        stake_units = 1.0
+    ext_rules = runtime.rules.get("extended_range", {})
+    if in_extended and ext_rules.get("enabled", True):
+        if ev_decimal < thresholds.edge_premium_extended:
+            return None, "extended_range_requires_premium_signal"
+        if confidence_score < int(ext_rules.get("min_confidence", 5)):
+            return None, "extended_range_requires_premium_signal"
+        if ext_rules.get("require_no_critical_flags", True) and critical_present:
+            return None, "extended_range_requires_premium_signal"
+        if ext_rules.get("require_no_flags", True) and flags:
+            return None, "extended_range_requires_premium_signal"
+
+    conf_rules = runtime.rules.get("confidence", {})
+    stakes = runtime.rules.get("stakes", {})
+    min_to_keep = int(conf_rules.get("min_to_keep", 3))
+    full_unit_min = int(conf_rules.get("full_unit_min", 5))
+    if critical_present or confidence_score < min_to_keep:
+        stake_units = float(stakes.get("zero_unit", 0.0))
+    elif (
+        confidence_score >= full_unit_min
+        and (not conf_rules.get("full_unit_requires_no_flags", True) or not flags)
+        and ev_decimal >= thresholds.edge_strong
+        and (not conf_rules.get("full_unit_requires_not_extended", True) or not in_extended)
+    ):
+        stake_units = float(stakes.get("full_unit", 1.0))
     else:
-        stake_units = 0.5
+        stake_units = float(stakes.get("half_unit", 0.5))
 
     if stake_units <= 0:
         return None, "low_confidence_or_critical_flag"
@@ -200,6 +205,7 @@ def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[s
     fair_odd = candidate.get("odd_justa")
     fair_odd = round(float(fair_odd), 2) if fair_odd else None
 
+    market_priority = get_market_priority()
     return {
         **candidate,
         "bet_id": build_bet_id(
@@ -216,7 +222,9 @@ def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[s
         "stake_units": stake_units,
         "entry_reason": "|".join(reasons[:4]) if reasons else "SEM_MOTIVO",
         "risk_flags": "|".join(flags) if flags else "SEM_FLAG",
-        "market_priority": MARKET_PRIORITY.get(market_type, 99),
+        "market_priority": market_priority.get(market_type, 99),
+        "strategy_config_name": runtime.name,
+        "strategy_config_fingerprint": runtime.fingerprint,
     }, None
 
 

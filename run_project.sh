@@ -13,6 +13,8 @@ DEBUG=0
 DRY_RUN=0
 JSON_FLAG=0
 PYTHON_BIN="python3"
+CONFIG_FILE=""
+CONFIG_NAME=""
 TEMP_ROOT=""
 ORIGINAL_OUTPUT_DIR="$OUTPUT_DIR"
 ORIGINAL_LEDGER_FILE="$LEDGER_FILE"
@@ -45,6 +47,8 @@ Parâmetros:
   --debug        Roda sem persistir picks finais do pipeline
   --dry-run      Executa o fluxo completo em diretório temporário e apaga tudo no final
   --python-bin   Binário do Python (default: python3)
+  --config-file  Arquivo JSON da estratégia
+  --config-name  Preset da estratégia em ./configs
 USAGE
 }
 
@@ -68,6 +72,10 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="$2"; shift 2 ;;
     --python-bin)
       PYTHON_BIN="$2"; shift 2 ;;
+    --config-file)
+      CONFIG_FILE="$2"; shift 2 ;;
+    --config-name)
+      CONFIG_NAME="$2"; shift 2 ;;
     --json)
       JSON_FLAG=1; shift ;;
     --debug)
@@ -176,6 +184,13 @@ if [[ "$MODE" == "legacy" ]]; then
     --ledger-file "$LEDGER_FILE"
     --output-dir "$OUTPUT_DIR"
   )
+
+  if [[ -n "$CONFIG_FILE" ]]; then
+    PIPELINE_ARGS+=(--config-file "$CONFIG_FILE")
+  fi
+  if [[ -n "$CONFIG_NAME" ]]; then
+    PIPELINE_ARGS+=(--config-name "$CONFIG_NAME")
+  fi
 
   if [[ "$DEBUG" -eq 1 ]]; then
     PIPELINE_ARGS+=(--debug)
