@@ -3,96 +3,112 @@
     "nome": "Premier League",
     "ativo": true,
     "betano_path": "/sport/futebol/inglaterra/premier-league/1/",
-    "footystats_url": "https://footystats.org/england/premier-league"
+    "footystats_url": "https://footystats.org/england/premier-league",
+    "chaotic": false
   },
   {
     "nome": "Championship",
     "ativo": true,
     "betano_path": "/sport/futebol/inglaterra/championship/2/",
-    "footystats_url": "https://footystats.org/england/championship"
+    "footystats_url": "https://footystats.org/england/championship",
+    "chaotic": true
   },
   {
     "nome": "La Liga",
     "ativo": true,
     "betano_path": "/sport/futebol/espanha/laliga/5/",
-    "footystats_url": "https://footystats.org/spain/la-liga"
+    "footystats_url": "https://footystats.org/spain/la-liga",
+    "chaotic": false
   },
   {
     "nome": "Segunda División",
     "ativo": true,
     "betano_path": "/sport/futebol/espanha/segunda-division/10000/",
-    "footystats_url": "https://footystats.org/spain/segunda-division"
+    "footystats_url": "https://footystats.org/spain/segunda-division",
+    "chaotic": true
   },
   {
     "nome": "Ligue 1",
     "ativo": true,
     "betano_path": "/sport/futebol/franca/ligue-1/215/",
-    "footystats_url": "https://footystats.org/france/ligue-1"
+    "footystats_url": "https://footystats.org/france/ligue-1",
+    "chaotic": false
   },
   {
     "nome": "Ligue 2",
     "ativo": true,
     "betano_path": "/sport/futebol/league/ligue-2-franca/10467/",
-    "footystats_url": "https://footystats.org/france/ligue-2"
+    "footystats_url": "https://footystats.org/france/ligue-2",
+    "chaotic": true
   },
   {
     "nome": "Bundesliga",
     "ativo": true,
     "betano_path": "/sport/futebol/alemanha/bundesliga/216/",
-    "footystats_url": "https://footystats.org/germany/bundesliga"
+    "footystats_url": "https://footystats.org/germany/bundesliga",
+    "chaotic": false
   },
   {
     "nome": "2. Bundesliga",
     "ativo": true,
     "betano_path": "/sport/futebol/alemanha/2-bundesliga/217/",
-    "footystats_url": "https://footystats.org/germany/2-bundesliga"
+    "footystats_url": "https://footystats.org/germany/2-bundesliga",
+    "chaotic": false
   },
   {
     "nome": "Serie A",
     "ativo": true,
     "betano_path": "/sport/futebol/italia/serie-a/1635/",
-    "footystats_url": "https://footystats.org/italy/serie-a"
+    "footystats_url": "https://footystats.org/italy/serie-a",
+    "chaotic": false
   },
   {
     "nome": "Serie B",
     "ativo": true,
     "betano_path": "/sport/futebol/italia/serie-b/10210/",
-    "footystats_url": "https://footystats.org/italy/serie-b"
+    "footystats_url": "https://footystats.org/italy/serie-b",
+    "chaotic": true
   },
   {
     "nome": "Liga NOS",
     "ativo": true,
     "betano_path": "/sport/futebol/portugal/primeira-liga/17083/",
-    "footystats_url": "https://footystats.org/portugal/liga-nos"
+    "footystats_url": "https://footystats.org/portugal/liga-nos",
+    "chaotic": false
   },
   {
     "nome": "MLS",
     "ativo": true,
     "betano_path": "/sport/futebol/eua/mls/17103/",
-    "footystats_url": "https://footystats.org/usa/mls"
+    "footystats_url": "https://footystats.org/usa/mls",
+    "chaotic": false
   },
   {
     "nome": "Brasileirão Série A",
     "ativo": true,
     "betano_path": "/sport/futebol/brasil/brasileirao-serie-a-betano/10016/",
-    "footystats_url": "https://footystats.org/brazil/serie-a"
+    "footystats_url": "https://footystats.org/brazil/serie-a",
+    "chaotic": false
   },
   {
     "nome": "Liga dos Campeões",
     "ativo": true,
     "betano_path": "/sport/futebol/competicoes/liga-dos-campeoes/188566/",
-    "footystats_url": "https://footystats.org/europe/uefa-champions-league"
+    "footystats_url": "https://footystats.org/europe/uefa-champions-league",
+    "chaotic": false
   },
   {
     "nome": "Liga Europa",
     "ativo": true,
     "betano_path": "/sport/futebol/competicoes/liga-europa/188567/",
-    "footystats_url": "https://footystats.org/europe/uefa-europa-league"
+    "footystats_url": "https://footystats.org/europe/uefa-europa-league",
+    "chaotic": false
   },
   {
     "nome": "Liga Conferência",
     "ativo": true,
     "betano_path": "/sport/futebol/competicoes/liga-conferencia/189602/",
-    "footystats_url": "https://footystats.org/europe/uefa-europa-conference-league"
+    "footystats_url": "https://footystats.org/europe/uefa-europa-conference-league",
+    "chaotic": false
   }
 ]

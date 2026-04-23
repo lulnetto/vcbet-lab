@@ -69,7 +69,6 @@ MARKET_THRESHOLDS: Dict[str, MarketThreshold] = {
     ),
 }
 
-CHAOTIC_LEAGUES = {"Championship", "Serie B", "Ligue 2", "Segunda División"}
 PRIMARY_MARKETS = {name for name, cfg in MARKET_THRESHOLDS.items() if cfg.is_primary_market}
 ALLOWED_MARKETS = set(MARKET_THRESHOLDS.keys())
 MARKET_PRIORITY = {

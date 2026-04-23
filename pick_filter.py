@@ -3,9 +3,9 @@ from __future__ import annotations
 from hashlib import md5
 from typing import Any
 
+from config_ligas import liga_eh_caotica
 from market_thresholds import (
     ALLOWED_MARKETS,
-    CHAOTIC_LEAGUES,
     CONFIDENCE_CAPS,
     CRITICAL_FLAGS,
     MARKET_PRIORITY,
@@ -64,7 +64,7 @@ def _base_risk_flags(candidate: dict[str, Any]) -> list[str]:
         if market_type in {"team_total", "asian_handicap"}:
             flags.append("DADO_INCOMPLETO_LIGA")
 
-    if candidate["league"] in CHAOTIC_LEAGUES:
+    if liga_eh_caotica(str(candidate.get("league", ""))):
         flags.append("LIGA_VOLATIL")
 
     if market_type == "team_total":
@@ -121,7 +121,7 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
         score += 1
         reasons.append("MATCH_CONFIAVEL")
 
-    if candidate["league"] not in CHAOTIC_LEAGUES:
+    if not liga_eh_caotica(str(candidate.get("league", ""))):
         score += 1
         reasons.append("LIGA_ESTAVEL")
 

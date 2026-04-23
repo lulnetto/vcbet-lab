@@ -14,7 +14,10 @@ def _normalizar_filtro_nomes(ligas_nomes: Iterable[str] | None) -> Set[str] | No
     return nomes or None
 
 
-def carregar_ligas(apenas_ativas: bool = True, ligas_nomes: Iterable[str] | None = None) -> List[Dict[str, Any]]:
+def carregar_ligas(
+    apenas_ativas: bool = True,
+    ligas_nomes: Iterable[str] | None = None,
+) -> List[Dict[str, Any]]:
     with open(ARQUIVO_LIGAS, "r", encoding="utf-8") as arquivo:
         ligas = json.load(arquivo)
 
@@ -33,14 +36,12 @@ def carregar_ligas(apenas_ativas: bool = True, ligas_nomes: Iterable[str] | None
     return ligas
 
 
-
 def carregar_ligas_betano(ligas_nomes: Iterable[str] | None = None) -> List[Dict[str, str]]:
     return [
         {"nome": liga["nome"], "path": liga["betano_path"]}
         for liga in carregar_ligas(ligas_nomes=ligas_nomes)
         if liga.get("betano_path")
     ]
-
 
 
 def carregar_ligas_footystats(ligas_nomes: Iterable[str] | None = None) -> Dict[str, str]:
@@ -51,6 +52,27 @@ def carregar_ligas_footystats(ligas_nomes: Iterable[str] | None = None) -> Dict[
     }
 
 
-
 def obter_nomes_ligas_ativas(ligas_nomes: Iterable[str] | None = None) -> Set[str]:
     return {liga["nome"] for liga in carregar_ligas(ligas_nomes=ligas_nomes)}
+
+
+def obter_meta_liga(nome_liga: str) -> Dict[str, Any] | None:
+    for liga in carregar_ligas(apenas_ativas=False):
+        if liga.get("nome") == nome_liga:
+            return liga
+    return None
+
+
+def liga_eh_caotica(nome_liga: str) -> bool:
+    meta = obter_meta_liga(nome_liga)
+    if not meta:
+        return False
+    return bool(meta.get("chaotic", False))
+
+
+def obter_nomes_ligas_caoticas(apenas_ativas: bool = True) -> Set[str]:
+    return {
+        liga["nome"]
+        for liga in carregar_ligas(apenas_ativas=apenas_ativas)
+        if liga.get("chaotic", False)
+    }
