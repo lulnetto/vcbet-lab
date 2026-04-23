@@ -137,10 +137,10 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
         "LOW_SCORE_MATCH": 1,
         "HIGH_TOTAL_MATCH": 1,
         "POISSON_MARGIN_RISK": 1,
-        "ODD_ALTA_VARIANCIA": 1,
         "CORRELACAO_JOGO": 1,
         "MATCH_DUVIDOSO": 2,
         "DADO_INCOMPLETO_LIGA": 2,
+        "ODD_ALTA_VARIANCIA": 1,
     }
     for flag in flags:
         score -= penalties.get(flag, 0)
@@ -149,19 +149,19 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
     return score, reasons
 
 
-def evaluate_pick_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     market_type = candidate["market_type"]
     if market_type not in ALLOWED_MARKETS:
-        return None
+        return None, "unsupported_market"
 
     limits = MARKET_LIMITS[market_type]
     odd = float(candidate["odd_entrada"])
     ev_decimal = float(candidate["ev_decimal"])
 
     if odd < limits["odd_min"] or odd > limits["extended_max"]:
-        return None
+        return None, "odd_out_of_range"
     if ev_decimal < limits["edge_min"]:
-        return None
+        return None, "edge_below_min"
 
     flags = _base_risk_flags(candidate)
     confidence_score, reasons = _confidence_score(candidate, flags)
@@ -169,7 +169,7 @@ def evaluate_pick_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
     critical_present = bool(CRITICAL_FLAGS.intersection(flags))
     in_extended = odd > limits["standard_max"]
     if in_extended and (ev_decimal < 0.10 or confidence_score < 4 or critical_present):
-        return None
+        return None, "extended_range_requires_stronger_signal"
 
     if critical_present or confidence_score < 3:
         stake_units = 0.0
@@ -179,7 +179,7 @@ def evaluate_pick_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
         stake_units = 0.5
 
     if stake_units <= 0:
-        return None
+        return None, "low_confidence_or_critical_flag"
 
     fair_odd = candidate.get("odd_justa")
     fair_odd = round(float(fair_odd), 2) if fair_odd else None
@@ -200,4 +200,9 @@ def evaluate_pick_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
         "entry_reason": "|".join(reasons[:4]) if reasons else "SEM_MOTIVO",
         "risk_flags": "|".join(flags) if flags else "SEM_FLAG",
         "market_priority": MARKET_PRIORITY.get(market_type, 99),
-    }
+    }, None
+
+
+def evaluate_pick_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    evaluated, _ = evaluate_pick_candidate_with_meta(candidate)
+    return evaluated

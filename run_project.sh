@@ -246,7 +246,7 @@ if [[ "$DEBUG" -eq 1 ]]; then
   PIPELINE_ARGS+=(--debug)
 fi
 
-"$PYTHON_BIN" fs_xg_v2.py "${XG_ARGS[@]}"
+"$PYTHON_BIN" fs_xg.py "${XG_ARGS[@]}"
 
 if [[ ! -f "$XG_SNAPSHOT" ]]; then
   echo "[ERRO] xg_snapshot.csv não foi gerado. Abortando o pipeline." >&2

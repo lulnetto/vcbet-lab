@@ -63,19 +63,32 @@ def manifest_path(run_dir: str | Path) -> Path:
     return Path(run_dir) / "run_manifest.json"
 
 
+def quality_report_path(run_dir: str | Path) -> Path:
+    return Path(run_dir) / "quality_report.json"
+
+
+def save_json_file(path: str | Path, payload: Dict[str, Any]) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8") as arquivo:
+        json.dump(payload, arquivo, ensure_ascii=False, indent=2)
+    return target
+
+
+def load_json_file(path: str | Path) -> Dict[str, Any]:
+    target = Path(path)
+    if not target.exists():
+        return {}
+    with target.open("r", encoding="utf-8") as arquivo:
+        return json.load(arquivo)
+
+
 def save_manifest(run_dir: str | Path, manifest: Dict[str, Any]) -> Path:
-    path = manifest_path(run_dir)
-    with path.open("w", encoding="utf-8") as arquivo:
-        json.dump(manifest, arquivo, ensure_ascii=False, indent=2)
-    return path
+    return save_json_file(manifest_path(run_dir), manifest)
 
 
 def load_manifest(run_dir: str | Path) -> Dict[str, Any]:
-    path = manifest_path(run_dir)
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as arquivo:
-        return json.load(arquivo)
+    return load_json_file(manifest_path(run_dir))
 
 
 def update_manifest(run_dir: str | Path, **updates: Any) -> Dict[str, Any]:
@@ -85,3 +98,9 @@ def update_manifest(run_dir: str | Path, **updates: Any) -> Dict[str, Any]:
     manifest["updated_at"] = now_str()
     save_manifest(run_dir, manifest)
     return manifest
+
+
+def save_quality_report(run_dir: str | Path, report: Dict[str, Any]) -> Path:
+    payload = dict(report)
+    payload.setdefault("generated_at", now_str())
+    return save_json_file(quality_report_path(run_dir), payload)

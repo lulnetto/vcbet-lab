@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -8,9 +9,9 @@ import pandas as pd
 from config_ligas import obter_nomes_ligas_ativas
 from correlation_rules import select_top_picks
 from market_normalizer import normalize_odds_dataframe
-from pick_filter import evaluate_pick_candidate, is_xg_fallback
+from pick_filter import evaluate_pick_candidate_with_meta, is_xg_fallback
 from pricing_engine import calculate_lambdas, expected_value_decimal, fair_odd_from_probs, price_market_selection
-from run_utils import ensure_run_dir, now_str, update_manifest
+from run_utils import ensure_run_dir, now_str, save_quality_report, update_manifest
 from ledger_manager import DEFAULT_LEDGER_FILE, append_new_picks_to_ledger
 from team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
 
@@ -75,6 +76,16 @@ def carregar_snapshot_xg(xg_file: str | Path) -> pd.DataFrame:
         "xGA_Fora": "xga_away",
     }
     return df_xg.rename(columns=rename_map)
+
+
+def to_sorted_dict(counter_like) -> dict:
+    if isinstance(counter_like, Counter):
+        items = counter_like.items()
+    elif isinstance(counter_like, dict):
+        items = counter_like.items()
+    else:
+        items = counter_like
+    return {str(k): int(v) for k, v in sorted(items, key=lambda item: str(item[0]))}
 
 
 def build_candidate_row(
@@ -175,15 +186,28 @@ def processar_pipeline(
     if "normalized_status" not in df_betano.columns:
         raise ValueError("Snapshot de odds sem coluna normalized_status após carregamento.")
 
+    normalized_status_counts = Counter(df_betano["normalized_status"].fillna("missing"))
+    market_scope_counts = Counter(df_betano.get("market_scope", pd.Series(dtype=object)).fillna("missing"))
+    normalized_market_type_counts = Counter(df_betano.loc[df_betano["normalized_status"] == "ok", "market_type"].fillna("missing"))
+
+    base_filter_discard_counts = Counter()
+    for _, row in df_betano.iterrows():
+        if row.get("normalized_status") != "ok":
+            base_filter_discard_counts["normalized_status_not_ok"] += 1
+            continue
+        if row.get("market_scope") != "full_time":
+            base_filter_discard_counts["market_scope_not_full_time"] += 1
+            continue
+        if row.get("market_type") not in SUPPORTED_MARKETS:
+            base_filter_discard_counts["unsupported_market_type"] += 1
+            continue
+
     df_alvo = df_betano[
         (df_betano["normalized_status"] == "ok")
         & (df_betano["market_scope"] == "full_time")
         & (df_betano["market_type"].isin(SUPPORTED_MARKETS))
     ].copy()
-    print(
-        "[3] Normalização/Filtro base: "
-        f"{len(df_alvo)} linhas elegíveis de {len(df_betano)} totais"
-    )
+    print("[3] Normalização/Filtro base: " f"{len(df_alvo)} linhas elegíveis de {len(df_betano)} totais")
 
     alias_cache = load_alias_cache(alias_file)
     xg_by_league = {league: league_df.copy() for league, league_df in df_xg.groupby("league")}
@@ -192,16 +216,22 @@ def processar_pipeline(
     status_counts = {key: 0 for key in ["auto_exact", "auto_fuzzy_high", "manual_approved", "pending_review", "blocked"]}
     generated_at = now_str()
 
+    processing_discard_counts = Counter()
     candidate_rows: list[dict] = []
+    priced_market_counts = Counter()
+    approved_market_counts = Counter()
+
     for _, linha in df_alvo.iterrows():
         time_casa = str(linha.get("home_team", "")).strip()
         time_fora = str(linha.get("away_team", "")).strip()
         if not time_casa or not time_fora:
+            processing_discard_counts["missing_home_or_away_team"] += 1
             continue
 
         liga_jogo = linha["league"]
         df_xg_liga = xg_by_league.get(liga_jogo)
         if df_xg_liga is None or df_xg_liga.empty:
+            processing_discard_counts["missing_xg_league_snapshot"] += 1
             continue
 
         candidates = df_xg_liga["team_name"].tolist()
@@ -214,21 +244,20 @@ def processar_pipeline(
                 key = (liga_jogo, res.source_name, side)
                 if key not in pending_seen:
                     pending_seen.add(key)
-                    pending_rows.append(
-                        PendingAliasRow(
-                            run_id=run_id,
-                            created_at=generated_at,
-                            league=liga_jogo,
-                            match_name=str(linha["match_name"]),
-                            side=side,
-                            source_name=res.source_name,
-                            suggestion=res.suggestion,
-                            score=res.score,
-                            match_status=res.match_status,
-                        )
-                    )
+                    pending_rows.append(PendingAliasRow(
+                        run_id=run_id,
+                        created_at=generated_at,
+                        league=liga_jogo,
+                        match_name=str(linha["match_name"]),
+                        side=side,
+                        source_name=res.source_name,
+                        suggestion=res.suggestion,
+                        score=res.score,
+                        match_status=res.match_status,
+                    ))
 
         if not home_match.matched_name or not away_match.matched_name:
+            processing_discard_counts["unresolved_team_match"] += 1
             continue
 
         home_xg_row = df_xg_liga.loc[df_xg_liga["team_name"] == home_match.matched_name].iloc[0]
@@ -250,8 +279,10 @@ def processar_pipeline(
             lambda_away=lambda_bundle["lambda_away"],
         )
         if not pricing_result:
+            processing_discard_counts["pricing_unavailable"] += 1
             continue
 
+        priced_market_counts[linha["market_type"]] += 1
         candidate = build_candidate_row(
             run_id=run_id,
             odds_run_id=odds_run_id or run_id,
@@ -265,11 +296,17 @@ def processar_pipeline(
             home_xg_row=home_xg_row,
             away_xg_row=away_xg_row,
         )
-        evaluated = evaluate_pick_candidate(candidate)
+        evaluated, reject_reason = evaluate_pick_candidate_with_meta(candidate)
         if evaluated:
             candidate_rows.append(evaluated)
+            approved_market_counts[linha["market_type"]] += 1
+        else:
+            processing_discard_counts[f"pick_filter_{reject_reason or 'rejected'}"] += 1
 
     write_pending_aliases(pending_rows, alias_pending_file)
+
+    unique_pending_counts = Counter(row.match_status for row in pending_rows)
+    unique_pending_by_league = Counter(row.league for row in pending_rows)
     print(
         " -> Pareamento: "
         f"{status_counts['auto_exact']} exatos, "
@@ -278,10 +315,26 @@ def processar_pipeline(
         f"{status_counts['pending_review']} pendentes, "
         f"{status_counts['blocked']} bloqueados"
     )
+    print(
+        " -> Aliases únicos: "
+        f"{len(pending_rows)} total | "
+        f"{unique_pending_counts.get('pending_review', 0)} pendentes | "
+        f"{unique_pending_counts.get('blocked', 0)} bloqueados"
+    )
     print(f" -> Fila manual de aliases: {alias_pending_file}")
 
     df_candidates = pd.DataFrame(candidate_rows)
     df_final = select_top_picks(df_candidates) if not df_candidates.empty else pd.DataFrame()
+
+    print(
+        "[4] Pricing/Filtro: "
+        f"{sum(priced_market_counts.values())} linhas precificadas | "
+        f"{len(df_candidates)} aprovadas no filtro de pick | "
+        f"{len(df_final)} picks finais"
+    )
+    print(" -> Descartes por motivo:", ", ".join(f"{k}={v}" for k, v in sorted(processing_discard_counts.items())) or "nenhum")
+    print(" -> Precificadas por mercado:", ", ".join(f"{k}={v}" for k, v in sorted(priced_market_counts.items())) or "nenhuma")
+    print(" -> Aprovadas no filtro por mercado:", ", ".join(f"{k}={v}" for k, v in sorted(approved_market_counts.items())) or "nenhuma")
 
     print("\n================ [ SCAN REPORT ] ================")
     if not df_final.empty:
@@ -298,43 +351,80 @@ def processar_pipeline(
             "risk_flags",
         ]
         print(df_final[preview_cols].to_string(index=False))
+        final_picks_by_market = Counter(df_final["market_type"].fillna("missing"))
+        final_picks_by_league = Counter(df_final["league"].fillna("missing"))
+        final_picks_by_confidence = Counter(df_final["confidence_score"].fillna("missing"))
+        print(" -> Picks finais por mercado:", ", ".join(f"{k}={v}" for k, v in sorted(final_picks_by_market.items())))
+        print(" -> Picks finais por liga:", ", ".join(f"{k}={v}" for k, v in sorted(final_picks_by_league.items())))
+        print(" -> Picks finais por confiança:", ", ".join(f"{k}={v}" for k, v in sorted(final_picks_by_confidence.items())))
+    else:
+        final_picks_by_market = Counter()
+        final_picks_by_league = Counter()
+        final_picks_by_confidence = Counter()
+        print("0 entradas aprovadas na régua da Entrega 4.")
 
+    quality_report = {
+        "run_id": run_id,
+        "target_date": target_date,
+        "source_files": {
+            "odds_file": str(odds_path),
+            "xg_file": str(xg_path),
+            "alias_file": str(alias_file),
+            "ledger_file": str(ledger_file),
+        },
+        "inputs": {
+            "odds_rows_total": int(len(df_betano)),
+            "xg_rows_total": int(len(df_xg)),
+            "odds_rows_by_league": to_sorted_dict(Counter(df_betano["league"].fillna("missing"))),
+            "xg_rows_by_league": to_sorted_dict(Counter(df_xg["league"].fillna("missing"))),
+        },
+        "normalization": {
+            "normalized_status_counts": to_sorted_dict(normalized_status_counts),
+            "market_scope_counts": to_sorted_dict(market_scope_counts),
+            "normalized_market_type_counts": to_sorted_dict(normalized_market_type_counts),
+            "base_filter_discard_counts": to_sorted_dict(base_filter_discard_counts),
+            "eligible_rows_total": int(len(df_alvo)),
+            "eligible_rows_by_league": to_sorted_dict(Counter(df_alvo["league"].fillna("missing"))),
+            "eligible_rows_by_market_type": to_sorted_dict(Counter(df_alvo["market_type"].fillna("missing"))),
+        },
+        "matching": {
+            "status_occurrences": to_sorted_dict(status_counts),
+            "unique_alias_rows_total": int(len(pending_rows)),
+            "unique_alias_rows_by_status": to_sorted_dict(unique_pending_counts),
+            "unique_alias_rows_by_league": to_sorted_dict(unique_pending_by_league),
+        },
+        "processing": {
+            "priced_candidates_total": int(sum(priced_market_counts.values())),
+            "priced_candidates_by_market_type": to_sorted_dict(priced_market_counts),
+            "pick_filter_approved_total": int(len(df_candidates)),
+            "pick_filter_approved_by_market_type": to_sorted_dict(approved_market_counts),
+            "discard_reason_counts": to_sorted_dict(processing_discard_counts),
+        },
+        "outputs": {
+            "final_picks_total": int(len(df_final)),
+            "final_picks_by_market_type": to_sorted_dict(final_picks_by_market),
+            "final_picks_by_league": to_sorted_dict(final_picks_by_league),
+            "final_picks_by_confidence": to_sorted_dict(final_picks_by_confidence),
+            "alias_pending_file": str(alias_pending_file),
+            "picks_file": str(picks_file),
+        },
+    }
+    quality_report_file = save_quality_report(run_dir, quality_report)
+
+    if not df_final.empty:
         if not modo_debug:
             export_cols = [
-                "bet_id",
-                "run_id",
-                "generated_at",
-                "league",
-                "match_datetime",
-                "home_team",
-                "away_team",
-                "match_name",
-                "market_type",
-                "market_scope",
-                "market_raw",
-                "event_url",
-                "selection_raw",
-                "line",
-                "side",
-                "target_team_role",
-                "target_team_name",
-                "odd_entrada",
-                "odd_justa",
-                "prob_model",
-                "ev_percent",
-                "confidence_score",
-                "stake_units",
-                "entry_reason",
-                "risk_flags",
-                "odds_source_run_id",
-                "xg_source_run_id",
-                "correlation_level",
-                "coexistence_status",
+                "bet_id", "run_id", "generated_at", "league", "match_datetime", "home_team", "away_team",
+                "match_name", "market_type", "market_scope", "market_raw", "event_url", "selection_raw",
+                "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
+                "prob_model", "ev_percent", "confidence_score", "stake_units", "entry_reason",
+                "risk_flags", "odds_source_run_id", "xg_source_run_id", "correlation_level", "coexistence_status",
             ]
             df_final[export_cols].to_csv(picks_file, index=False, sep=";", encoding="utf-8-sig")
             ledger_path, ledger_added_rows, ledger_total_rows = append_new_picks_to_ledger(df_final[export_cols], ledger_file)
             print(f"\n[+] Picks exportadas com sucesso: {picks_file}")
             print(f"[+] Ledger atualizado: {ledger_path} | novas={ledger_added_rows} | total={ledger_total_rows}")
+            print(f"[+] Quality report salvo: {quality_report_file}")
             update_manifest(
                 run_dir,
                 status="pipeline_completed",
@@ -346,9 +436,11 @@ def processar_pipeline(
                 alias_pending_file=str(alias_pending_file),
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
+                quality_report_file=str(quality_report_file),
             )
         else:
             print("\n[!] MODO DEBUG: execução concluída sem salvar picks.")
+            print(f"[+] Quality report salvo: {quality_report_file}")
             update_manifest(
                 run_dir,
                 status="pipeline_debug",
@@ -356,9 +448,10 @@ def processar_pipeline(
                 alias_pending_file=str(alias_pending_file),
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
+                quality_report_file=str(quality_report_file),
             )
     else:
-        print("0 entradas aprovadas na régua da Entrega 4.")
+        print(f"[+] Quality report salvo: {quality_report_file}")
         update_manifest(
             run_dir,
             status="pipeline_empty",
@@ -366,6 +459,7 @@ def processar_pipeline(
             alias_pending_file=str(alias_pending_file),
             alias_pending_rows=len(pending_rows),
             team_match_status_counts=status_counts,
+            quality_report_file=str(quality_report_file),
         )
 
 
