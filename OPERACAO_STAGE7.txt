@@ -1,0 +1,21 @@
+ETAPA 7 | FECHAMENTO OPERACIONAL
+
+1) Coletar resultados automáticos do dia
+python3 results_collector.py --ledger-file data/history/bets_ledger.csv --output-file data/results/results_auto.csv --source auto --debug
+
+2) Se houver exceção manual, preencher SOMENTE as linhas necessárias em data/results/results_overrides.csv
+Campos mais comuns:
+- bet_id
+- manual_home_goals
+- manual_away_goals
+- manual_bet_status (settled|postponed|voided|open)
+- manual_settlement_status (win|loss|push|half_win|half_loss|void|pending)
+- override_reason
+
+3) Aplicar settlement
+python3 settlement_engine.py --ledger-file data/history/bets_ledger.csv --results-file data/results/results_auto.csv
+
+Observacoes:
+- settlement_engine.py aplica data/results/results_overrides.csv automaticamente se o arquivo existir.
+- Use --no-overrides para ignorar o arquivo padrao numa execucao especifica.
+- O matching do resultado agora usa liga + times + proximidade de datetime, nao apenas match_name.

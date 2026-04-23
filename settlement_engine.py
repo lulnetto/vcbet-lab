@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import re
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +11,7 @@ from ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
 from run_utils import now_str
 
 
+DEFAULT_OVERRIDES_FILE = Path("data") / "results" / "results_overrides.csv"
 RESULTS_REQUIRED_COLUMNS = {"match_name", "home_goals", "away_goals"}
 OVERRIDES_REQUIRED_COLUMNS = {"bet_id"}
 
@@ -191,29 +194,129 @@ def compute_result_units(settlement_status: str, odd: float | None, stake_units:
     return 0.0
 
 
+def _slug_text(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    normalized = unicodedata.normalize("NFKD", str(value))
+    without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", " ", without_accents.casefold())
+    return " ".join(cleaned.split())
+
+
+def _parse_match_datetime(value):
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return pd.Timestamp.strptime(text, fmt).to_pydatetime()
+        except Exception:
+            continue
+    try:
+        return pd.to_datetime(text, errors="coerce").to_pydatetime()
+    except Exception:
+        return None
+
+
+def _result_row_score(ledger_row: pd.Series, result_row: pd.Series) -> int:
+    score = 0
+
+    ledger_league = _slug_text(ledger_row.get("league"))
+    result_league = _slug_text(result_row.get("league"))
+    if ledger_league and result_league:
+        if ledger_league == result_league:
+            score += 40
+        else:
+            return -10**9
+
+    ledger_home = _slug_text(ledger_row.get("home_team"))
+    result_home = _slug_text(result_row.get("home_team"))
+    if ledger_home == result_home:
+        score += 80
+    elif ledger_home and result_home and (ledger_home in result_home or result_home in ledger_home):
+        score += 40
+
+    ledger_away = _slug_text(ledger_row.get("away_team"))
+    result_away = _slug_text(result_row.get("away_team"))
+    if ledger_away == result_away:
+        score += 80
+    elif ledger_away and result_away and (ledger_away in result_away or result_away in ledger_away):
+        score += 40
+
+    ledger_match = _slug_text(ledger_row.get("match_name"))
+    result_match = _slug_text(result_row.get("match_name"))
+    if ledger_match and result_match and ledger_match == result_match:
+        score += 20
+
+    ledger_dt = _parse_match_datetime(ledger_row.get("match_datetime"))
+    result_dt = _parse_match_datetime(result_row.get("match_datetime"))
+    if ledger_dt and result_dt:
+        diff_seconds = abs((result_dt - ledger_dt).total_seconds())
+        if diff_seconds <= 4 * 3600:
+            score += 30
+        elif diff_seconds <= 12 * 3600:
+            score += 15
+        elif diff_seconds <= 24 * 3600:
+            score += 5
+        elif diff_seconds > 5 * 24 * 3600:
+            score -= 40
+
+    return score
+
+
+def _infer_auto_settlement_status(bet_status: str, explicit_status) -> str:
+    if not _is_missing(explicit_status):
+        return str(explicit_status)
+    normalized = str(bet_status or "").strip().lower()
+    if normalized in {"cancelled", "voided"}:
+        return "void"
+    return "pending"
+
+
 def apply_results_file(ledger_df: pd.DataFrame, results_file: str | Path) -> pd.DataFrame:
     results_df = pd.read_csv(results_file, sep=";")
     missing = RESULTS_REQUIRED_COLUMNS - set(results_df.columns)
     if missing:
         raise ValueError(f"Arquivo de resultados sem colunas obrigatórias: {sorted(missing)}")
 
-    if "match_datetime" in results_df.columns:
-        results_df = results_df.sort_values(by=["match_name", "match_datetime"])
-
-    results_by_match = results_df.drop_duplicates(subset=["match_name"], keep="last").set_index("match_name")
-
     updated = _prepare_ledger_dtypes(ledger_df)
     for idx, row in updated.iterrows():
-        match_name = row["match_name"]
-        if match_name not in results_by_match.index:
+        best_idx = None
+        best_score = -10**9
+        for res_idx, result_row in results_df.iterrows():
+            score = _result_row_score(row, result_row)
+            if score > best_score:
+                best_score = score
+                best_idx = res_idx
+
+        if best_idx is None or best_score < 120:
             continue
-        result_row = results_by_match.loc[match_name]
+
+        result_row = results_df.loc[best_idx]
+        auto_bet_status = result_row.get("bet_status", "settled")
         updated.at[idx, "auto_home_goals"] = result_row.get("home_goals")
         updated.at[idx, "auto_away_goals"] = result_row.get("away_goals")
-        updated.at[idx, "auto_bet_status"] = result_row.get("bet_status", "settled")
+        updated.at[idx, "auto_bet_status"] = auto_bet_status
+        updated.at[idx, "auto_settlement_status"] = _infer_auto_settlement_status(
+            str(auto_bet_status),
+            result_row.get("settlement_status"),
+        )
         updated.at[idx, "settlement_source"] = result_row.get("settlement_source", "results_file")
         updated.at[idx, "settlement_confidence"] = result_row.get("settlement_confidence", "auto")
-        updated.at[idx, "settlement_note"] = result_row.get("settlement_note", pd.NA)
+
+        note_parts = []
+        base_note = result_row.get("settlement_note", pd.NA)
+        if not _is_missing(base_note):
+            note_parts.append(str(base_note))
+        matched_via = result_row.get("matched_via", pd.NA)
+        if not _is_missing(matched_via):
+            note_parts.append(f"matched_via={matched_via}")
+        source_event_id = result_row.get("source_event_id", pd.NA)
+        if not _is_missing(source_event_id):
+            note_parts.append(f"source_event_id={source_event_id}")
+        updated.at[idx, "settlement_note"] = " | ".join(note_parts) if note_parts else pd.NA
     return updated
 
 
@@ -222,11 +325,17 @@ def apply_overrides_file(ledger_df: pd.DataFrame, overrides_file: str | Path) ->
     missing = OVERRIDES_REQUIRED_COLUMNS - set(overrides_df.columns)
     if missing:
         raise ValueError(f"Arquivo de overrides sem colunas obrigatórias: {sorted(missing)}")
+    if overrides_df.empty:
+        return _prepare_ledger_dtypes(ledger_df)
+
+    overrides_df = overrides_df.copy()
+    overrides_df["bet_id"] = overrides_df["bet_id"].astype(str).str.strip()
+    overrides_df = overrides_df[overrides_df["bet_id"] != ""]
 
     overrides_by_bet = overrides_df.drop_duplicates(subset=["bet_id"], keep="last").set_index("bet_id")
     updated = _prepare_ledger_dtypes(ledger_df)
     for idx, row in updated.iterrows():
-        bet_id = row["bet_id"]
+        bet_id = str(row["bet_id"]).strip()
         if bet_id not in overrides_by_bet.index:
             continue
         override = overrides_by_bet.loc[bet_id]
@@ -323,13 +432,15 @@ def resolve_final_fields(ledger_df: pd.DataFrame) -> pd.DataFrame:
 def settle_ledger(
     ledger_file: str | Path = DEFAULT_LEDGER_FILE,
     results_file: str | Path | None = None,
-    overrides_file: str | Path | None = None,
+    overrides_file: str | Path | None = DEFAULT_OVERRIDES_FILE,
 ) -> tuple[Path, int]:
     ledger_df = _prepare_ledger_dtypes(load_ledger(ledger_file))
     if results_file:
         ledger_df = apply_results_file(ledger_df, results_file)
     if overrides_file:
-        ledger_df = apply_overrides_file(ledger_df, overrides_file)
+        override_path = Path(overrides_file)
+        if override_path.exists() and override_path.stat().st_size > 0:
+            ledger_df = apply_overrides_file(ledger_df, override_path)
     ledger_df = resolve_final_fields(ledger_df)
     path = save_ledger(ledger_df, ledger_file)
     settled_count = int((ledger_df["final_bet_status"].astype(str) == "settled").sum())
@@ -340,13 +451,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Liquidação do ledger com resultados automáticos e overrides manuais")
     parser.add_argument("--ledger-file", default=str(DEFAULT_LEDGER_FILE), help="Caminho do bets_ledger.csv")
     parser.add_argument("--results-file", help="CSV com match_name;home_goals;away_goals e colunas opcionais de status")
-    parser.add_argument("--overrides-file", help="CSV com overrides manuais por bet_id")
+    parser.add_argument("--overrides-file", default=str(DEFAULT_OVERRIDES_FILE), help="CSV com overrides manuais por bet_id. Se existir, é aplicado automaticamente.")
+    parser.add_argument("--no-overrides", action="store_true", help="Ignora o arquivo padrão de overrides nesta execução")
     args = parser.parse_args()
 
     ledger_path, settled_count = settle_ledger(
         ledger_file=args.ledger_file,
         results_file=args.results_file,
-        overrides_file=args.overrides_file,
+        overrides_file=None if args.no_overrides else args.overrides_file,
     )
     print(f"Ledger atualizado: {ledger_path}")
     print(f"Apostas liquidadas: {settled_count}")
