@@ -1,0 +1,98 @@
+[
+  {
+    "nome": "Premier League",
+    "ativo": true,
+    "betano_path": "/sport/futebol/inglaterra/premier-league/1/",
+    "footystats_url": "https://footystats.org/england/premier-league"
+  },
+  {
+    "nome": "Championship",
+    "ativo": true,
+    "betano_path": "/sport/futebol/inglaterra/championship/2/",
+    "footystats_url": "https://footystats.org/england/championship"
+  },
+  {
+    "nome": "La Liga",
+    "ativo": true,
+    "betano_path": "/sport/futebol/espanha/laliga/5/",
+    "footystats_url": "https://footystats.org/spain/la-liga"
+  },
+  {
+    "nome": "Segunda División",
+    "ativo": true,
+    "betano_path": "/sport/futebol/espanha/segunda-division/10000/",
+    "footystats_url": "https://footystats.org/spain/segunda-division"
+  },
+  {
+    "nome": "Ligue 1",
+    "ativo": true,
+    "betano_path": "/sport/futebol/franca/ligue-1/215/",
+    "footystats_url": "https://footystats.org/france/ligue-1"
+  },
+  {
+    "nome": "Ligue 2",
+    "ativo": true,
+    "betano_path": "/sport/futebol/league/ligue-2-franca/10467/",
+    "footystats_url": "https://footystats.org/france/ligue-2"
+  },
+  {
+    "nome": "Bundesliga",
+    "ativo": true,
+    "betano_path": "/sport/futebol/alemanha/bundesliga/216/",
+    "footystats_url": "https://footystats.org/germany/bundesliga"
+  },
+  {
+    "nome": "2. Bundesliga",
+    "ativo": true,
+    "betano_path": "/sport/futebol/alemanha/2-bundesliga/217/",
+    "footystats_url": "https://footystats.org/germany/2-bundesliga"
+  },
+  {
+    "nome": "Serie A",
+    "ativo": true,
+    "betano_path": "/sport/futebol/italia/serie-a/1635/",
+    "footystats_url": "https://footystats.org/italy/serie-a"
+  },
+  {
+    "nome": "Serie B",
+    "ativo": true,
+    "betano_path": "/sport/futebol/italia/serie-b/10210/",
+    "footystats_url": "https://footystats.org/italy/serie-b"
+  },
+  {
+    "nome": "Liga NOS",
+    "ativo": true,
+    "betano_path": "/sport/futebol/portugal/primeira-liga/17083/",
+    "footystats_url": "https://footystats.org/portugal/liga-nos"
+  },
+  {
+    "nome": "MLS",
+    "ativo": true,
+    "betano_path": "/sport/futebol/eua/mls/17103/",
+    "footystats_url": "https://footystats.org/usa/mls"
+  },
+  {
+    "nome": "Brasileirão Série A",
+    "ativo": true,
+    "betano_path": "/sport/futebol/brasil/brasileirao-serie-a-betano/10016/",
+    "footystats_url": "https://footystats.org/brazil/serie-a"
+  },
+  {
+    "nome": "Liga dos Campeões",
+    "ativo": true,
+    "betano_path": "/sport/futebol/competicoes/liga-dos-campeoes/188566/",
+    "footystats_url": "https://footystats.org/europe/uefa-champions-league"
+  },
+  {
+    "nome": "Liga Europa",
+    "ativo": true,
+    "betano_path": "/sport/futebol/competicoes/liga-europa/188567/",
+    "footystats_url": "https://footystats.org/europe/uefa-europa-league"
+  },
+  {
+    "nome": "Liga Conferência",
+    "ativo": true,
+    "betano_path": "/sport/futebol/competicoes/liga-conferencia/189602/",
+    "footystats_url": "https://footystats.org/europe/uefa-europa-conference-league"
+  }
+]
