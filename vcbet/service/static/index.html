@@ -20,6 +20,7 @@
     .tab { display:none; }
     .tab.active { display:block; }
     .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+    .jobs-grid { display:grid; gap:16px; grid-template-columns:minmax(320px,0.9fr) minmax(520px,1.6fr); }
     .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; }
     .kpis { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
     .kpi { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:14px; padding:12px; }
@@ -34,164 +35,245 @@
     button.amber { background:var(--amber); color:#111; }
     button.ghost { background:transparent; border:1px solid var(--border); }
     button.danger { background:var(--danger); }
+    button.small { padding:6px 10px; font-size:12px; }
     .inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .muted { color:var(--muted); }
     .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; }
-    pre { white-space:pre-wrap; word-break:break-word; max-height:360px; overflow:auto; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px; }
-    .jobs-grid { display:grid; gap:16px; grid-template-columns:minmax(320px,0.8fr) minmax(520px,1.6fr); align-items:start; }
-    .logs-card { min-height:72vh; }
-    #jobLogs { max-height:72vh; min-height:62vh; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:13px; line-height:1.45; }
-    @media (max-width: 900px) { .jobs-grid { grid-template-columns:1fr; } #jobLogs { max-height:68vh; } }
+    pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px; }
+    #jobLogs { max-height:72vh; min-height:64vh; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:13px; line-height:1.45; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
     th, td { padding:8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
-    th { color:var(--muted); font-weight:600; }
+    th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--panel); }
     .table-wrap { overflow:auto; max-height:420px; }
+    .table-wrap.tall { max-height:72vh; }
     .job { border-top:1px solid var(--border); padding:12px 0; }
-    .ok { color:#3fb950; } .bad { color:#ff7b72; } .warn { color:#d29922; }
     .section-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .config-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+    .ok { color:#3fb950; } .bad { color:#ff7b72; } .warn { color:#d29922; }
+    .state-box { padding:14px; border:1px dashed var(--border); border-radius:12px; color:var(--muted); }
+    @media (max-width: 900px) { .jobs-grid { grid-template-columns:1fr; } #jobLogs { max-height:68vh; } }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <section class="hero">
-      <div>
-        <h1>VCBet Control Center</h1>
-        <p>Dashboard, operação, replay e jobs no mesmo painel.</p>
-      </div>
-      <div class="inline muted">
-        <span id="healthText">carregando...</span>
-      </div>
-    </section>
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <h1>VCBet Control Center</h1>
+      <p>Dashboard, operação, replay, aliases e jobs no mesmo painel.</p>
+    </div>
+    <div class="inline muted"><span id="healthText">carregando...</span></div>
+  </section>
 
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-      <button class="tab-btn" data-tab="operacao">Operação</button>
-      <button class="tab-btn" data-tab="replay">Replay</button>
-      <button class="tab-btn" data-tab="jobs">Jobs</button>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="operacao">Operação</button>
+    <button class="tab-btn" data-tab="replay">Replay</button>
+    <button class="tab-btn" data-tab="aliases">Aliases</button>
+    <button class="tab-btn" data-tab="jobs">Jobs</button>
+  </div>
+
+  <section id="tab-dashboard" class="tab active">
+    <div class="card">
+      <div class="section-title">
+        <h2>Filtros da dashboard</h2>
+        <button class="ghost" onclick="loadDashboard()">Atualizar</button>
+      </div>
+      <div class="row">
+        <div><label>Ledger file</label><input id="dashLedger" value="data/history/bets_ledger.csv"></div>
+        <div><label>Run ID</label><select id="dashRun"><option value="">Todos</option></select></div>
+        <div><label>Liga</label><select id="dashLeague"><option value="">Todas</option></select></div>
+        <div><label>Mercado</label><select id="dashMarket"><option value="">Todos</option></select></div>
+        <div><label>Data inicial</label><input id="dashDateFrom" placeholder="2026-04-22"></div>
+        <div><label>Data final</label><input id="dashDateTo" placeholder="2026-04-23"></div>
+      </div>
+      <div class="inline" style="margin-top:10px;">
+        <label><input type="checkbox" id="dashExecuted"> Só executadas</label>
+        <label><input type="checkbox" id="dashSettled"> Só liquidadas</label>
+      </div>
     </div>
 
-    <section id="tab-dashboard" class="tab active">
+    <div class="kpis" id="kpiGrid"></div>
+
+    <div class="grid">
+      <div class="card"><h3>Performance por mercado</h3><div class="table-wrap"><table id="tableMarket"></table></div></div>
+      <div class="card"><h3>Performance por odd</h3><div class="table-wrap"><table id="tableOdd"></table></div></div>
+      <div class="card"><h3>Performance por stake</h3><div class="table-wrap"><table id="tableStake"></table></div></div>
+      <div class="card"><h3>Performance por flag</h3><div class="table-wrap"><table id="tableFlag"></table></div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <h2>Entradas recentes</h2>
+        <button class="ghost" onclick="loadEntries()">Recarregar tabela</button>
+      </div>
+      <div class="table-wrap tall"><table id="tableEntries"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-operacao" class="tab">
+    <div class="grid">
       <div class="card">
-        <div class="section-title">
-          <h2>Filtros da dashboard</h2>
-          <button class="ghost" onclick="loadDashboard()">Atualizar</button>
-        </div>
+        <h2>Gerar picks</h2>
+        <p class="muted">Executa análise e produz a carteira sugerida. Não valida resultado.</p>
         <div class="row">
-          <div><label>Ledger file</label><input id="dashLedger" value="data/history/bets_ledger.csv"></div>
-          <div><label>Run ID</label><select id="dashRun"><option value="">Todos</option></select></div>
-          <div><label>Liga</label><select id="dashLeague"><option value="">Todas</option></select></div>
-          <div><label>Mercado</label><select id="dashMarket"><option value="">Todos</option></select></div>
-          <div><label>Data inicial</label><input id="dashDateFrom" placeholder="2026-04-22"></div>
-          <div><label>Data final</label><input id="dashDateTo" placeholder="2026-04-23"></div>
+          <div><label>Modo</label><select id="analysisMode"><option value="full">full</option><option value="legacy">legacy</option></select></div>
+          <div><label>Data</label><input id="analysisDate" placeholder="2026-04-24"></div>
+          <div><label>Ledger file</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Config</label><select id="analysisConfig"></select></div>
         </div>
         <div class="inline" style="margin-top:10px;">
-          <label><input type="checkbox" id="dashExecuted"> Só executadas</label>
-          <label><input type="checkbox" id="dashSettled"> Só liquidadas</label>
+          <label><input type="checkbox" id="analysisDebug"> debug</label>
+          <label><input type="checkbox" id="analysisDryRun"> dry-run</label>
         </div>
-      </div>
-
-      <div class="kpis" id="kpiGrid"></div>
-
-      <div class="grid">
-        <div class="card">
-          <h3>Performance por mercado</h3>
-          <div class="table-wrap"><table id="tableMarket"></table></div>
-        </div>
-        <div class="card">
-          <h3>Performance por odd</h3>
-          <div class="table-wrap"><table id="tableOdd"></table></div>
-        </div>
-        <div class="card">
-          <h3>Performance por stake</h3>
-          <div class="table-wrap"><table id="tableStake"></table></div>
-        </div>
-        <div class="card">
-          <h3>Performance por flag</h3>
-          <div class="table-wrap"><table id="tableFlag"></table></div>
-        </div>
+        <button class="green" onclick="submitAnalysis()">Rodar análise</button>
       </div>
 
       <div class="card">
-        <div class="section-title">
-          <h2>Entradas recentes</h2>
-          <button class="ghost" onclick="loadEntries()">Recarregar tabela</button>
-        </div>
-        <div class="table-wrap"><table id="tableEntries"></table></div>
-      </div>
-    </section>
-
-    <section id="tab-operacao" class="tab">
-      <div class="grid">
-        <div class="card">
-          <h2>Análise</h2>
-          <div class="row">
-            <div><label>Modo</label><select id="analysisMode"><option value="full">full</option><option value="legacy">legacy</option></select></div>
-            <div><label>Data</label><input id="analysisDate" placeholder="2026-04-23"></div>
-            <div><label>Ledger file</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
-            <div><label>Config</label><select id="analysisConfig"></select></div>
-          </div>
-          <div class="inline" style="margin-top:10px;">
-            <label><input type="checkbox" id="analysisDebug"> debug</label>
-            <label><input type="checkbox" id="analysisDryRun"> dry-run</label>
-          </div>
-          <button class="green" onclick="submitAnalysis()">Rodar análise</button>
-        </div>
-
-        <div class="card">
-          <h2>Daily run</h2>
-          <div class="row">
-            <div><label>Data</label><input id="dailyDate" placeholder="2026-04-23"></div>
-            <div><label>Ledger file</label><input id="dailyLedger" value="data/history/bets_ledger.csv"></div>
-            <div><label>Results file</label><input id="dailyResults" value="data/results/results_auto.csv"></div>
-            <div><label>Config</label><select id="dailyConfig"></select></div>
-          </div>
-          <div class="inline" style="margin-top:10px;">
-            <label><input type="checkbox" id="dailyDebug"> debug</label>
-            <label><input type="checkbox" id="skipResults"> pular results</label>
-            <label><input type="checkbox" id="skipSettlement"> pular settlement</label>
-          </div>
-          <button onclick="submitDailyRun()">Rodar daily run</button>
-        </div>
-      </div>
-      <div class="card"><pre id="actionResult">Sem ações ainda.</pre></div>
-    </section>
-
-    <section id="tab-replay" class="tab">
-      <div class="card">
-        <h2>Replay / calibração</h2>
+        <h2>Ciclo diário completo</h2>
         <div class="row">
-          <div><label>Source run dir</label><input id="replaySourceRun" value="data/runs/2026-04-22/run_20260422_235000"></div>
-          <div><label>Config 1</label><select id="replayConfig1"></select></div>
-          <div><label>Config 2</label><select id="replayConfig2"></select></div>
-          <div><label>Config 3</label><select id="replayConfig3"></select></div>
+          <div><label>Data</label><input id="dailyDate" placeholder="2026-04-24"></div>
+          <div><label>Ledger file</label><input id="dailyLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Results file</label><input id="dailyResults" value="data/results/results_auto.csv"></div>
+          <div><label>Config</label><select id="dailyConfig"></select></div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="dailyDebug"> debug</label>
+          <label><input type="checkbox" id="skipResults"> pular results</label>
+          <label><input type="checkbox" id="skipSettlement"> pular settlement</label>
+        </div>
+        <button onclick="submitDailyRun()">Rodar daily run</button>
+      </div>
+
+      <div class="card">
+        <h2>Atualizar closing odds</h2>
+        <div class="row">
+          <div><label>Ledger file</label><input id="closingLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Janela minutos</label><input id="closingWindow" value="20"></div>
+          <div><label>Allow past minutos</label><input id="closingPast" value="10"></div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="closingAllPending"> todos pendentes</label>
+        </div>
+        <button onclick="submitClosingOdds()">Atualizar closing odds</button>
+      </div>
+
+      <div class="card">
+        <h2>Atualizar resultados</h2>
+        <p class="muted">Coleta resultados reais das entradas pendentes.</p>
+        <div class="row">
+          <div><label>Ledger file</label><input id="resultsLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Results file</label><input id="resultsFile" value="data/results/results_auto.csv"></div>
+          <div><label>Grace minutes</label><input id="resultsGrace" value="110"></div>
+          <div><label>Máx. páginas</label><input id="resultsMaxPages" value="6"></div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="resultsAllPending"> todos pendentes</label>
+          <label><input type="checkbox" id="resultsDebug"> debug</label>
+          <label>Fonte <select id="resultsSource" style="width:auto;"><option value="">auto</option><option value="browser">browser</option><option value="api">api</option></select></label>
+        </div>
+        <button class="amber" onclick="submitResultsCollection()">Atualizar resultados</button>
+      </div>
+
+      <div class="card">
+        <h2>Liquidar ledger</h2>
+        <div class="row">
+          <div><label>Ledger file</label><input id="settlementLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Results file</label><input id="settlementResults" value="data/results/results_auto.csv"></div>
+          <div><label>Overrides file</label><input id="settlementOverrides" placeholder="data/results/results_overrides.csv"></div>
+        </div>
+        <button class="ghost" onclick="submitSettlement()">Liquidar ledger</button>
+      </div>
+    </div>
+    <div class="card"><pre id="actionResult">Sem ações ainda.</pre></div>
+  </section>
+
+  <section id="tab-replay" class="tab">
+    <div class="grid">
+      <div class="card">
+        <div class="section-title"><h2>Replay / calibração</h2><button class="ghost" onclick="loadReplayRuns()">Recarregar runs</button></div>
+        <div class="row">
+          <div><label>Run histórica</label><select id="replaySourceRunSelect"></select></div>
+          <div><label>Source run dir manual</label><input id="replaySourceRun" placeholder="data/runs/YYYY-MM-DD/run_xxx"></div>
+        </div>
+        <div style="margin-top:12px;">
+          <label>Configs do replay</label>
+          <div id="replayConfigRows"></div>
+          <button class="ghost" onclick="addReplayConfigField()">+ adicionar config</button>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="replayEvaluateResults"> checar resultados e liquidar replay</label>
+          <label>Fonte resultados <select id="replayResultsSource" style="width:auto;"><option value="">auto</option><option value="browser">browser</option><option value="api">api</option></select></label>
         </div>
         <button class="amber" onclick="submitReplay()">Rodar replay</button>
       </div>
-      <div class="card">
-        <h3>Presets disponíveis</h3>
-        <div id="configList" class="grid"></div>
-      </div>
-    </section>
 
-    <section id="tab-jobs" class="tab">
-      <div class="jobs-grid">
-        <div class="card">
-          <div class="section-title">
-            <h2>Jobs</h2>
-            <button class="ghost" onclick="loadJobs()">Atualizar</button>
-          </div>
-          <div id="jobsList"></div>
-        </div>
-        <div class="card logs-card">
-          <div class="section-title"><h2>Logs</h2><button class="ghost" onclick="reloadSelectedLogs()">Recarregar</button></div>
-          <pre id="jobLogs">Selecione um job.</pre>
-        </div>
+      <div class="card">
+        <div class="section-title"><h3>Summaries de replay</h3><button class="ghost" onclick="loadReplaySummaries()">Atualizar</button></div>
+        <div class="table-wrap"><table id="tableReplaySummaries"></table></div>
       </div>
-    </section>
-  </div>
+    </div>
+
+    <div class="card">
+      <h3>Resumo do replay</h3>
+      <div id="replaySummaryKpis" class="kpis"></div>
+      <div class="table-wrap"><table id="tableReplayResults"></table></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Picks da config selecionada</h3><div class="muted" id="replayPicksMeta">Selecione um replay.</div></div>
+      <div class="table-wrap tall"><table id="tableReplayPicks"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-aliases" class="tab">
+    <div class="grid">
+      <div class="card">
+        <div class="section-title"><h2>Revisão de aliases</h2><button class="ghost" onclick="loadAliasFiles(true)">Atualizar</button></div>
+        <div class="row">
+          <div><label>Arquivo pending</label><select id="aliasPendingFile"></select></div>
+          <div><label>Alias file</label><input id="aliasFile" value="alias_times.json"></div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <label><input type="checkbox" id="aliasIncludeBlocked" checked> incluir blocked</label>
+          <button class="green" onclick="approveSelectedAliases()">Aceitar selecionados</button>
+          <button class="amber" onclick="approveAllVisibleAliases()">Aceitar todos visíveis</button>
+        </div>
+        <p class="muted">Aliases só aparecem quando existe pendência real. Arquivo vazio some sozinho.</p>
+      </div>
+
+      <div class="card">
+        <h3>Resumo</h3>
+        <pre id="aliasSummary">Sem arquivo selecionado.</pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Pendências de alias</h3><div class="muted" id="aliasVisibleCount">0 aliases visíveis</div></div>
+      <div id="aliasEmptyState" class="state-box">Sem aliases pendentes.</div>
+      <div class="table-wrap tall" id="aliasTableWrap" style="display:none;"><table id="tableAliasReview"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-jobs" class="tab">
+    <div class="jobs-grid">
+      <div class="card">
+        <div class="section-title"><h2>Jobs</h2><div class="inline"><span class="muted">auto 5s</span><button class="ghost" onclick="loadJobs()">Atualizar</button></div></div>
+        <div id="jobsList"></div>
+      </div>
+      <div class="card">
+        <div class="section-title"><h2>Logs</h2><div class="inline"><span class="muted" id="logsAutoState">auto 2s</span><button class="ghost" onclick="reloadSelectedLogs()">Recarregar</button></div></div>
+        <pre id="jobLogs">Selecione um job.</pre>
+      </div>
+    </div>
+  </section>
+</div>
 
 <script>
-const state = { configs: [], jobs: [], dashboard: null, selectedJobId: null };
+const state = {
+  configs: [], jobs: [], dashboard: null, selectedJobId: null,
+  replayRuns: [], replaySummaries: [], replaySummaryPayload: null,
+  aliasFiles: [], aliasReview: null,
+};
 
 function qs(params) {
   const url = new URLSearchParams();
@@ -200,6 +282,24 @@ function qs(params) {
     url.set(k, v);
   });
   return url.toString();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatLocalDateTime(value) {
+  if (!value || value === 'NaT') return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return new Intl.DateTimeFormat('pt-BR', {
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit',
+  }).format(dt);
 }
 
 async function api(path, options = {}) {
@@ -237,25 +337,33 @@ function fillConfigSelect(id, preferred = 'legacy_v2') {
   });
 }
 
-function renderConfigCards() {
-  const root = document.getElementById('configList');
-  root.innerHTML = '';
-  state.configs.forEach(cfg => {
-    const div = document.createElement('div');
-    div.className = 'card';
-    div.innerHTML = `<strong>${cfg.label}</strong><div class="muted">${cfg.name}</div><div class="muted">${cfg.description || ''}</div><div class="pill">${cfg.fingerprint || 'sem fingerprint'}</div>`;
-    root.appendChild(div);
+function fillSelect(id, values, keepEmpty = false, emptyLabel = 'Todos') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const current = el.value;
+  el.innerHTML = keepEmpty ? `<option value="">${emptyLabel}</option>` : '';
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    el.appendChild(opt);
   });
+  if ([...el.options].some(o => o.value === current)) el.value = current;
 }
 
 function renderTable(id, rows, cols) {
   const el = document.getElementById(id);
+  const normalizedCols = cols.map(c => typeof c === 'string' ? ({key:c, label:c, html:false}) : ({html:false, ...c}));
   if (!rows || !rows.length) {
     el.innerHTML = '<tr><td class="muted">Sem dados.</td></tr>';
     return;
   }
-  const head = `<tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr>`;
-  const body = rows.map(row => `<tr>${cols.map(c => `<td>${row[c.key] ?? ''}</td>`).join('')}</tr>`).join('');
+  const head = `<tr>${normalizedCols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr>`;
+  const body = rows.map(row => `<tr>${normalizedCols.map(c => {
+    const raw = row[c.key] ?? '';
+    const value = c.format ? c.format(raw, row) : raw;
+    return `<td>${c.html ? (value || '') : escapeHtml(value)}</td>`;
+  }).join('')}</tr>`).join('');
   el.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
@@ -267,17 +375,13 @@ function renderKpis(summary, clv) {
     ['Weighted HR %', summary.weighted_hit_rate_percent], ['Wins', summary.wins], ['Losses', summary.losses],
     ['Half wins', summary.half_wins], ['Half losses', summary.half_losses], ['CLV médio', clv.avg_delta], ['CLV + %', clv.positive_rate_percent]
   ];
-  document.getElementById('kpiGrid').innerHTML = items.map(([label, value]) => `
-    <div class="kpi"><div class="label">${label}</div><div class="value">${value ?? 0}</div></div>
-  `).join('');
+  document.getElementById('kpiGrid').innerHTML = items.map(([label, value]) => `<div class="kpi"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value ?? 0)}</div></div>`).join('');
 }
 
 async function loadConfigs() {
   state.configs = await api('/configs');
-  ['analysisConfig','dailyConfig','replayConfig1','replayConfig2','replayConfig3'].forEach(id => fillConfigSelect(id));
-  if (document.getElementById('replayConfig2').options.length > 1) document.getElementById('replayConfig2').selectedIndex = 1;
-  if (document.getElementById('replayConfig3').options.length > 2) document.getElementById('replayConfig3').selectedIndex = 2;
-  renderConfigCards();
+  ['analysisConfig','dailyConfig'].forEach(id => fillConfigSelect(id));
+  renderReplayConfigRows(['legacy_v2']);
 }
 
 function dashboardParams() {
@@ -321,43 +425,44 @@ async function loadDashboard() {
   }
 }
 
-function fillSelect(id, values, keepEmpty = false) {
-  const el = document.getElementById(id);
-  const current = el.value;
-  el.innerHTML = keepEmpty ? '<option value="">Todos</option>' : '';
-  values.forEach(v => {
-    const opt = document.createElement('option'); opt.value = v; opt.textContent = v; el.appendChild(opt);
-  });
-  if ([...el.options].some(o => o.value === current)) el.value = current;
-}
-
 async function loadEntries() {
   try {
-    const payload = await api(`/dashboard/entries?${qs({...dashboardParams(), limit: 100})}`);
+    const payload = await api(`/dashboard/entries?${qs({...dashboardParams(), limit: 300})}`);
     renderTable('tableEntries', payload.items, [
-      {key:'created_at', label:'Criado em'}, {key:'run_id', label:'Run'}, {key:'league', label:'Liga'},
-      {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'}, {key:'selection_raw', label:'Seleção'},
-      {key:'odd_entrada', label:'Odd'}, {key:'stake_units', label:'Stake'}, {key:'final_settlement_status', label:'Status'}
+      {key:'match_datetime', label:'Jogo em', format:v => formatLocalDateTime(v)},
+      {key:'league', label:'Liga'}, {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'},
+      {key:'selection_raw', label:'Seleção'}, {key:'line', label:'Linha'}, {key:'odd_entrada', label:'Odd'},
+      {key:'stake_units', label:'Stake'}, {key:'final_settlement_status', label:'Status'},
+      {key:'created_at', label:'Criado em', format:v => formatLocalDateTime(v)},
     ]);
   } catch (err) {
     document.getElementById('actionResult').textContent = `Erro entries: ${err.message}`;
   }
 }
 
+async function submitJob(path, payload) {
+  try {
+    const res = await api(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    document.getElementById('actionResult').textContent = JSON.stringify(res, null, 2);
+    await loadJobs();
+  } catch (err) {
+    document.getElementById('actionResult').textContent = `Erro: ${err.message}`;
+  }
+}
+
 async function submitAnalysis() {
-  const payload = {
+  await submitJob('/jobs/analysis', {
     mode: document.getElementById('analysisMode').value,
     date: document.getElementById('analysisDate').value || null,
     ledger_file: document.getElementById('analysisLedger').value,
     config_name: document.getElementById('analysisConfig').value,
     debug: document.getElementById('analysisDebug').checked,
     dry_run: document.getElementById('analysisDryRun').checked,
-  };
-  await submitJob('/jobs/analysis', payload);
+  });
 }
 
 async function submitDailyRun() {
-  const payload = {
+  await submitJob('/jobs/daily-run', {
     date: document.getElementById('dailyDate').value || null,
     ledger_file: document.getElementById('dailyLedger').value,
     results_file: document.getElementById('dailyResults').value,
@@ -365,70 +470,280 @@ async function submitDailyRun() {
     debug: document.getElementById('dailyDebug').checked,
     skip_results_collection: document.getElementById('skipResults').checked,
     skip_settlement: document.getElementById('skipSettlement').checked,
-  };
-  await submitJob('/jobs/daily-run', payload);
+  });
+}
+
+async function submitClosingOdds() {
+  await submitJob('/jobs/closing-odds', {
+    ledger_file: document.getElementById('closingLedger').value,
+    window_minutes: Number(document.getElementById('closingWindow').value || 20),
+    allow_past_minutes: Number(document.getElementById('closingPast').value || 10),
+    all_pending: document.getElementById('closingAllPending').checked,
+  });
+}
+
+async function submitResultsCollection() {
+  await submitJob('/jobs/results-collection', {
+    ledger_file: document.getElementById('resultsLedger').value,
+    output_file: document.getElementById('resultsFile').value,
+    grace_minutes: Number(document.getElementById('resultsGrace').value || 110),
+    max_pages: Number(document.getElementById('resultsMaxPages').value || 6),
+    all_pending: document.getElementById('resultsAllPending').checked,
+    debug: document.getElementById('resultsDebug').checked,
+    source: document.getElementById('resultsSource').value || null,
+  });
+}
+
+async function submitSettlement() {
+  await submitJob('/jobs/settlement', {
+    ledger_file: document.getElementById('settlementLedger').value,
+    results_file: document.getElementById('settlementResults').value,
+    overrides_file: document.getElementById('settlementOverrides').value || null,
+  });
+}
+
+function renderReplayConfigRows(selected = []) {
+  const root = document.getElementById('replayConfigRows');
+  root.innerHTML = '';
+  const initial = selected.length ? selected : ['legacy_v2'];
+  initial.forEach(name => addReplayConfigField(name));
+}
+
+function addReplayConfigField(selected = '') {
+  const root = document.getElementById('replayConfigRows');
+  const max = state.configs.length || 1;
+  if (root.children.length >= max) return;
+  const div = document.createElement('div');
+  div.className = 'config-row';
+  const select = document.createElement('select');
+  select.className = 'replay-config-select';
+  state.configs.forEach(cfg => {
+    const opt = document.createElement('option');
+    opt.value = cfg.name;
+    opt.textContent = `${cfg.label} (${cfg.name})`;
+    if (cfg.name === selected) opt.selected = true;
+    select.appendChild(opt);
+  });
+  const remove = document.createElement('button');
+  remove.className = 'ghost';
+  remove.textContent = 'remover';
+  remove.onclick = () => div.remove();
+  div.appendChild(select);
+  div.appendChild(remove);
+  root.appendChild(div);
+}
+
+async function loadReplayRuns() {
+  const payload = await api('/runs?limit=300');
+  state.replayRuns = payload.items || [];
+  const select = document.getElementById('replaySourceRunSelect');
+  select.innerHTML = '<option value="">Selecione uma run</option>' + state.replayRuns.map(item =>
+    `<option value="${escapeHtml(item.path)}">${escapeHtml(item.target_date)} | ${escapeHtml(item.run_id)} | picks=${escapeHtml(item.picks_rows ?? '-')}</option>`
+  ).join('');
+  select.onchange = () => { document.getElementById('replaySourceRun').value = select.value; };
+}
+
+async function loadReplaySummaries() {
+  const payload = await api('/replays/summaries?limit=80');
+  state.replaySummaries = payload.items || [];
+  renderTable('tableReplaySummaries', state.replaySummaries.map((item, idx) => ({
+    ...item,
+    configs_text: (item.configs || []).join(', '),
+    action: `<button class="ghost small" onclick="loadReplaySummaryDetail(${idx})">abrir</button>`
+  })), [
+    {key:'target_date', label:'Data'}, {key:'source_run_id', label:'Run'}, {key:'configs_text', label:'Configs'}, {key:'results_count', label:'N'}, {key:'action', label:'', html:true}
+  ]);
+}
+
+async function loadReplaySummaryDetail(index) {
+  const item = state.replaySummaries[index];
+  if (!item) return;
+  const payload = await api(`/replays/summary?${qs({summary_file: item.summary_file})}`);
+  state.replaySummaryPayload = payload;
+  const rows = (payload.results || []).map((r, idx) => {
+    const st = (r.settlement && r.settlement.settlement_summary) || {};
+    return {
+      config_name: r.config_name,
+      picks_total: r.picks_total,
+      precision: r.comparison?.precision,
+      recall: r.comparison?.recall,
+      jaccard: r.comparison?.jaccard,
+      drift: r.asian_total_line_drift?.shifted_line_matches_total || 0,
+      settled: st.settled ?? 0,
+      units: st.model_units ?? 0,
+      roi: st.model_roi_percent ?? 0,
+      action: `<button class="ghost small" onclick="loadReplayPicks('${escapeHtml(item.summary_file)}','${escapeHtml(r.config_name)}')">ver picks</button>`
+    };
+  });
+  document.getElementById('replaySummaryKpis').innerHTML = `
+    <div class="kpi"><div class="label">Source run</div><div class="value">${escapeHtml(payload.source_run_id || '-')}</div></div>
+    <div class="kpi"><div class="label">Data</div><div class="value">${escapeHtml(payload.target_date || '-')}</div></div>
+    <div class="kpi"><div class="label">Configs</div><div class="value">${rows.length}</div></div>`;
+  renderTable('tableReplayResults', rows, [
+    {key:'config_name', label:'Config'}, {key:'picks_total', label:'Picks'}, {key:'precision', label:'Precision %'},
+    {key:'recall', label:'Recall %'}, {key:'jaccard', label:'Jaccard %'}, {key:'drift', label:'Drift'},
+    {key:'settled', label:'Settled'}, {key:'units', label:'Unid'}, {key:'roi', label:'ROI %'}, {key:'action', label:'', html:true}
+  ]);
+}
+
+async function loadReplayPicks(summaryFile, configName) {
+  const payload = await api(`/replays/picks?${qs({summary_file: summaryFile, config_name: configName, limit: 400})}`);
+  document.getElementById('replayPicksMeta').textContent = `${configName} | ${payload.total} picks | fonte=${payload.source_file || '-'}`;
+  renderTable('tableReplayPicks', payload.items, [
+    'league','match_name','market_type','selection_raw','target_team_name','line','odd_entrada','odd_justa','ev_percent','confidence_score','stake_units','final_bet_status','result_units_model','risk_flags'
+  ]);
 }
 
 async function submitReplay() {
-  const configs = [document.getElementById('replayConfig1').value, document.getElementById('replayConfig2').value, document.getElementById('replayConfig3').value]
-    .filter((v, i, arr) => v && arr.indexOf(v) === i);
-  const payload = {
-    source_run_dir: document.getElementById('replaySourceRun').value,
+  const configs = [...document.querySelectorAll('.replay-config-select')].map(el => el.value).filter((v, i, arr) => v && arr.indexOf(v) === i);
+  await submitJob('/jobs/replay-run', {
+    source_run_dir: document.getElementById('replaySourceRun').value || document.getElementById('replaySourceRunSelect').value,
     configs,
-  };
-  await submitJob('/jobs/replay-run', payload);
+    evaluate_results: document.getElementById('replayEvaluateResults').checked,
+    results_source: document.getElementById('replayResultsSource').value || null,
+  });
 }
 
-async function submitJob(path, payload) {
-  try {
-    const res = await api(path, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
-    });
-    document.getElementById('actionResult').textContent = JSON.stringify(res, null, 2);
-    loadJobs();
-  } catch (err) {
-    document.getElementById('actionResult').textContent = `Erro: ${err.message}`;
+async function loadAliasFiles(forceReload = false) {
+  const includeBlocked = document.getElementById('aliasIncludeBlocked').checked;
+  const payload = await api(`/aliases/files?${qs({include_blocked: includeBlocked})}`);
+  state.aliasFiles = payload.items || [];
+  const select = document.getElementById('aliasPendingFile');
+  const current = forceReload ? '' : select.value;
+  select.innerHTML = '';
+  if (!state.aliasFiles.length) {
+    select.innerHTML = '<option value="">Sem aliases pendentes</option>';
+    document.getElementById('aliasSummary').textContent = 'Sem aliases pendentes.';
+    renderAliasReviewTable([]);
+    return;
   }
+  state.aliasFiles.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item.pending_file;
+    opt.textContent = `${item.pending_file} | pend=${item.status_counts.pending_review} | blocked=${item.status_counts.blocked}`;
+    select.appendChild(opt);
+  });
+  if ([...select.options].some(o => o.value === current)) select.value = current;
+  select.onchange = () => loadAliasReview();
+  await loadAliasReview();
+}
+
+async function loadAliasReview() {
+  const pendingFile = document.getElementById('aliasPendingFile').value;
+  if (!pendingFile) {
+    document.getElementById('aliasSummary').textContent = 'Sem aliases pendentes.';
+    renderAliasReviewTable([]);
+    return;
+  }
+  const payload = await api(`/aliases/review?${qs({pending_file: pendingFile, alias_file: document.getElementById('aliasFile').value, include_blocked: document.getElementById('aliasIncludeBlocked').checked})}`);
+  state.aliasReview = payload;
+  document.getElementById('aliasSummary').textContent = JSON.stringify({ pending_file: payload.pending_file, alias_file: payload.alias_file, total: payload.total, status_counts: payload.status_counts }, null, 2);
+  renderAliasReviewTable(payload.items || []);
+}
+
+function renderAliasReviewTable(items) {
+  document.getElementById('aliasVisibleCount').textContent = `${items.length} aliases visíveis`;
+  if (!items.length) {
+    document.getElementById('aliasEmptyState').style.display = 'block';
+    document.getElementById('aliasTableWrap').style.display = 'none';
+    document.getElementById('tableAliasReview').innerHTML = '';
+    return;
+  }
+  document.getElementById('aliasEmptyState').style.display = 'none';
+  document.getElementById('aliasTableWrap').style.display = 'block';
+  const rows = items.map(item => ({
+    ...item,
+    pick: `<input type="checkbox" class="alias-check" data-row-id="${escapeHtml(item.row_id)}" checked>`,
+    target_edit: `<input class="alias-target" data-row-id="${escapeHtml(item.row_id)}" value="${escapeHtml(item.suggestion || '')}">`
+  }));
+  renderTable('tableAliasReview', rows, [
+    {key:'pick', label:'', html:true}, 'league', 'match_name', 'side', 'source_name',
+    {key:'target_edit', label:'Target', html:true}, 'score', 'match_status'
+  ]);
+}
+
+function collectAliasApprovals(allVisible = false) {
+  const items = state.aliasReview?.items || [];
+  const checked = new Set([...document.querySelectorAll('.alias-check')].filter(el => allVisible || el.checked).map(el => el.dataset.rowId));
+  const targetMap = new Map([...document.querySelectorAll('.alias-target')].map(el => [el.dataset.rowId, el.value]));
+  return items.filter(item => checked.has(item.row_id)).map(item => ({
+    row_id: item.row_id,
+    source_name: item.source_name,
+    target_name: targetMap.get(item.row_id) || item.suggestion || '',
+  })).filter(item => item.source_name && item.target_name);
+}
+
+async function approveSelectedAliases() {
+  const approvals = collectAliasApprovals(false);
+  if (!approvals.length) return;
+  await api('/aliases/approve', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, alias_file: document.getElementById('aliasFile').value, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
+  });
+  await loadAliasFiles(true);
+}
+
+async function approveAllVisibleAliases() {
+  const approvals = collectAliasApprovals(true);
+  if (!approvals.length) return;
+  await api('/aliases/approve', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, alias_file: document.getElementById('aliasFile').value, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
+  });
+  await loadAliasFiles(true);
 }
 
 function formatJob(job) {
   const req = job.request || {};
   const config = req.config_name ? ` | config=${req.config_name}` : '';
   const replayCfg = req.configs ? ` | configs=${req.configs.join(',')}` : '';
-  return `
-    <div class="job">
-      <div class="inline"><strong>${job.title}</strong><span class="pill">${job.status}</span><span class="muted">${job.id}</span></div>
-      <div class="muted">${job.job_type}${config}${replayCfg}</div>
-      <div class="inline" style="margin-top:8px;">
-        <button class="ghost" onclick="viewLogs('${job.id}')">logs</button>
-        <button class="danger" onclick="cancelJob('${job.id}')">cancelar</button>
-      </div>
-    </div>`;
+  return `<div class="job">
+    <div class="inline"><strong>${escapeHtml(job.title)}</strong><span class="pill">${escapeHtml(job.status)}</span><span class="muted">${escapeHtml(job.id)}</span></div>
+    <div class="muted">${escapeHtml(job.job_type)}${escapeHtml(config)}${escapeHtml(replayCfg)}</div>
+    <div class="inline" style="margin-top:8px;">
+      <button class="ghost small" onclick="viewLogs('${escapeHtml(job.id)}')">logs</button>
+      <button class="danger small" onclick="cancelJob('${escapeHtml(job.id)}')">cancelar</button>
+    </div></div>`;
 }
 
 async function loadJobs() {
-  const payload = await api('/jobs?limit=30');
+  const payload = await api('/jobs?limit=40');
   state.jobs = payload.items || [];
   document.getElementById('jobsList').innerHTML = state.jobs.map(formatJob).join('') || '<div class="muted">Sem jobs.</div>';
 }
 
 async function viewLogs(jobId) {
   state.selectedJobId = jobId;
-  const res = await fetch(`/jobs/${jobId}/logs?lines=1200`);
+  const res = await fetch(`/jobs/${jobId}/logs?lines=1400`);
   const text = await res.text();
   const el = document.getElementById('jobLogs');
   el.textContent = text || 'Sem logs.';
   el.scrollTop = el.scrollHeight;
 }
 
-function reloadSelectedLogs() {
+async function reloadSelectedLogs() {
   if (!state.selectedJobId) return;
-  viewLogs(state.selectedJobId);
+  await viewLogs(state.selectedJobId);
 }
 
 async function cancelJob(jobId) {
   await api(`/jobs/${jobId}/cancel`, { method:'POST' });
   await loadJobs();
+}
+
+function startAutoRefresh() {
+  setInterval(async () => {
+    try { await loadJobs(); } catch {}
+  }, 5000);
+  setInterval(async () => {
+    if (!state.selectedJobId) return;
+    const selected = state.jobs.find(job => job.id === state.selectedJobId);
+    const running = selected && ['queued','running'].includes(selected.status);
+    document.getElementById('logsAutoState').textContent = running ? 'auto 2s' : 'parado';
+    if (running) {
+      try { await reloadSelectedLogs(); } catch {}
+    }
+  }, 2000);
 }
 
 async function loadHealth() {
@@ -438,10 +753,15 @@ async function loadHealth() {
 
 async function boot() {
   bindTabs();
+  document.getElementById('aliasIncludeBlocked').onchange = () => loadAliasFiles(true);
   await loadHealth();
   await loadConfigs();
   await loadDashboard();
+  await loadReplayRuns();
+  await loadReplaySummaries();
+  await loadAliasFiles(true);
   await loadJobs();
+  startAutoRefresh();
 }
 
 boot();

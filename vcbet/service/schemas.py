@@ -114,6 +114,24 @@ class ReplayRunRequest(BaseModel):
     output_dir: str = "data/replays"
     alias_file: str = "alias_times.json"
     python_bin: str = "python3"
+    evaluate_results: bool = False
+    results_source: str | None = None
+    results_grace_minutes: int = 110
+    results_max_pages: int = 6
+    results_debug: bool = False
+
+
+class AliasApprovalItem(BaseModel):
+    row_id: str
+    source_name: str
+    target_name: str
+
+
+class AliasApproveRequest(BaseModel):
+    pending_file: str
+    alias_file: str = "alias_times.json"
+    approvals: list[AliasApprovalItem] = Field(default_factory=list)
+    include_blocked: bool = True
 
 
 class ConfigInfo(BaseModel):

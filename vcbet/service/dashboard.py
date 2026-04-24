@@ -24,7 +24,7 @@ def _read_csv_auto(path: Path) -> pd.DataFrame:
     except Exception:
         first_line = sample.splitlines()[0] if sample else ""
         counts = {d: first_line.count(d) for d in delimiters}
-        sep = max(counts, key=counts.get) if any(counts.values()) else ","
+        sep = max(counts, key=counts.get) if any(counts.values()) else ";"
 
     df = pd.read_csv(path, sep=sep)
 
@@ -76,12 +76,18 @@ def apply_filters(
         out = out[out.get("market_type", pd.Series(index=out.index)).astype(str) == str(market_type)]
     if date_from:
         dt = pd.to_datetime(date_from, errors="coerce")
-        if pd.notna(dt) and "created_at" in out.columns:
-            out = out[out["created_at"] >= dt]
+        if pd.notna(dt):
+            if "match_datetime" in out.columns:
+                out = out[out["match_datetime"] >= dt]
+            elif "created_at" in out.columns:
+                out = out[out["created_at"] >= dt]
     if date_to:
         dt = pd.to_datetime(date_to, errors="coerce")
-        if pd.notna(dt) and "created_at" in out.columns:
-            out = out[out["created_at"] <= dt]
+        if pd.notna(dt):
+            if "match_datetime" in out.columns:
+                out = out[out["match_datetime"] <= dt]
+            elif "created_at" in out.columns:
+                out = out[out["created_at"] <= dt]
     if only_executed and "bet_executed" in out.columns:
         out = out[out["bet_executed"].astype(str).str.lower() == "yes"]
     if only_settled and "final_bet_status" in out.columns:
@@ -152,18 +158,37 @@ def _aggregate_performance(df: pd.DataFrame, group_col: str) -> list[dict[str, A
 
 def _recent_entries(df: pd.DataFrame, limit: int = 100) -> list[dict[str, Any]]:
     recent_entries = df.copy()
-    if "created_at" in recent_entries.columns:
+    if "match_datetime" in recent_entries.columns:
+        recent_entries = recent_entries.sort_values("match_datetime", ascending=True, na_position="last")
+    elif "created_at" in recent_entries.columns:
         recent_entries = recent_entries.sort_values("created_at", ascending=False)
     recent_entries = recent_entries.head(limit).copy()
     recent_cols = [
-        "bet_id", "created_at", "run_id", "league", "match_name", "market_type", "selection_raw",
-        "odd_entrada", "ev_percent", "stake_units", "bet_executed", "final_bet_status",
-        "final_settlement_status", "result_units_model", "result_units_real", "risk_flags"
+        "bet_id",
+        "match_datetime",
+        "created_at",
+        "run_id",
+        "config_name",
+        "league",
+        "match_name",
+        "market_type",
+        "selection_raw",
+        "line",
+        "odd_entrada",
+        "ev_percent",
+        "stake_units",
+        "bet_executed",
+        "final_bet_status",
+        "final_settlement_status",
+        "result_units_model",
+        "result_units_real",
+        "risk_flags",
     ]
     recent_cols = [c for c in recent_cols if c in recent_entries.columns]
     recent_entries = recent_entries[recent_cols].fillna("")
-    if "created_at" in recent_entries.columns:
-        recent_entries["created_at"] = recent_entries["created_at"].astype(str)
+    for dt_col in ["match_datetime", "created_at"]:
+        if dt_col in recent_entries.columns:
+            recent_entries[dt_col] = recent_entries[dt_col].astype(str)
     return recent_entries.to_dict(orient="records")
 
 
@@ -224,6 +249,7 @@ def build_dashboard_payload(df: pd.DataFrame, entries_limit: int = 100) -> dict[
     leagues = sorted(df.get("league", pd.Series(dtype="object")).dropna().astype(str).unique().tolist()) if "league" in df.columns else []
     markets = sorted(df.get("market_type", pd.Series(dtype="object")).dropna().astype(str).unique().tolist()) if "market_type" in df.columns else []
     runs = sorted(df.get("run_id", pd.Series(dtype="object")).dropna().astype(str).unique().tolist(), reverse=True) if "run_id" in df.columns else []
+    configs = sorted(df.get("config_name", pd.Series(dtype="object")).dropna().astype(str).unique().tolist()) if "config_name" in df.columns else []
 
     return {
         "summary": {
@@ -261,5 +287,6 @@ def build_dashboard_payload(df: pd.DataFrame, entries_limit: int = 100) -> dict[
             "available_leagues": leagues,
             "available_markets": markets,
             "available_runs": runs,
+            "available_configs": configs,
         },
     }

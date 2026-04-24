@@ -188,4 +188,10 @@ def build_replay_command(project_root: Path, req: ReplayRunRequest) -> CommandSp
     ]
     for config_name in req.configs:
         args += ["--config", config_name]
+    _append_if(args, getattr(req, "evaluate_results", False), "--evaluate-results")
+    if getattr(req, "results_source", None):
+        args += ["--results-source", req.results_source]
+    args += ["--results-grace-minutes", str(getattr(req, "results_grace_minutes", 110))]
+    args += ["--results-max-pages", str(getattr(req, "results_max_pages", 6))]
+    _append_if(args, getattr(req, "results_debug", False), "--results-debug")
     return CommandSpec(name="replay_run", command=args, cwd=project_root)

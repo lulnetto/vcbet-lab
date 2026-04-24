@@ -137,8 +137,14 @@ def classify_correlation(a: dict[str, Any], b: dict[str, Any]) -> str:
     line_a = a.get("line")
     line_b = b.get("line")
 
-    if mt_a == "asian_handicap" and mt_b == "asian_handicap" and side_a != side_b:
-        return "high"
+    if mt_a == "asian_handicap" and mt_b == "asian_handicap":
+        same_target = a.get("target_team_role") == b.get("target_team_role") and a.get("target_team_name") == b.get("target_team_name")
+        # Linhas AH para o mesmo time/direção são apostas aninhadas, não diversificação.
+        # Ex.: +0.5 e -0.25 no mesmo time carregam a mesma tese com draw-risk diferente.
+        if same_target and side_a == side_b:
+            return "high"
+        if side_a != side_b:
+            return "high"
 
     if mt_a == mt_b:
         same_target = a.get("target_team_role") == b.get("target_team_role") and a.get("target_team_name") == b.get("target_team_name")

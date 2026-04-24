@@ -5,6 +5,16 @@ import pandas as pd
 from vcbet.core.pick_filter import is_xg_fallback
 from vcbet.core.pricing_engine import expected_value_decimal, fair_odd_from_probs
 
+
+def _display_selection(row: pd.Series) -> str:
+    """Seleção legível e identificável para relatórios, comparison e ledger."""
+    selection = str(row.get("selection_raw", "")).strip()
+    if str(row.get("market_type", "")).strip() == "team_total":
+        team = str(row.get("target_team_name", "")).strip()
+        if team and team.lower() not in {"nan", "none", "<na>", "geral"}:
+            return f"{team} {selection}".strip()
+    return selection
+
 def build_candidate_row(
     *,
     run_id: str,
@@ -36,7 +46,7 @@ def build_candidate_row(
         "market_type": row["market_type"],
         "market_scope": row["market_scope"],
         "market_raw": row["market_raw"],
-        "selection_raw": row["selection_raw"],
+        "selection_raw": _display_selection(row),
         "line": None if pd.isna(row.get("line")) else float(row.get("line")),
         "side": row.get("side"),
         "target_team_role": row.get("target_team_role"),

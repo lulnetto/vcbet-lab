@@ -179,7 +179,139 @@ def _load_picks_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep=";")
 
 
-def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_root: Path, alias_file: str, python_bin: str) -> dict[str, Any]:
+def _load_csv_semicolon(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path, sep=";")
+
+
+def _summarize_replay_ledger(ledger_file: Path) -> dict[str, Any]:
+    df = _load_csv_semicolon(ledger_file)
+    if df.empty:
+        return {
+            "total": 0,
+            "settled": 0,
+            "open": 0,
+            "wins": 0,
+            "losses": 0,
+            "pushes": 0,
+            "model_units": 0.0,
+            "model_roi_percent": 0.0,
+        }
+
+    status = df.get("final_bet_status", pd.Series(["open"] * len(df))).fillna("open").astype(str).str.lower()
+    result_units = pd.to_numeric(df.get("result_units_model", pd.Series([0] * len(df))), errors="coerce").fillna(0.0)
+    stake = pd.to_numeric(df.get("stake_units", pd.Series([0] * len(df))), errors="coerce").fillna(0.0)
+    settled_mask = status.isin({"won", "lost", "half_won", "half_lost", "push", "voided", "postponed", "settled"})
+
+    settled_stake = float(stake[settled_mask].sum())
+    model_units = float(result_units[settled_mask].sum())
+    roi = (model_units / settled_stake * 100.0) if settled_stake else 0.0
+
+    return {
+        "total": int(len(df)),
+        "settled": int(settled_mask.sum()),
+        "open": int((~settled_mask).sum()),
+        "wins": int(status.eq("won").sum()),
+        "losses": int(status.eq("lost").sum()),
+        "half_wins": int(status.eq("half_won").sum()),
+        "half_losses": int(status.eq("half_lost").sum()),
+        "pushes": int(status.eq("push").sum()),
+        "voided": int(status.eq("voided").sum()),
+        "postponed": int(status.eq("postponed").sum()),
+        "model_units": round(model_units, 3),
+        "model_roi_percent": round(roi, 2),
+    }
+
+
+def _run_replay_settlement(
+    *,
+    replay_dir: Path,
+    ledger_file: Path,
+    python_bin: str,
+    results_source: str,
+    results_grace_minutes: int,
+    results_max_pages: int,
+    results_debug: bool,
+) -> dict[str, Any]:
+    results_file = replay_dir / "results_auto.csv"
+    debug_dir = replay_dir / "results_debug"
+
+    results_cmd = [
+        python_bin,
+        "-m",
+        "vcbet.collectors.results_collector",
+        "--ledger-file", str(ledger_file),
+        "--output-file", str(results_file),
+        "--all-pending",
+        "--grace-minutes", str(results_grace_minutes),
+        "--debug-dir", str(debug_dir),
+        "--max-pages", str(results_max_pages),
+        "--source", results_source,
+    ]
+    if results_debug:
+        results_cmd.append("--debug")
+
+    settlement_cmd = [
+        python_bin,
+        "-m",
+        "vcbet.settlement.settlement_engine",
+        "--ledger-file", str(ledger_file),
+        "--results-file", str(results_file),
+    ]
+
+    results_proc = subprocess.run(results_cmd, cwd=Path.cwd(), capture_output=True, text=True)
+    settlement_proc = subprocess.run(settlement_cmd, cwd=Path.cwd(), capture_output=True, text=True) if results_proc.returncode == 0 else None
+
+    return {
+        "results_file": str(results_file),
+        "results_return_code": results_proc.returncode,
+        "results_stdout_tail": results_proc.stdout.splitlines()[-50:],
+        "results_stderr_tail": results_proc.stderr.splitlines()[-30:],
+        "settlement_return_code": settlement_proc.returncode if settlement_proc else None,
+        "settlement_stdout_tail": settlement_proc.stdout.splitlines()[-50:] if settlement_proc else [],
+        "settlement_stderr_tail": settlement_proc.stderr.splitlines()[-30:] if settlement_proc else [],
+        "settlement_summary": _summarize_replay_ledger(ledger_file),
+    }
+
+
+
+def _compact_picks_for_summary(picks_df: pd.DataFrame, ledger_file: Path, limit: int = 200) -> list[dict[str, Any]]:
+    source_df = _load_csv_semicolon(ledger_file) if ledger_file.exists() else picks_df
+    if source_df.empty:
+        return []
+    wanted = [
+        "league", "match_name", "market_type", "selection_raw", "target_team_name",
+        "line", "odd_entrada", "odd_justa", "ev_percent", "confidence_score",
+        "stake_units", "final_bet_status", "result_units_model", "risk_flags",
+    ]
+    rows: list[dict[str, Any]] = []
+    for _, row in source_df.head(limit).iterrows():
+        item: dict[str, Any] = {}
+        for col in wanted:
+            value = row.get(col, None)
+            if pd.isna(value):
+                value = None
+            if hasattr(value, "item"):
+                value = value.item()
+            item[col] = value
+        rows.append(item)
+    return rows
+
+
+def _run_single_replay(
+    *,
+    source_info: dict[str, Any],
+    config_ref: str,
+    output_root: Path,
+    alias_file: str,
+    python_bin: str,
+    evaluate_results: bool = False,
+    results_source: str = "auto",
+    results_grace_minutes: int = 110,
+    results_max_pages: int = 6,
+    results_debug: bool = False,
+) -> dict[str, Any]:
     possible_path = Path(config_ref)
     if possible_path.exists():
         config_path = resolve_config_file(config_file=possible_path, strict=True)
@@ -221,6 +353,18 @@ def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_r
     comparison = _compare_pick_sets(reference_df, candidate_df)
     asian_total_line_drift = _asian_total_line_drift(reference_df, candidate_df)
 
+    settlement_payload = None
+    if evaluate_results and result.returncode == 0:
+        settlement_payload = _run_replay_settlement(
+            replay_dir=replay_dir,
+            ledger_file=ledger_file,
+            python_bin=python_bin,
+            results_source=results_source,
+            results_grace_minutes=results_grace_minutes,
+            results_max_pages=results_max_pages,
+            results_debug=results_debug,
+        )
+
     quality_report = _load_json(replay_dir / "quality_report.json")
     payload = {
         "config_name": config_name,
@@ -231,18 +375,34 @@ def _run_single_replay(*, source_info: dict[str, Any], config_ref: str, output_r
         "stderr_tail": result.stderr.splitlines()[-40:],
         "picks_total": int(len(candidate_df)),
         "picks_by_market": dict(Counter(candidate_df.get("market_type", pd.Series(dtype=object)).fillna("missing"))),
+        "picks_preview": _compact_picks_for_summary(candidate_df, ledger_file),
+        "picks_file": str(replay_picks) if replay_picks.exists() else None,
+        "ledger_file": str(ledger_file) if ledger_file.exists() else None,
         "comparison": comparison,
         "asian_total_line_drift": asian_total_line_drift,
         "quality_report_file": str(replay_dir / "quality_report.json") if (replay_dir / "quality_report.json").exists() else None,
         "quality_processing": quality_report.get("processing", {}),
         "quality_outputs": quality_report.get("outputs", {}),
         "replay_dir": str(replay_dir),
+        "settlement": settlement_payload,
     }
     (replay_dir / "replay_result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
 
 
-def replay_configs_for_run(*, source_run_dir: Path, config_refs: list[str], output_dir: Path, alias_file: str, python_bin: str) -> Path:
+def replay_configs_for_run(
+    *,
+    source_run_dir: Path,
+    config_refs: list[str],
+    output_dir: Path,
+    alias_file: str,
+    python_bin: str,
+    evaluate_results: bool = False,
+    results_source: str = "auto",
+    results_grace_minutes: int = 110,
+    results_max_pages: int = 6,
+    results_debug: bool = False,
+) -> Path:
     source_info = _resolve_source_run(source_run_dir)
     comparison_dir = output_dir / str(source_info["target_date"]) / f"comparison_{source_info['run_id']}"
     comparison_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +416,11 @@ def replay_configs_for_run(*, source_run_dir: Path, config_refs: list[str], outp
                 output_root=output_dir,
                 alias_file=alias_file,
                 python_bin=python_bin,
+                evaluate_results=evaluate_results,
+                results_source=results_source,
+                results_grace_minutes=results_grace_minutes,
+                results_max_pages=results_max_pages,
+                results_debug=results_debug,
             )
         )
 
@@ -284,6 +449,9 @@ def replay_configs_for_run(*, source_run_dir: Path, config_refs: list[str], outp
             "edge_below_min_discards": item["quality_processing"].get("discard_reason_counts", {}).get("pick_filter_edge_below_min", 0),
             "odd_out_of_range_discards": item["quality_processing"].get("discard_reason_counts", {}).get("pick_filter_odd_out_of_range", 0),
             "asian_total_shifted_lines": item.get("asian_total_line_drift", {}).get("shifted_line_matches_total", 0),
+            "settled": (item.get("settlement") or {}).get("settlement_summary", {}).get("settled", 0),
+            "model_units": (item.get("settlement") or {}).get("settlement_summary", {}).get("model_units", 0.0),
+            "model_roi_percent": (item.get("settlement") or {}).get("settlement_summary", {}).get("model_roi_percent", 0.0),
         })
     pd.DataFrame(rows).sort_values(["jaccard_percent", "overlap", "picks_total"], ascending=[False, False, False]).to_csv(
         comparison_dir / "comparison_summary.csv",
@@ -301,6 +469,11 @@ def main() -> None:
     parser.add_argument("--output-dir", default=str(DEFAULT_REPLAY_DIR), help="Diretório base para os replays")
     parser.add_argument("--alias-file", default="alias_times.json", help="Arquivo de aliases")
     parser.add_argument("--python-bin", default="python3", help="Binário Python")
+    parser.add_argument("--evaluate-results", action="store_true", help="Após cada replay, coleta resultados e liquida o replay_ledger.")
+    parser.add_argument("--results-source", default="auto", choices=["auto", "browser", "api"], help="Fonte usada na coleta de resultados do replay.")
+    parser.add_argument("--results-grace-minutes", type=int, default=110, help="Grace period para coleta de resultados.")
+    parser.add_argument("--results-max-pages", type=int, default=6, help="Páginas máximas na coleta de resultados.")
+    parser.add_argument("--results-debug", action="store_true", help="Debug da coleta de resultados do replay.")
     args = parser.parse_args()
 
     summary_path = replay_configs_for_run(
@@ -309,6 +482,11 @@ def main() -> None:
         output_dir=Path(args.output_dir).resolve(),
         alias_file=args.alias_file,
         python_bin=args.python_bin,
+        evaluate_results=args.evaluate_results,
+        results_source=args.results_source,
+        results_grace_minutes=args.results_grace_minutes,
+        results_max_pages=args.results_max_pages,
+        results_debug=args.results_debug,
     )
     print(f"[OK] Replay concluído. Resumo salvo em: {summary_path}")
 
