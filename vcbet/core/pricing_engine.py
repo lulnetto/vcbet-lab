@@ -26,15 +26,30 @@ def expected_value_decimal(probs: dict[str, float], odd_decimal: float) -> float
     )
 
 
+def _outcome_prob(probs: dict[str, float], outcome: str) -> float:
+    return float(probs.get(outcome, 0.0) or 0.0)
+
+
 def effective_model_probability(probs: dict[str, float]) -> float:
-    return probs["win"] + 0.5 * probs["half_win"]
+    fair_odd = fair_odd_from_probs(probs)
+    if fair_odd is None or fair_odd <= 0:
+        return 0.0
+    return 1.0 / fair_odd
+
+
+def fair_profit_loss_ratio_from_probs(probs: dict[str, float]) -> float | None:
+    win_equivalent = _outcome_prob(probs, "win") + 0.5 * _outcome_prob(probs, "half_win")
+    loss_equivalent = _outcome_prob(probs, "loss") + 0.5 * _outcome_prob(probs, "half_loss")
+    if win_equivalent <= 0:
+        return None
+    return loss_equivalent / win_equivalent
 
 
 def fair_odd_from_probs(probs: dict[str, float]) -> float | None:
-    effective_prob = effective_model_probability(probs)
-    if effective_prob <= 0:
+    fair_profit_loss_ratio = fair_profit_loss_ratio_from_probs(probs)
+    if fair_profit_loss_ratio is None:
         return None
-    return 1 / effective_prob
+    return 1.0 + fair_profit_loss_ratio
 
 
 def _univariate_probs(mu: float, side: str, line: float) -> dict[str, float] | None:

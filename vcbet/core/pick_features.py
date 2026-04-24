@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from vcbet.core.pick_filter import is_xg_fallback
-from vcbet.core.pricing_engine import expected_value_decimal, fair_odd_from_probs
+from vcbet.core.pricing_engine import effective_model_probability, expected_value_decimal, fair_odd_from_probs
+from vcbet.core.risk_policy import is_xg_fallback
 
 
 def _display_selection(row: pd.Series) -> str:
@@ -53,7 +53,7 @@ def build_candidate_row(
         "target_team_name": row.get("target_team_name"),
         "event_url": row.get("event_url"),
         "odd_entrada": float(row["odd"]),
-        "prob_model": round(probs["win"] + 0.5 * probs["half_win"], 6),
+        "prob_model": round(effective_model_probability(probs), 6),
         "odd_justa": fair_odd,
         "ev_decimal": ev_decimal,
         "mu_total": lambda_bundle["mu_total"],

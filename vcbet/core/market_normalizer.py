@@ -7,23 +7,35 @@ from typing import Any, Dict
 import pandas as pd
 
 IGNORED_MARKET_TERMS = (
-    "1º tempo",
-    "1° tempo",
-    "1o tempo",
-    "1 tempo",
-    "2º tempo",
-    "2° tempo",
-    "2o tempo",
-    "2 tempo",
     "alternativas",
 )
 
 
-FIRST_HALF_TERMS = ("1º tempo", "1° tempo", "1o tempo", "1 tempo")
-SECOND_HALF_TERMS = ("2º tempo", "2° tempo", "2o tempo", "2 tempo")
+FIRST_HALF_TERMS = (
+    "1 tempo",
+    "1o tempo",
+    "1º tempo",
+    "1° tempo",
+)
+SECOND_HALF_TERMS = (
+    "2 tempo",
+    "2o tempo",
+    "2º tempo",
+    "2° tempo",
+    "segundo tempo",
+)
+UNSUPPORTED_SCOPE_TERMS = (
+    "primeiro tempo",
+    "1a parte",
+    "1 parte",
+    "2a parte",
+    "2 parte",
+    "intervalo",
+)
 
 COMPOSITE_SELECTION_PATTERN = re.compile(r"\s(e|ou)\s|\(|\)", re.IGNORECASE)
 LINE_PATTERN = re.compile(r"([-+]?\d+(?:[\.,]\d+)?)")
+LINE_SUFFIX_PATTERN = re.compile(r"^(?P<label>.*?)\s+(?P<line>[-+]?\d+(?:[\.,]\d+)?)\s*$")
 
 
 def slug_text(value: str) -> str:
@@ -41,16 +53,45 @@ def parse_numeric_line(text: str) -> float | None:
     return float(match.group(1).replace(",", "."))
 
 
+def parse_numeric_line_suffix(text: str) -> tuple[str, float] | None:
+    match = LINE_SUFFIX_PATTERN.match(str(text).strip())
+    if not match:
+        return None
+    return match.group("label").strip(), float(match.group("line").replace(",", "."))
+
+
 def compare_team_name(a: str, b: str) -> bool:
     return slug_text(a) == slug_text(b)
 
 
+def _scope_terms(terms: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(slug_text(term) for term in terms)
+
+
+FIRST_HALF_SLUGS = _scope_terms(FIRST_HALF_TERMS)
+SECOND_HALF_SLUGS = _scope_terms(SECOND_HALF_TERMS)
+UNSUPPORTED_SCOPE_SLUGS = _scope_terms(UNSUPPORTED_SCOPE_TERMS)
+
+
 def detect_market_scope(market_slug: str) -> str:
-    if any(term in market_slug for term in FIRST_HALF_TERMS):
+    market_slug = slug_text(market_slug)
+    if any(term in market_slug for term in FIRST_HALF_SLUGS):
         return "first_half"
-    if any(term in market_slug for term in SECOND_HALF_TERMS):
+    if any(term in market_slug for term in SECOND_HALF_SLUGS):
         return "second_half"
     return "full_time"
+
+
+def detect_market_scope_status(market_slug: str) -> tuple[str | None, str]:
+    market_slug = slug_text(market_slug)
+    scope = detect_market_scope(market_slug)
+    if scope != "full_time":
+        return scope, "ok"
+    if any(term in market_slug for term in UNSUPPORTED_SCOPE_SLUGS):
+        return None, "unsupported_scope"
+    if "tempo" in market_slug or "parte" in market_slug or "periodo" in market_slug:
+        return None, "unsupported_scope"
+    return scope, "ok"
 
 
 DEFAULT_NORMALIZED = {
@@ -76,10 +117,15 @@ def normalize_market_entry(
     selection_slug = slug_text(selection)
 
     result: Dict[str, Any] = dict(DEFAULT_NORMALIZED)
-    result["market_scope"] = detect_market_scope(market_slug)
+    market_scope, scope_status = detect_market_scope_status(market_slug)
+    result["market_scope"] = market_scope
 
     if not market or not selection:
         result["normalized_status"] = "parse_error"
+        return result
+
+    if scope_status != "ok":
+        result["normalized_status"] = scope_status
         return result
 
     if result["market_scope"] != "full_time":
@@ -112,17 +158,12 @@ def normalize_market_entry(
         return result
 
     if "handicap asiatico" in market_slug:
-        line = parse_numeric_line(selection)
-        if line is None:
+        parsed = parse_numeric_line_suffix(selection)
+        if parsed is None:
             result["normalized_status"] = "unknown_selection"
             return result
 
-        match = re.match(r"^(.*?)\s+[-+]\d+(?:[\.,]\d+)?$", selection)
-        if not match:
-            result["normalized_status"] = "unknown_selection"
-            return result
-
-        team_name = match.group(1).strip()
+        team_name, line = parsed
         if compare_team_name(team_name, home_team):
             target_role = "home"
             side = "home"

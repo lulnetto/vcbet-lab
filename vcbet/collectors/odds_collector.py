@@ -9,12 +9,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import pandas as pd
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from vcbet.core.config_ligas import carregar_ligas_betano
 from vcbet.core.market_normalizer import normalize_market_entry
 from vcbet.core.run_utils import build_manifest, ensure_run_dir, generate_run_id, save_manifest, update_manifest
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, file_md5, snapshot_time_from_dataframe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -245,6 +247,9 @@ if __name__ == "__main__":
             status="odds_completed",
             odds_rows=len(all_odds_data),
             odds_snapshot_file=str(odds_snapshot_path),
+            odds_snapshot_hash=file_md5(odds_snapshot_path) if odds_snapshot_path.exists() else None,
+            odds_snapshot_time=snapshot_time_from_dataframe(pd.DataFrame(all_odds_data)),
+            temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
             odds_json_file=str(odds_json_path) if args.json and not args.debug else None,
         )
         logging.info(f"Extração total concluída. {len(all_odds_data)} odds registradas.")

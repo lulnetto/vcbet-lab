@@ -127,8 +127,19 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
             "half_unit": 0.5,
             "zero_unit": 0.0,
         },
+        "safety_gates": {
+            "enabled": True,
+            "block_flags": ["MATCH_FUZZY", "MATCH_DUVIDOSO", "DADO_INCOMPLETO_LIGA"],
+        },
         "portfolio": {
             "max_picks_per_match": 2,
+            "max_picks_per_league": 3,
+            "max_stake_per_league": 2.0,
+            "max_picks_per_market_family": 4,
+            "max_stake_per_market_family": 3.0,
+            "near_duplicate_line_tolerance": 0.25,
+            "contradictory_line_tolerance": 0.25,
+            "medium_correlation_policy": "downgrade",
             "asian_total_line_ladder": {
                 "enabled": False,
                 "target_gap": 0.75,

@@ -10,9 +10,11 @@ from typing import Any
 import pandas as pd
 
 from vcbet.core.strategy_config import CONFIGS_DIR, ConfigResolutionError, list_available_configs, resolve_config_file
+from vcbet.core.temporal_contract import file_md5, snapshot_time_from_dataframe
 from vcbet.paths import REPLAYS_DIR
 
 DEFAULT_REPLAY_DIR = REPLAYS_DIR
+ROOT = Path.cwd()
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -132,29 +134,62 @@ def _compare_pick_sets(reference_df: pd.DataFrame, candidate_df: pd.DataFrame) -
 def _resolve_source_run(source_run_dir: Path) -> dict[str, Path | str | None]:
     manifest = _load_json(source_run_dir / "run_manifest.json")
 
-    def _from_manifest(*keys: str) -> Path | None:
+    def _from_manifest(*keys: str) -> tuple[Path | None, str]:
         value = manifest
         for key in keys:
             if not isinstance(value, dict):
-                return None
+                return None, ""
             value = value.get(key)
         if not value:
-            return None
+            return None, ""
         path = Path(str(value))
         if not path.is_absolute():
             path = (ROOT / path).resolve()
-        return path
+        return path, ".".join(keys)
 
-    odds_path = source_run_dir / "odds_snapshot.csv"
-    xg_path = source_run_dir / "xg_snapshot.csv"
-    if not odds_path.exists():
-        odds_path = _from_manifest("source_files", "odds_file") or _from_manifest("odds_snapshot_file") or odds_path
-    if not xg_path.exists():
-        xg_path = _from_manifest("source_files", "xg_file") or _from_manifest("xg_snapshot_file") or xg_path
+    def _resolve_snapshot(filename: str, *manifest_keys: tuple[str, ...]) -> tuple[Path, str, str]:
+        local = source_run_dir / filename
+        if local.exists():
+            return local, "frozen_run_local", filename
+        for keys in manifest_keys:
+            candidate, source_key = _from_manifest(*keys)
+            if candidate and candidate.exists():
+                return candidate, "manifest_reference", source_key
+        return local, "missing", ""
+
+    def _snapshot_time(path: Path, *manifest_keys: str) -> str | None:
+        for key in manifest_keys:
+            value = manifest.get(key)
+            if value:
+                return str(value)
+        provenance = manifest.get("provenance", {})
+        if isinstance(provenance, dict):
+            for key in manifest_keys:
+                value = provenance.get(key)
+                if value:
+                    return str(value)
+        if path.exists():
+            try:
+                return snapshot_time_from_dataframe(pd.read_csv(path, sep=";"))
+            except Exception:
+                return None
+        return None
+
+    odds_path, odds_source_mode, odds_source_key = _resolve_snapshot(
+        "odds_snapshot.csv",
+        ("source_files", "odds_file"),
+        ("odds_snapshot_file",),
+    )
+    xg_path, xg_source_mode, xg_source_key = _resolve_snapshot(
+        "xg_snapshot.csv",
+        ("source_files", "xg_file"),
+        ("xg_snapshot_file",),
+    )
 
     picks_path = source_run_dir / "picks_snapshot.csv"
     if not picks_path.exists():
-        picks_path = _from_manifest("picks_file") or picks_path
+        picks_candidate, _source_key = _from_manifest("picks_file")
+        picks_path = picks_candidate or picks_path
 
     target_date = manifest.get("target_date") or source_run_dir.parent.name
     run_id = manifest.get("run_id") or source_run_dir.name
@@ -170,6 +205,19 @@ def _resolve_source_run(source_run_dir: Path) -> dict[str, Path | str | None]:
         "picks_path": Path(picks_path),
         "target_date": str(target_date),
         "run_id": str(run_id),
+        "replay_input_contract": {
+            "odds_source_mode": odds_source_mode,
+            "xg_source_mode": xg_source_mode,
+            "odds_source_key": odds_source_key,
+            "xg_source_key": xg_source_key,
+            "odds_path": str(odds_path),
+            "xg_path": str(xg_path),
+            "odds_snapshot_hash": file_md5(odds_path) if Path(odds_path).exists() else None,
+            "xg_snapshot_hash": file_md5(xg_path) if Path(xg_path).exists() else None,
+            "odds_snapshot_time": _snapshot_time(Path(odds_path), "odds_snapshot_time"),
+            "xg_asof": _snapshot_time(Path(xg_path), "xg_asof"),
+            "source_strength": "strong" if odds_source_mode == "frozen_run_local" and xg_source_mode == "frozen_run_local" else "weak_fallback",
+        },
     }
 
 
@@ -283,7 +331,13 @@ def _compact_picks_for_summary(picks_df: pd.DataFrame, ledger_file: Path, limit:
     wanted = [
         "league", "match_name", "market_type", "selection_raw", "target_team_name",
         "line", "odd_entrada", "odd_justa", "ev_percent", "confidence_score",
-        "stake_units", "final_bet_status", "result_units_model", "risk_flags",
+        "stake_units", "run_id", "config_name", "config_fingerprint", "source_run_id",
+        "odds_source_run_id", "xg_source_run_id", "odds_snapshot_hash", "xg_snapshot_hash",
+        "odds_snapshot_time", "xg_asof", "temporal_contract_version", "temporal_contract_status",
+        "decision_timestamp", "pick_safety_status", "candidate_stage", "safety_gate_reason",
+        "decision_policy_status", "decision_reject_reason", "selection_policy_status", "selection_reject_reason",
+        "portfolio_risk_status", "portfolio_risk_reason", "portfolio_exposure_scope", "portfolio_exposure_after", "market_family",
+        "final_bet_status", "result_units_model", "risk_flags",
     ]
     rows: list[dict[str, Any]] = []
     for _, row in source_df.head(limit).iterrows():
@@ -384,6 +438,7 @@ def _run_single_replay(
         "quality_processing": quality_report.get("processing", {}),
         "quality_outputs": quality_report.get("outputs", {}),
         "replay_dir": str(replay_dir),
+        "replay_input_contract": source_info.get("replay_input_contract", {}),
         "settlement": settlement_payload,
     }
     (replay_dir / "replay_result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -429,6 +484,7 @@ def replay_configs_for_run(
         "source_run_id": source_info["run_id"],
         "target_date": source_info["target_date"],
         "source_picks_file": str(source_info["picks_path"]),
+        "replay_input_contract": source_info.get("replay_input_contract", {}),
         "results": results,
         "available_configs": list_available_configs(),
     }

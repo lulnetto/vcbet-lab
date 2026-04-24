@@ -432,7 +432,12 @@ async function loadEntries() {
       {key:'match_datetime', label:'Jogo em', format:v => formatLocalDateTime(v)},
       {key:'league', label:'Liga'}, {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'},
       {key:'selection_raw', label:'Seleção'}, {key:'line', label:'Linha'}, {key:'odd_entrada', label:'Odd'},
-      {key:'stake_units', label:'Stake'}, {key:'final_settlement_status', label:'Status'},
+      {key:'odd_justa', label:'Odd justa'}, {key:'ev_percent', label:'EV %'}, {key:'stake_units', label:'Stake'},
+      {key:'config_name', label:'Config'}, {key:'source_run_id', label:'Source run'},
+      {key:'decision_timestamp', label:'Decisao em', format:v => formatLocalDateTime(v)},
+      {key:'pick_safety_status', label:'Safety'}, {key:'candidate_stage', label:'Stage'}, {key:'safety_gate_reason', label:'Gate'},
+      {key:'portfolio_risk_status', label:'Portfolio'}, {key:'portfolio_risk_reason', label:'Port. motivo'},
+      {key:'final_settlement_status', label:'Status'},
       {key:'created_at', label:'Criado em', format:v => formatLocalDateTime(v)},
     ]);
   } catch (err) {
@@ -590,7 +595,7 @@ async function loadReplayPicks(summaryFile, configName) {
   const payload = await api(`/replays/picks?${qs({summary_file: summaryFile, config_name: configName, limit: 400})}`);
   document.getElementById('replayPicksMeta').textContent = `${configName} | ${payload.total} picks | fonte=${payload.source_file || '-'}`;
   renderTable('tableReplayPicks', payload.items, [
-    'league','match_name','market_type','selection_raw','target_team_name','line','odd_entrada','odd_justa','ev_percent','confidence_score','stake_units','final_bet_status','result_units_model','risk_flags'
+    'league','match_name','market_type','market_family','selection_raw','target_team_name','line','odd_entrada','odd_justa','ev_percent','confidence_score','stake_units','portfolio_risk_status','portfolio_risk_reason','portfolio_exposure_scope','config_name','source_run_id','decision_timestamp','odds_snapshot_time','xg_asof','temporal_contract_status','pick_safety_status','candidate_stage','decision_policy_status','selection_policy_status','safety_gate_reason','final_bet_status','result_units_model','risk_flags'
   ]);
 }
 

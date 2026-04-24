@@ -12,6 +12,7 @@ import re
 
 from vcbet.core.config_ligas import carregar_ligas_footystats
 from vcbet.core.run_utils import build_manifest, ensure_run_dir, generate_run_id, save_manifest, update_manifest
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, file_md5, snapshot_time_from_dataframe
 
 
 
@@ -223,6 +224,9 @@ def construir_banco_dados(
             status="xg_completed",
             xg_rows=len(df_final),
             xg_snapshot_file=str(xg_snapshot_path),
+            xg_snapshot_hash=file_md5(xg_snapshot_path) if xg_snapshot_path.exists() else None,
+            xg_asof=snapshot_time_from_dataframe(df_final),
+            temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
             xg_target_leagues=list(mapa_footystats.keys()),
         )
     else:

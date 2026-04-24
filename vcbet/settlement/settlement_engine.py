@@ -81,6 +81,13 @@ def _safe_int(value):
         return None
 
 
+def _first_present(*values, default=None):
+    for value in values:
+        if not _is_missing(value):
+            return value
+    return default
+
+
 def settle_total_like(side: str, line: float, value: int) -> str:
     frac = round(abs(line) % 1, 2)
     if frac == 0.5:
@@ -369,11 +376,16 @@ def apply_overrides_file(ledger_df: pd.DataFrame, overrides_file: str | Path) ->
 def resolve_final_fields(ledger_df: pd.DataFrame) -> pd.DataFrame:
     updated = _prepare_ledger_dtypes(ledger_df)
     for idx, row in updated.iterrows():
-        final_home_goals = row.get("manual_home_goals") if not _is_missing(row.get("manual_home_goals")) else row.get("auto_home_goals")
-        final_away_goals = row.get("manual_away_goals") if not _is_missing(row.get("manual_away_goals")) else row.get("auto_away_goals")
-        final_bet_status = row.get("manual_bet_status") if not _is_missing(row.get("manual_bet_status")) else row.get("auto_bet_status", "open")
-        final_settlement_status = row.get("manual_settlement_status") if not _is_missing(row.get("manual_settlement_status")) else row.get("auto_settlement_status", "pending")
-        final_odd_fechamento = row.get("manual_odd_fechamento") if not _is_missing(row.get("manual_odd_fechamento")) else row.get("auto_odd_fechamento")
+        final_home_goals = _first_present(row.get("manual_home_goals"), row.get("auto_home_goals"))
+        final_away_goals = _first_present(row.get("manual_away_goals"), row.get("auto_away_goals"))
+        final_bet_status = _first_present(row.get("manual_bet_status"), row.get("auto_bet_status"), row.get("final_bet_status"), default="open")
+        final_settlement_status = _first_present(
+            row.get("manual_settlement_status"),
+            row.get("auto_settlement_status"),
+            row.get("final_settlement_status"),
+            default="pending",
+        )
+        final_odd_fechamento = _first_present(row.get("manual_odd_fechamento"), row.get("auto_odd_fechamento"), row.get("final_odd_fechamento"))
 
         home_goals = _safe_int(final_home_goals)
         away_goals = _safe_int(final_away_goals)

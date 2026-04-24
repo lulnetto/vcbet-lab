@@ -7,15 +7,21 @@ from pathlib import Path
 import pandas as pd
 
 from vcbet.core.config_ligas import obter_nomes_ligas_ativas
-from vcbet.core.correlation_rules import select_top_picks
+from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
+from vcbet.core.line_selector import select_top_picks
 from vcbet.core.market_normalizer import normalize_odds_dataframe
-from vcbet.core.pick_filter import evaluate_pick_candidate_with_meta
 from vcbet.core.pick_features import build_candidate_row
-from vcbet.core.pricing_engine import calculate_lambdas, expected_value_decimal, fair_odd_from_probs, price_market_selection
+from vcbet.core.pricing_engine import calculate_lambdas, price_market_selection
 from vcbet.core.run_utils import ensure_run_dir, now_str, save_quality_report, update_manifest
 from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, append_new_picks_to_ledger
 from vcbet.core.strategy_config import configure_runtime, get_runtime_config, save_runtime_snapshot
 from vcbet.core.team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
+from vcbet.core.temporal_contract import (
+    TEMPORAL_CONTRACT_VERSION,
+    file_md5,
+    snapshot_time_from_dataframe,
+    temporal_contract_status,
+)
 
 
 HIGH_MATCH_THRESHOLD = 90
@@ -27,6 +33,8 @@ SUPPORTED_MARKETS = {
     "asian_total",
     "asian_handicap",
 }
+SIGNAL_VERSION = "ev_pipeline_v1"
+PIPELINE_VERSION = "pipeline_ev_phase3_provenance"
 
 
 def carregar_snapshot_odds(odds_file: str | Path) -> pd.DataFrame:
@@ -59,7 +67,9 @@ def carregar_snapshot_odds(odds_file: str | Path) -> pd.DataFrame:
             df_betano["home_team"] = split_cols[0].fillna("").str.strip()
             df_betano["away_team"] = split_cols[1].fillna("").str.strip() if split_cols.shape[1] > 1 else ""
 
-    if "normalized_status" not in df_betano.columns:
+    if {"market_raw", "selection_raw", "home_team", "away_team"}.issubset(df_betano.columns):
+        df_betano = normalize_odds_dataframe(df_betano)
+    elif "normalized_status" not in df_betano.columns:
         df_betano = normalize_odds_dataframe(df_betano)
 
     return df_betano
@@ -124,6 +134,10 @@ def processar_pipeline(
     alias_pending_file = run_dir / "alias_review_pending.csv"
     picks_file = run_dir / "picks_snapshot.csv"
     config_snapshot_file = save_runtime_snapshot(run_dir)
+    odds_snapshot_hash = file_md5(odds_path)
+    xg_snapshot_hash = file_md5(xg_path)
+    odds_snapshot_time = snapshot_time_from_dataframe(df_betano)
+    xg_asof = snapshot_time_from_dataframe(df_xg)
 
     print(f"[0] Configuração ativa: {runtime_config.label} ({runtime_config.fingerprint})")
     print(f"    source: {runtime_config.source_path or 'default_embutida'}")
@@ -172,8 +186,15 @@ def processar_pipeline(
     pending_seen = set()
     status_counts = {key: 0 for key in ["auto_exact", "auto_fuzzy_high", "manual_approved", "pending_review", "blocked"]}
     generated_at = now_str()
+    temporal_status = temporal_contract_status(
+        decision_timestamp=generated_at,
+        odds_snapshot_time=odds_snapshot_time,
+        xg_asof=xg_asof,
+    )
 
     processing_discard_counts = Counter()
+    raw_candidate_rows: list[dict] = []
+    blocked_candidate_rows: list[dict] = []
     candidate_rows: list[dict] = []
     priced_market_counts = Counter()
     approved_market_counts = Counter()
@@ -253,12 +274,15 @@ def processar_pipeline(
             home_xg_row=home_xg_row,
             away_xg_row=away_xg_row,
         )
-        evaluated, reject_reason = evaluate_pick_candidate_with_meta(candidate)
+        raw_candidate_rows.append({**candidate, "candidate_stage": "raw_candidate"})
+        evaluated, reject_reason, rejected_payload = evaluate_pick_candidate_with_details(candidate)
         if evaluated:
             candidate_rows.append(evaluated)
             approved_market_counts[linha["market_type"]] += 1
         else:
             processing_discard_counts[f"pick_filter_{reject_reason or 'rejected'}"] += 1
+            if rejected_payload:
+                blocked_candidate_rows.append(rejected_payload)
 
     write_pending_aliases(pending_rows, alias_pending_file)
 
@@ -281,18 +305,62 @@ def processar_pipeline(
     print(f" -> Fila manual de aliases: {alias_pending_file}")
 
     df_candidates = pd.DataFrame(candidate_rows)
+    df_raw_candidates = pd.DataFrame(raw_candidate_rows)
+    df_blocked_candidates = pd.DataFrame(blocked_candidate_rows)
     pick_filter_approved_file = run_dir / "pick_filter_approved.csv"
+    raw_candidates_file = run_dir / "raw_candidates.csv"
+    blocked_candidates_file = run_dir / "blocked_candidates.csv"
     portfolio_rejected_file = run_dir / "portfolio_rejected.csv"
     if not df_candidates.empty:
         df_final, df_portfolio_rejected = select_top_picks(df_candidates, return_meta=True)
     else:
         df_final = pd.DataFrame()
         df_portfolio_rejected = pd.DataFrame()
+    if not df_final.empty:
+        df_final = df_final.copy()
+        df_final["candidate_stage"] = "official_accepted_pick"
+        df_final["pick_safety_status"] = "safe"
+        df_final["decision_timestamp"] = generated_at
+        df_final["config_name"] = runtime_config.name
+        df_final["config_fingerprint"] = runtime_config.fingerprint
+        df_final["config_source_path"] = runtime_config.source_path or ""
+        df_final["config_snapshot_file"] = str(config_snapshot_file)
+        df_final["source_run_id"] = run_id
+        df_final["source_snapshot_ref"] = f"odds:{odds_path}|xg:{xg_path}"
+        df_final["odds_snapshot_file"] = str(odds_path)
+        df_final["xg_snapshot_file"] = str(xg_path)
+        df_final["odds_snapshot_hash"] = odds_snapshot_hash
+        df_final["xg_snapshot_hash"] = xg_snapshot_hash
+        df_final["odds_snapshot_time"] = odds_snapshot_time or ""
+        df_final["xg_asof"] = xg_asof or ""
+        df_final["temporal_contract_version"] = TEMPORAL_CONTRACT_VERSION
+        df_final["temporal_contract_status"] = temporal_status
+        df_final["signal_version"] = SIGNAL_VERSION
+        df_final["pipeline_version"] = PIPELINE_VERSION
+
+    safety_gate_blocked_total = int((df_blocked_candidates.get("pick_safety_status", pd.Series(dtype=object)) == "blocked").sum()) if not df_blocked_candidates.empty else 0
+    official_unsafe_total = int((df_final.get("pick_safety_status", pd.Series(dtype=object)) != "safe").sum()) if not df_final.empty else 0
+    if official_unsafe_total:
+        run_safety_status = "unsafe_official_picks"
+    elif safety_gate_blocked_total:
+        run_safety_status = "safe_with_blocked_candidates"
+    else:
+        run_safety_status = "safe"
+
+    if not df_raw_candidates.empty:
+        df_raw_candidates.to_csv(raw_candidates_file, index=False, sep=";", encoding="utf-8-sig")
+    if not df_candidates.empty:
+        df_candidates.to_csv(pick_filter_approved_file, index=False, sep=";", encoding="utf-8-sig")
+    if not df_blocked_candidates.empty:
+        df_blocked_candidates.to_csv(blocked_candidates_file, index=False, sep=";", encoding="utf-8-sig")
+    if not df_portfolio_rejected.empty:
+        df_portfolio_rejected.to_csv(portfolio_rejected_file, index=False, sep=";", encoding="utf-8-sig")
 
     print(
         "[4] Pricing/Filtro: "
         f"{sum(priced_market_counts.values())} linhas precificadas | "
         f"{len(df_candidates)} aprovadas no filtro de pick | "
+        f"{safety_gate_blocked_total} bloqueadas por safety gate | "
         f"{len(df_final)} picks finais"
     )
     print(" -> Descartes por motivo:", ", ".join(f"{k}={v}" for k, v in sorted(processing_discard_counts.items())) or "nenhum")
@@ -336,6 +404,23 @@ def processar_pipeline(
             "source_path": runtime_config.source_path,
             "snapshot_file": str(config_snapshot_file),
         },
+        "provenance": {
+            "decision_timestamp": generated_at,
+            "source_run_id": run_id,
+            "source_snapshot_ref": f"odds:{odds_path}|xg:{xg_path}",
+            "odds_source_run_id": odds_run_id or run_id,
+            "xg_source_run_id": xg_run_id or run_id,
+            "odds_snapshot_file": str(odds_path),
+            "xg_snapshot_file": str(xg_path),
+            "odds_snapshot_hash": odds_snapshot_hash,
+            "xg_snapshot_hash": xg_snapshot_hash,
+            "odds_snapshot_time": odds_snapshot_time,
+            "xg_asof": xg_asof,
+            "temporal_contract_version": TEMPORAL_CONTRACT_VERSION,
+            "temporal_contract_status": temporal_status,
+            "signal_version": SIGNAL_VERSION,
+            "pipeline_version": PIPELINE_VERSION,
+        },
         "source_files": {
             "odds_file": str(odds_path),
             "xg_file": str(xg_path),
@@ -364,13 +449,24 @@ def processar_pipeline(
             "unique_alias_rows_by_league": to_sorted_dict(unique_pending_by_league),
         },
         "processing": {
+            "raw_candidates_total": int(len(df_raw_candidates)),
             "priced_candidates_total": int(sum(priced_market_counts.values())),
             "priced_candidates_by_market_type": to_sorted_dict(priced_market_counts),
             "pick_filter_approved_total": int(len(df_candidates)),
             "pick_filter_approved_by_market_type": to_sorted_dict(approved_market_counts),
+            "blocked_candidates_total": int(len(df_blocked_candidates)),
+            "blocked_candidates_by_reason": to_sorted_dict(Counter(df_blocked_candidates.get("safety_reject_reason", pd.Series(dtype=object)).fillna("missing"))) if not df_blocked_candidates.empty else {},
+            "safety_gate_blocked_total": safety_gate_blocked_total,
+            "safety_gate_blocked_by_flag": to_sorted_dict(Counter("|".join(df_blocked_candidates.get("safety_gate_reason", pd.Series(dtype=object)).fillna("")).split("|"))) if not df_blocked_candidates.empty else {},
             "portfolio_rejected_total": int(len(df_portfolio_rejected)),
             "portfolio_rejected_by_reason": to_sorted_dict(Counter(df_portfolio_rejected.get("portfolio_reject_reason", pd.Series(dtype=object)).fillna("missing"))) if not df_portfolio_rejected.empty else {},
             "discard_reason_counts": to_sorted_dict(processing_discard_counts),
+        },
+        "safety": {
+            "run_safety_status": run_safety_status,
+            "official_unsafe_total": official_unsafe_total,
+            "safety_gate_blocked_total": safety_gate_blocked_total,
+            "blocked_candidates_file": str(blocked_candidates_file) if not df_blocked_candidates.empty else None,
         },
         "outputs": {
             "final_picks_total": int(len(df_final)),
@@ -378,6 +474,8 @@ def processar_pipeline(
             "final_picks_by_league": to_sorted_dict(final_picks_by_league),
             "final_picks_by_confidence": to_sorted_dict(final_picks_by_confidence),
             "alias_pending_file": str(alias_pending_file),
+            "raw_candidates_file": str(raw_candidates_file),
+            "blocked_candidates_file": str(blocked_candidates_file),
             "pick_filter_approved_file": str(pick_filter_approved_file),
             "portfolio_rejected_file": str(portfolio_rejected_file),
             "picks_file": str(picks_file),
@@ -392,7 +490,16 @@ def processar_pipeline(
                 "match_name", "market_type", "market_scope", "market_raw", "event_url", "selection_raw",
                 "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
                 "prob_model", "ev_percent", "confidence_score", "stake_units", "entry_reason",
-                "risk_flags", "strategy_config_name", "strategy_config_fingerprint", "odds_source_run_id", "xg_source_run_id", "correlation_level", "coexistence_status",
+                "risk_flags", "pick_safety_status", "candidate_stage", "safety_gate_reason",
+                "decision_policy_status", "decision_reject_reason", "selection_policy_status",
+                "portfolio_risk_status", "portfolio_risk_reason", "portfolio_exposure_scope",
+                "portfolio_exposure_after", "market_family",
+                "strategy_config_name", "strategy_config_fingerprint", "config_name", "config_fingerprint",
+                "config_source_path", "config_snapshot_file", "source_run_id", "source_snapshot_ref",
+                "odds_source_run_id", "xg_source_run_id", "odds_snapshot_file", "xg_snapshot_file",
+                "odds_snapshot_hash", "xg_snapshot_hash", "odds_snapshot_time", "xg_asof",
+                "temporal_contract_version", "temporal_contract_status", "decision_timestamp", "signal_version",
+                "pipeline_version", "correlation_level", "coexistence_status",
             ]
             df_final[export_cols].to_csv(picks_file, index=False, sep=";", encoding="utf-8-sig")
             ledger_path, ledger_added_rows, ledger_total_rows = append_new_picks_to_ledger(df_final[export_cols], ledger_file)
@@ -411,9 +518,25 @@ def processar_pipeline(
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
                 quality_report_file=str(quality_report_file),
+                run_safety_status=run_safety_status,
+                safety_gate_blocked_total=safety_gate_blocked_total,
                 strategy_config_name=runtime_config.name,
                 strategy_config_fingerprint=runtime_config.fingerprint,
                 strategy_config_file=str(config_snapshot_file),
+                config_name=runtime_config.name,
+                config_fingerprint=runtime_config.fingerprint,
+                config_source_path=runtime_config.source_path,
+                config_snapshot_file=str(config_snapshot_file),
+                source_run_id=run_id,
+                source_snapshot_ref=f"odds:{odds_path}|xg:{xg_path}",
+                odds_snapshot_hash=odds_snapshot_hash,
+                xg_snapshot_hash=xg_snapshot_hash,
+                odds_snapshot_time=odds_snapshot_time,
+                xg_asof=xg_asof,
+                temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
+                temporal_contract_status=temporal_status,
+                signal_version=SIGNAL_VERSION,
+                pipeline_version=PIPELINE_VERSION,
             )
         else:
             print("\n[!] MODO DEBUG: execução concluída sem salvar picks.")
@@ -426,9 +549,25 @@ def processar_pipeline(
                 alias_pending_rows=len(pending_rows),
                 team_match_status_counts=status_counts,
                 quality_report_file=str(quality_report_file),
+                run_safety_status=run_safety_status,
+                safety_gate_blocked_total=safety_gate_blocked_total,
                 strategy_config_name=runtime_config.name,
                 strategy_config_fingerprint=runtime_config.fingerprint,
                 strategy_config_file=str(config_snapshot_file),
+                config_name=runtime_config.name,
+                config_fingerprint=runtime_config.fingerprint,
+                config_source_path=runtime_config.source_path,
+                config_snapshot_file=str(config_snapshot_file),
+                source_run_id=run_id,
+                source_snapshot_ref=f"odds:{odds_path}|xg:{xg_path}",
+                odds_snapshot_hash=odds_snapshot_hash,
+                xg_snapshot_hash=xg_snapshot_hash,
+                odds_snapshot_time=odds_snapshot_time,
+                xg_asof=xg_asof,
+                temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
+                temporal_contract_status=temporal_status,
+                signal_version=SIGNAL_VERSION,
+                pipeline_version=PIPELINE_VERSION,
             )
     else:
         print(f"[+] Quality report salvo: {quality_report_file}")
@@ -440,9 +579,25 @@ def processar_pipeline(
             alias_pending_rows=len(pending_rows),
             team_match_status_counts=status_counts,
             quality_report_file=str(quality_report_file),
+            run_safety_status=run_safety_status,
+            safety_gate_blocked_total=safety_gate_blocked_total,
             strategy_config_name=runtime_config.name,
             strategy_config_fingerprint=runtime_config.fingerprint,
             strategy_config_file=str(config_snapshot_file),
+            config_name=runtime_config.name,
+            config_fingerprint=runtime_config.fingerprint,
+            config_source_path=runtime_config.source_path,
+            config_snapshot_file=str(config_snapshot_file),
+            source_run_id=run_id,
+            source_snapshot_ref=f"odds:{odds_path}|xg:{xg_path}",
+            odds_snapshot_hash=odds_snapshot_hash,
+            xg_snapshot_hash=xg_snapshot_hash,
+            odds_snapshot_time=odds_snapshot_time,
+            xg_asof=xg_asof,
+            temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
+            temporal_contract_status=temporal_status,
+            signal_version=SIGNAL_VERSION,
+            pipeline_version=PIPELINE_VERSION,
         )
 
 
