@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import uvicorn
 
-from ubet_service.api import app
-from ubet_service.settings import ServiceSettings
+from vcbet.service.api import app
+from vcbet.service.settings import ServiceSettings
 
 
 if __name__ == "__main__":

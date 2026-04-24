@@ -196,7 +196,7 @@ if [[ "$MODE" == "legacy" ]]; then
     PIPELINE_ARGS+=(--debug)
   fi
 
-  "$PYTHON_BIN" pipeline_ev.py "${PIPELINE_ARGS[@]}"
+  "$PYTHON_BIN" -m vcbet.core.pipeline_ev "${PIPELINE_ARGS[@]}"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "[DRY-RUN] Execução concluída sem persistir artefatos em $ORIGINAL_OUTPUT_DIR ou $ORIGINAL_LEDGER_FILE."
@@ -231,7 +231,7 @@ if [[ "$DEBUG" -eq 1 ]]; then
   ODDS_ARGS+=(--debug)
 fi
 
-"$PYTHON_BIN" 2odds_c.py "${ODDS_ARGS[@]}"
+"$PYTHON_BIN" -m vcbet.collectors.odds_collector "${ODDS_ARGS[@]}"
 
 if [[ ! -f "$ODDS_SNAPSHOT" ]]; then
   echo "[ERRO] odds_snapshot.csv não foi gerado. Abortando a etapa de xG e pipeline." >&2
@@ -261,14 +261,14 @@ if [[ "$DEBUG" -eq 1 ]]; then
   PIPELINE_ARGS+=(--debug)
 fi
 
-"$PYTHON_BIN" fs_xg.py "${XG_ARGS[@]}"
+"$PYTHON_BIN" -m vcbet.collectors.footystats_xg_collector "${XG_ARGS[@]}"
 
 if [[ ! -f "$XG_SNAPSHOT" ]]; then
   echo "[ERRO] xg_snapshot.csv não foi gerado. Abortando o pipeline." >&2
   exit 1
 fi
 
-"$PYTHON_BIN" pipeline_ev.py "${PIPELINE_ARGS[@]}"
+"$PYTHON_BIN" -m vcbet.core.pipeline_ev "${PIPELINE_ARGS[@]}"
 
 echo "[OK] Execução concluída."
 if [[ "$DRY_RUN" -eq 1 ]]; then
