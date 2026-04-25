@@ -17,9 +17,26 @@ function operationalDate() {
   return document.getElementById('analysisDate')?.value || document.getElementById('dailyDate')?.value || state.selectedDate || todayIsoDate();
 }
 
+function registryPendingCount() {
+  return (state.teamRegistry?.pending || []).filter(item =>
+    String(item.status || 'pending_review') === 'pending_review'
+  ).length;
+}
+
+function legacyAliasDiagnosticCount() {
+  return state.aliasFiles.reduce((sum, item) => (
+    sum + Number(item.status_counts?.pending_review || 0)
+  ), 0);
+}
+
+function legacyAliasBlockedCount() {
+  return state.aliasFiles.reduce((sum, item) => (
+    sum + Number(item.status_counts?.blocked || 0)
+  ), 0);
+}
+
 function aliasPendingCount() {
-  const runDiagnostics = state.aliasFiles.reduce((sum, item) => sum + Number(item.status_counts?.pending_review || 0) + Number(item.status_counts?.blocked || 0), 0);
-  return runDiagnostics + Number(state.teamRegistry?.pending?.length || 0);
+  return registryPendingCount();
 }
 
 function hasRunForOperationalDate() {
@@ -57,6 +74,8 @@ function renderTodayCockpit() {
   const running = state.jobs.some(job => ['queued','running'].includes(job.status));
   const failedJobs = state.jobs.filter(job => ['failed','error'].includes(job.status)).length;
   const aliases = aliasPendingCount();
+  const legacyAliases = legacyAliasDiagnosticCount();
+  const legacyBlockedAliases = legacyAliasBlockedCount();
   const total = Number(summary.total_entries || 0);
   const open = Number(summary.open_entries || 0);
   const settled = Number(summary.settled_entries || 0);
@@ -64,6 +83,9 @@ function renderTodayCockpit() {
   const incompleteReplay = state.replaySummaries.some(item => ['incomplete','blocked','bad'].some(x => String(item.replay_quality_status || item.temporal_contract_status || '').toLowerCase().includes(x)));
   const warningItems = [];
   if (aliases) warningItems.push(`${aliases} alias(es) pendente(s) em Qualidade de Dados.`);
+  if (!aliases && (legacyAliases || legacyBlockedAliases)) {
+  warningItems.push(`${legacyAliases + legacyBlockedAliases} diagnóstico(s) legado(s) de alias em runs/replays. Registry está sem pendências.`);
+  }
   if (failedJobs) warningItems.push(`${failedJobs} job(s) com erro no Monitor.`);
   if (state.loadErrors.dashboard) warningItems.push('Carteira não verificada nesta carga.');
   if (state.loadErrors.replay) warningItems.push('Replay Lab não verificado nesta carga.');
@@ -84,7 +106,8 @@ function renderTodayCockpit() {
   ].join('');
 
   const pendingRows = [
-    ['Aliases pendentes', state.loadErrors.aliases ? 'não verificado' : String(aliases)],
+    ['Aliases no registry', state.loadErrors.teamRegistry ? 'não verificado' : String(aliases)],
+    ['Diagnósticos legados', state.loadErrors.aliases ? 'não verificado' : String(legacyAliases + legacyBlockedAliases)],
     ['Jobs com erro', state.loadErrors.jobs ? 'não verificado' : String(failedJobs)],
     ['Picks abertas', state.loadErrors.dashboard ? 'não verificado' : String(open)],
     ['Resultados pendentes', state.loadErrors.dashboard ? 'não verificado' : (open ? String(open) : '0')],
@@ -607,7 +630,7 @@ async function syncAllTeamRegistryLeagues() {
     if (statusEl) statusEl.textContent = JSON.stringify({
       status: result.status,
       total: result.total,
-      failed: failed.map(item => ({league: item.league, coverage_status: item.coverage_status, error: item.error || ''})),
+      failed: failed.map(item => ({league: item.league, coverage_status: item.coverage_status, debug_reason: item.debug_reason || item.error || '', debug_artifact: item.debug_artifact || ''})),
       items: result.items,
     }, null, 2);
   } catch (err) {
@@ -664,21 +687,59 @@ function registryPayloadAt(index, useEdited = false) {
   };
 }
 
+function removeRegistryPendingAt(index) {
+  if (!Array.isArray(state.teamRegistry.pending)) return;
+  state.teamRegistry.pending.splice(index, 1);
+  renderTeamRegistryReview();
+
+  const summaryEl = document.getElementById('teamRegistrySummary');
+  if (summaryEl) summaryEl.innerHTML = renderTeamRegistrySummary(state.teamRegistry);
+
+  const statusEl = document.getElementById('teamRegistryStatus');
+  if (statusEl) {
+    statusEl.textContent = JSON.stringify({
+      pending_total: state.teamRegistry.pending.length,
+      approved_total: state.teamRegistry.approved.length,
+      last_action: 'registry_row_resolved',
+      last_sync: state.teamRegistry.syncResult,
+    }, null, 2);
+  }
+}
+
+function preserveScroll(fn) {
+  const y = window.scrollY;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => window.scrollTo(0, y));
+}
+
 async function approveRegistrySuggestion(index) {
   const payload = registryPayloadAt(index, false);
   if (!payload || !payload.footystats_name) return;
-  addManualOverrideIfNeeded(payload, index);
-  await approveTeamRegistryAlias(payload);
-  await loadTeamRegistry(true);
+
+  try {
+    addManualOverrideIfNeeded(payload, index);
+    await approveTeamRegistryAlias(payload);
+    removeRegistryPendingAt(index);
+  } catch (err) {
+    const statusEl = document.getElementById('teamRegistryStatus');
+    if (statusEl) statusEl.textContent = `Erro ao aprovar alias: ${err.message}`;
+  }
 }
 
 async function approveRegistryEdited(index) {
   const payload = registryPayloadAt(index, true);
   if (!payload || !payload.footystats_name) return;
-  addManualOverrideIfNeeded(payload, index);
-  await updateTeamRegistryAlias({...payload, suggested_footystats_name: payload.footystats_name});
-  await approveTeamRegistryAlias(payload);
-  await loadTeamRegistry(true);
+
+  try {
+    addManualOverrideIfNeeded(payload, index);
+    await updateTeamRegistryAlias({...payload, suggested_footystats_name: payload.footystats_name});
+    await approveTeamRegistryAlias(payload);
+    removeRegistryPendingAt(index);
+  } catch (err) {
+    const statusEl = document.getElementById('teamRegistryStatus');
+    if (statusEl) statusEl.textContent = `Erro ao editar/aprovar alias: ${err.message}`;
+  }
 }
 
 function addManualOverrideIfNeeded(payload, index) {
@@ -693,8 +754,14 @@ function addManualOverrideIfNeeded(payload, index) {
 async function rejectRegistryAlias(index) {
   const payload = registryPayloadAt(index, true);
   if (!payload) return;
-  await rejectTeamRegistryAlias({...payload, status: 'rejected'});
-  await loadTeamRegistry(true);
+
+  try {
+    await rejectTeamRegistryAlias({...payload, status: 'rejected'});
+    removeRegistryPendingAt(index);
+  } catch (err) {
+    const statusEl = document.getElementById('teamRegistryStatus');
+    if (statusEl) statusEl.textContent = `Erro ao rejeitar alias: ${err.message}`;
+  }
 }
 
 async function loadAliasFiles(forceReload = false) {

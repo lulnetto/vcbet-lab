@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,25 @@ from vcbet.service.team_registry_api import (
     reject_registry_alias,
     sync_registry_league,
 )
+from scripts.sync_team_aliases import PhaseDiscoveryError, validate_phase_candidate, write_debug_artifact
+
+
+def phase_payload(names: list[str]) -> dict:
+    return {
+        "data": {
+            "id": 4935355,
+            "title": "Bundesliga 2025/26",
+            "groups": [{
+                "teams": [
+                    {
+                        "information": {"name": name, "teamId": str(100000 + idx), "rank": idx + 1},
+                        "teamPageUrl": f"/sport/futebol/competicoes/alemanha/216/team-{idx}/{100000 + idx}-t/",
+                    }
+                    for idx, name in enumerate(names)
+                ]
+            }],
+        }
+    }
 
 
 class TeamRegistryApiTest(unittest.TestCase):
@@ -126,26 +146,95 @@ class TeamRegistryApiTest(unittest.TestCase):
             xg_dir = root / "data" / "runs" / "2026-04-25" / "fixture"
             xg_dir.mkdir(parents=True)
             (xg_dir / "xg_snapshot.csv").write_text(
-                "league;team_name;xg;xga\nBundesliga;Real City FC;1.2;1.1\nBundesliga;Real City B;1.0;1.3\n",
+                "league;team_name;xg;xga\nChampionship;Oxford United FC;1.2;1.1\n",
                 encoding="utf-8",
             )
             html = root / "betano.html"
             html.write_text(
                 """
                 <tr data-qa="standings_team_0">
-                  <td><a href="https://www.betano.bet.br/sport/futebol/competicoes/alemanha/216/real-city/99-t/">Real City</a></td>
+                  <td><a href="https://www.betano.bet.br/sport/futebol/competicoes/inglaterra/2/oxford-utd/106401-t/">Oxford Utd</a></td>
                 </tr>
                 """,
                 encoding="utf-8",
             )
 
-            result = sync_registry_league(root, {"league": "Bundesliga", "source": "saved_html", "html_path": str(html)})
+            result = sync_registry_league(root, {"league": "Championship", "source": "saved_html", "html_path": str(html)})
             pending = load_pending_registry_reviews(root)
 
             self.assertEqual(result["status"], "ok")
             self.assertEqual(result["betano_total"], 1)
             self.assertEqual(result["review_count"], 1)
             self.assertEqual(pending["total"], 1)
+            self.assertEqual(pending["items"][0]["betano_name"], "Oxford Utd")
+            self.assertEqual(pending["items"][0]["suggested_footystats_name"], "Oxford United FC")
+
+    def test_cached_phase_id_is_reused_for_api_sync(self) -> None:
+        from scripts import sync_team_aliases
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            xg_dir = root / "data" / "runs" / "2026-04-25" / "fixture"
+            xg_dir.mkdir(parents=True)
+            (xg_dir / "xg_snapshot.csv").write_text(
+                "league;team_name;xg;xga\nBundesliga;Mainz 05;1.2;1.1\n",
+                encoding="utf-8",
+            )
+            cache = root / "data" / "team_registry" / "betano_phase_cache.json"
+            cache.parent.mkdir(parents=True)
+            cache.write_text(json.dumps({
+                "Bundesliga": {
+                    "league_id": "216",
+                    "sport_id": "1",
+                    "g_league_ids": "216",
+                    "phase_id": "4935355",
+                    "api_url": "https://www.betano.bet.br/api/league/phaseStandings/?sportId=1&leagueId=216&gLeagueIds=216&phaseId=4935355",
+                }
+            }), encoding="utf-8")
+            original_fetch = sync_team_aliases.fetch_json
+            original_discover = sync_team_aliases.discover_phase_with_playwright
+            called = {"discover": 0}
+
+            def fake_fetch(url: str) -> dict:
+                return phase_payload(["Mainz 05"])
+
+            def fake_discover(*args, **kwargs):
+                called["discover"] += 1
+                raise AssertionError("cache should be used")
+
+            sync_team_aliases.fetch_json = fake_fetch
+            sync_team_aliases.discover_phase_with_playwright = fake_discover
+            try:
+                result = sync_registry_league(root, {"league": "Bundesliga"})
+            finally:
+                sync_team_aliases.fetch_json = original_fetch
+                sync_team_aliases.discover_phase_with_playwright = original_discover
+
+            self.assertEqual(result["phase_id"], "4935355")
+            self.assertEqual(called["discover"], 0)
+
+    def test_candidate_phase_id_is_validated_with_mocked_api(self) -> None:
+        result = validate_phase_candidate(
+            {"sportId": "1", "leagueId": "216", "gLeagueIds": "216", "phaseId": "4935355"},
+            "Bundesliga",
+            lambda url: phase_payload(["Mainz 05"]),
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["phase_id"], "4935355")
+        self.assertEqual(result["team_count"], 1)
+
+    def test_debug_artifact_structure_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rel = write_debug_artifact(Path(tmp), "Bundesliga", {
+                "opened_url": "https://example.test",
+                "captured_requests": [{"url": "https://www.betano.bet.br/api/test"}],
+                "failure_reason": "no_api_candidates",
+            })
+            payload = json.loads((Path(tmp) / rel).read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["failure_reason"], "no_api_candidates")
+            self.assertIn("captured_requests", payload)
 
     def test_invalid_page_text_alias_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -228,6 +317,84 @@ class TeamRegistryApiTest(unittest.TestCase):
             self.assertEqual(result["status"], "blocked")
             self.assertEqual(result["coverage_status"], "failed_partial_coverage")
             self.assertFalse((root / "configs" / "team_registry" / "betano_footystats_aliases.csv").exists())
+
+    def test_empty_api_response_blocks_writes(self) -> None:
+        from scripts import sync_team_aliases
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            xg_dir = root / "data" / "runs" / "2026-04-25" / "fixture"
+            xg_dir.mkdir(parents=True)
+            (xg_dir / "xg_snapshot.csv").write_text("league;team_name;xg;xga\nBundesliga;Mainz 05;1.2;1.1\n", encoding="utf-8")
+            original_fetch = sync_team_aliases.fetch_json
+            original_discover = sync_team_aliases.discover_phase_with_playwright
+            sync_team_aliases.fetch_json = lambda url: {"data": {"id": 4935355, "title": "empty", "groups": []}}
+            sync_team_aliases.discover_phase_with_playwright = lambda league, url: {
+                "league": league,
+                "league_id": "216",
+                "sport_id": "1",
+                "g_league_ids": "216",
+                "phase_id": "4935355",
+                "api_url": "https://www.betano.bet.br/api/league/phaseStandings/?sportId=1&leagueId=216&gLeagueIds=216&phaseId=4935355",
+            }
+            try:
+                result = sync_registry_league(root, {"league": "Bundesliga"})
+            finally:
+                sync_team_aliases.fetch_json = original_fetch
+                sync_team_aliases.discover_phase_with_playwright = original_discover
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["coverage_status"], "phase_standings_not_found")
+            self.assertFalse((root / "configs" / "team_registry" / "betano_footystats_aliases.csv").exists())
+
+    def test_failed_discovery_returns_blocked_with_debug_reason(self) -> None:
+        from scripts import sync_team_aliases
+
+        original_discover = sync_team_aliases.discover_phase_with_playwright
+        sync_team_aliases.discover_phase_with_playwright = lambda *args, **kwargs: (_ for _ in ()).throw(
+            PhaseDiscoveryError("no_api_candidates", "data/team_registry/debug/example.json")
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                xg_dir = root / "data" / "runs" / "2026-04-25" / "fixture"
+                xg_dir.mkdir(parents=True)
+                (xg_dir / "xg_snapshot.csv").write_text("league;team_name;xg;xga\nBundesliga;Mainz 05;1.0;1.0\n", encoding="utf-8")
+                result = sync_registry_league(root, {"league": "Bundesliga"})
+        finally:
+            sync_team_aliases.discover_phase_with_playwright = original_discover
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["debug_artifact"], "data/team_registry/debug/example.json")
+        self.assertEqual(result["debug_reason"], "no_api_candidates")
+
+    def test_rendered_dom_fallback_can_sync_when_api_not_captured(self) -> None:
+        from scripts import sync_team_aliases
+
+        original_discover = sync_team_aliases.discover_phase_with_playwright
+        sync_team_aliases.discover_phase_with_playwright = lambda *args, **kwargs: {
+            "source_mode": "rendered_dom",
+            "source_url": "https://example.test?bt=standings",
+            "phase_title": "rendered_dom_fallback",
+            "teams": [{
+                "league": "Bundesliga",
+                "name": "Mainz 05",
+                "betano_team_id": "106861",
+                "betano_url": "https://www.betano.bet.br/sport/futebol/competicoes/alemanha/216/mainz-05/106861-t/",
+            }],
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                xg_dir = root / "data" / "runs" / "2026-04-25" / "fixture"
+                xg_dir.mkdir(parents=True)
+                (xg_dir / "xg_snapshot.csv").write_text("league;team_name;xg;xga\nBundesliga;1. FSV Mainz 05;1.0;1.0\n", encoding="utf-8")
+                result = sync_registry_league(root, {"league": "Bundesliga"})
+        finally:
+            sync_team_aliases.discover_phase_with_playwright = original_discover
+
+        self.assertEqual(result["betano_total"], 1)
+        self.assertEqual(result["coverage_status"], "ok")
 
     def test_sync_all_continues_after_failed_league(self) -> None:
         from vcbet.service import team_registry_api

@@ -46,7 +46,7 @@
   },
   {
     "nome": "Ligue 2",
-    "ativo": true,
+    "ativo": false,
     "chaotic": true,
     "betano_path": "/sport/futebol/league/ligue-2-franca/10467/",
     "footystats_url": "https://footystats.org/france/ligue-2",

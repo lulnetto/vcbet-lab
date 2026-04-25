@@ -405,6 +405,8 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
         dry_run=False,
         threshold=float(payload.get("threshold") or 0.94),
         margin=float(payload.get("margin") or 0.08),
+        force_refresh_phase=bool(payload.get("force_refresh_phase") or False),
+        debug_network=bool(payload.get("debug_network") or False),
         verbose=False,
         debug_output=False,
     )
@@ -420,6 +422,10 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
     return {
         "status": sync_status,
         "league": league,
+        "phase_id": (summary.get("parse_diagnostics") or {}).get("phase_id", ""),
+        "phase_title": (summary.get("parse_diagnostics") or {}).get("phase_title", ""),
+        "debug_artifact": (summary.get("parse_diagnostics") or {}).get("debug_artifact", ""),
+        "debug_reason": (summary.get("parse_diagnostics") or {}).get("error", ""),
         "betano_total": len(summary.get("betano_teams") or []),
         "footystats_total": len(summary.get("footystats_teams") or []),
         "auto_approved": int(summary.get("approved_count") or 0),

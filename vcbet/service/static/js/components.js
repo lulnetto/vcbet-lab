@@ -340,12 +340,21 @@ function parseAmbiguousOptions(value) {
 function renderAmbiguousOptions(value, index = null) {
   const options = parseAmbiguousOptions(value);
   if (!options.length) return '<span class="muted">sem opções</span>';
-  const list = options.slice(0, 5).map(item => `<span class="candidate-chip">${escapeHtml(item.name)}${item.score ? ` <strong>${escapeHtml(item.score)}</strong>` : ''}</span>`).join('');
+
+  const list = options.slice(0, 5).map(item => (
+    `<span class="candidate-chip">${escapeHtml(item.name)}${item.score ? ` <strong>${escapeHtml(item.score)}</strong>` : ''}</span>`
+  )).join('');
+
   if (index === null) return `<div class="candidate-list">${list}</div>`;
+
   const select = `<select class="registry-candidate-select" data-registry-index="${Number(index)}">
-    <option value="">Sugestão atual</option>
-    ${options.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}${item.score ? ` (${escapeHtml(item.score)})` : ''}</option>`).join('')}
+    ${options.map((item, optionIndex) => (
+      `<option value="${escapeHtml(item.name)}" ${optionIndex === 0 ? 'selected' : ''}>
+        ${escapeHtml(item.name)}${item.score ? ` (${escapeHtml(item.score)})` : ''}
+      </option>`
+    )).join('')}
   </select>`;
+
   return `<div class="candidate-list">${list}</div>${select}`;
 }
 

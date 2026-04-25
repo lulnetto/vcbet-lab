@@ -142,6 +142,14 @@ class BetanoParseResult:
     found_standings_rows: bool
 
 
+@dataclass(frozen=True)
+class BetanoPhaseResult:
+    teams: list[BetanoTeam]
+    phase_id: str
+    phase_title: str
+    source_url: str
+
+
 class BetanoStandingsParser(html.parser.HTMLParser):
     def __init__(self, *, league: str, base_url: str = "https://www.betano.bet.br") -> None:
         super().__init__(convert_charrefs=True)
@@ -261,7 +269,10 @@ def _is_betano_team_href(url: str) -> bool:
 
 
 def is_valid_betano_team_identity(name: str, team_id: str, url: str) -> bool:
-    return bool(_looks_like_team_name(name) and str(team_id).isdigit() and _is_betano_team_href(str(url)))
+    if not (_looks_like_team_name(name) and str(team_id).isdigit() and _is_betano_team_href(str(url))):
+        return False
+    url_id = extract_betano_team_id(str(url))
+    return not url_id or url_id == str(team_id)
 
 
 def dedupe_betano_teams(teams: Iterable[BetanoTeam]) -> list[BetanoTeam]:
@@ -365,24 +376,34 @@ def ambiguity_reason(
 ) -> str | None:
     if not ranked:
         return "no_footystats_candidates"
+
     top = ranked[0]
     second_score = ranked[1].score if len(ranked) > 1 else 0.0
+
+    # Match perfeito normalizado é seguro mesmo com token genérico.
+    # Ex: "Bristol City" -> "Bristol City FC" normaliza igual.
+    if top.score >= 0.9999:
+        return None
+
     reasons: list[str] = []
     if top.score < threshold:
         reasons.append("below_threshold")
     if top.score - second_score < margin:
         reasons.append("low_score_gap")
+
     tokens = important_tokens(betano_name)
     generic = sorted(tokens & GENERIC_TOKENS)
     if generic:
         reasons.append(f"generic_tokens:{','.join(generic)}")
+
     shared = [
         item.footystats_name
         for item in ranked[:5]
         if len(tokens & important_tokens(item.footystats_name)) >= max(1, min(2, len(tokens)))
     ]
-    if len(shared) > 1 and top.score < 1.0:
+    if len(shared) > 1:
         reasons.append("multiple_shared_tokens")
+
     return "|".join(reasons) if reasons else None
 
 
@@ -462,6 +483,41 @@ def parse_betano_standings_html_with_diagnostics(
     )
 
 
+def parse_betano_phase_standings_json(
+    payload: dict,
+    *,
+    league: str,
+    source_url: str = "",
+    base_url: str = "https://www.betano.bet.br",
+) -> BetanoPhaseResult:
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    teams: list[BetanoTeam] = []
+    for group in data.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        for row in group.get("teams") or []:
+            if not isinstance(row, dict):
+                continue
+            info = row.get("information") or {}
+            if not isinstance(info, dict):
+                continue
+            name = " ".join(str(info.get("name") or "").split()).strip()
+            team_id = str(info.get("teamId") or "").strip()
+            page_url = str(row.get("teamPageUrl") or "").strip()
+            if not name or not team_id or not page_url:
+                continue
+            url = urljoin(base_url, page_url)
+            teams.append(BetanoTeam(league=league, name=name, betano_team_id=team_id, betano_url=url))
+    return BetanoPhaseResult(
+        teams=dedupe_betano_teams(teams),
+        phase_id=str(data.get("id") or ""),
+        phase_title=str(data.get("title") or ""),
+        source_url=source_url,
+    )
+
+
 def read_registry(path: str | Path = DEFAULT_REGISTRY_FILE) -> list[RegistryAlias]:
     registry_path = Path(path)
     if not registry_path.exists():
@@ -504,6 +560,11 @@ def registry_lookup(
             )
     return None
 
+def registry_alias_key(league: str, betano_team_id: str, betano_name: str) -> tuple[str, str]:
+    team_id = str(betano_team_id or "").strip()
+    if team_id:
+        return (league, f"id:{team_id}")
+    return (league, f"name:{normalize_team_name(betano_name)}")
 
 def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT_REGISTRY_FILE) -> tuple[int, int]:
     registry_path = Path(path)
@@ -512,16 +573,23 @@ def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT
         row for row in read_registry(registry_path)
         if is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url)
     ]
-    by_key = {(row.league, normalize_team_name(row.betano_name)): row for row in existing}
+    by_key = {
+        registry_alias_key(row.league, row.betano_team_id, row.betano_name): row
+        for row in existing
+    }
     added = 0
+
     for row in rows:
         if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
             continue
-        key = (row.league, normalize_team_name(row.betano_name))
+
+        key = registry_alias_key(row.league, row.betano_team_id, row.betano_name)
         if key in by_key:
             continue
+
         by_key[key] = row
         added += 1
+
     output = sorted(by_key.values(), key=lambda item: (item.league, normalize_team_name(item.betano_name)))
     with registry_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=APPROVED_COLUMNS, delimiter=";")
@@ -531,20 +599,55 @@ def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT
     return added, len(output)
 
 
-def write_review_aliases(rows: list[ReviewAlias], path: str | Path = DEFAULT_REVIEW_FILE) -> int:
+def write_review_aliases(
+    rows: list[ReviewAlias],
+    path: str | Path = DEFAULT_REVIEW_FILE,
+    *,
+    approved_path: str | Path = DEFAULT_REGISTRY_FILE,
+    synced_leagues: Iterable[str] | None = None,
+) -> int:
     review_path = Path(path)
     review_path.parent.mkdir(parents=True, exist_ok=True)
+
+    synced = set(synced_leagues or [])
+
+    approved_keys: set[tuple[str, str]] = set()
+    approved_file = Path(approved_path)
+    if approved_file.exists():
+        for row in read_registry(approved_file):
+            if row.match_status != "MATCH_REGISTRY_APPROVED":
+                continue
+            if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
+                continue
+            approved_keys.add(registry_alias_key(row.league, row.betano_team_id, row.betano_name))
+
+    incoming: dict[tuple[str, str], ReviewAlias] = {}
+    for row in rows:
+        key = registry_alias_key(row.league, row.betano_team_id, row.betano_name)
+        if key not in approved_keys:
+            incoming[key] = row
+
     existing: dict[tuple[str, str], ReviewAlias] = {}
     if review_path.exists():
         with review_path.open("r", newline="", encoding="utf-8-sig") as fh:
             for row in csv.DictReader(fh, delimiter=";"):
                 item = ReviewAlias(**{col: str(row.get(col, "") or "") for col in REVIEW_COLUMNS})
-                existing[(item.league, normalize_team_name(item.betano_name))] = item
-    for row in rows:
-        existing[(row.league, normalize_team_name(row.betano_name))] = row
+                key = registry_alias_key(item.league, item.betano_team_id, item.betano_name)
+
+                if key in approved_keys:
+                    continue
+
+                if synced and item.league in synced and key not in incoming:
+                    continue
+
+                existing[key] = item
+
+    existing.update(incoming)
+
     with review_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=REVIEW_COLUMNS, delimiter=";")
         writer.writeheader()
         for row in sorted(existing.values(), key=lambda item: (item.league, normalize_team_name(item.betano_name))):
             writer.writerow(asdict(row))
-    return len(rows)
+
+    return len(incoming)

@@ -9,11 +9,30 @@ from vcbet.core.team_registry import (
     BetanoTeam,
     build_registry_matches,
     normalize_team_name,
+    parse_betano_phase_standings_json,
     parse_betano_standings_html,
     parse_betano_standings_html_with_diagnostics,
     write_registry_aliases,
 )
-from scripts.sync_team_aliases import coverage_diagnostics
+from scripts.sync_team_aliases import coverage_diagnostics, extract_phase_params
+
+
+def phase_payload(names: list[str]) -> dict:
+    return {
+        "data": {
+            "id": 4935355,
+            "title": "Bundesliga 2025/26",
+            "groups": [{
+                "teams": [
+                    {
+                        "information": {"name": name, "teamId": str(100000 + idx), "rank": idx + 1},
+                        "teamPageUrl": f"/sport/futebol/competicoes/alemanha/216/{normalize_team_name(name).replace(' ', '-')}/{100000 + idx}-t/",
+                    }
+                    for idx, name in enumerate(names)
+                ]
+            }],
+        }
+    }
 
 
 class TeamRegistryTest(unittest.TestCase):
@@ -83,6 +102,28 @@ class TeamRegistryTest(unittest.TestCase):
         self.assertEqual(teams[0].name, "Mainz 05")
         self.assertEqual(teams[0].betano_team_id, "106861")
 
+    def test_phase_standings_json_preserves_numbered_team_names(self) -> None:
+        names = [
+            "1. FC Heidenheim 1846", "1. FC Köln", "1. FSV Mainz 05", "FC Bayern München",
+            "Bayer 04 Leverkusen", "BVB 09 Borussia Dortmund", "FC St. Pauli", "Hamburger SV",
+            "Rasen Ballsport Leipzig", "SC Freiburg", "VfB Stuttgart 1893", "VfL Wolfsburg",
+            "SV Werder Bremen", "TSG 1899 Hoffenheim", "Eintracht Frankfurt", "FC Augsburg",
+            "Borussia VfL Mönchengladbach", "1. FC Union Berlin",
+        ]
+
+        parsed = parse_betano_phase_standings_json(phase_payload(names), league="Bundesliga", source_url="https://api.test")
+
+        self.assertEqual(len(parsed.teams), 18)
+        self.assertIn("1. FSV Mainz 05", [team.name for team in parsed.teams])
+        self.assertIn("1. FC Köln", [team.name for team in parsed.teams])
+        self.assertEqual(parsed.phase_id, "4935355")
+
+    def test_extract_phase_standings_params(self) -> None:
+        params = extract_phase_params("https://www.betano.bet.br/api/league/phaseStandings/?sportId=1&leagueId=216&gLeagueIds=216&phaseId=4935355")
+
+        self.assertEqual(params["leagueId"], "216")
+        self.assertEqual(params["phaseId"], "4935355")
+
     def test_parse_real_bundesliga_fixture_extracts_18_standings_rows_when_available(self) -> None:
         fixture = Path("dev_asset/betano_classificacao.htm")
         if not fixture.exists():
@@ -127,8 +168,8 @@ class TeamRegistryTest(unittest.TestCase):
             ["Bayern Munich", "Real City FC", "Real City B"],
         )
 
-        self.assertEqual([row.betano_name for row in approved], ["Bayern de Munique"])
-        self.assertEqual([row.betano_name for row in review], ["Real City"])
+        self.assertEqual([row.betano_name for row in approved], ["Bayern de Munique", "Real City"])
+        self.assertEqual([row.betano_name for row in review], [])
 
     def test_registry_alias_beats_fuzzy_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

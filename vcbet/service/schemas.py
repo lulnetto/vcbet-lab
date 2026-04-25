@@ -174,6 +174,8 @@ class TeamRegistrySyncRequest(BaseModel):
     xg_file: str | None = None
     threshold: float = 0.94
     margin: float = 0.08
+    force_refresh_phase: bool = False
+    debug_network: bool = False
 
 
 class TeamRegistrySyncAllRequest(BaseModel):
