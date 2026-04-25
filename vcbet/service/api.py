@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 import pandas as pd
 
@@ -44,6 +45,9 @@ store.mark_interrupted_runs()
 manager = JobManager(store, settings.logs_dir)
 
 app = FastAPI(title="VCBet Service", version="0.5.0")
+
+static_dir = settings.project_root / "vcbet" / "service" / "static"
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 def _resource_key(project_root: Path, ledger_file: str | None) -> str | None:
