@@ -5,7 +5,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONDA_BIN="${CONDA_BIN:-/home/otten/miniforge3/bin/conda}"
 CONDA_ENV="${CONDA_ENV:-ubet}"
 PYTHON_BIN="${PYTHON_BIN:-}"
-BASE_URL="${VCBET_SMOKE_BASE_URL:-http://127.0.0.1:8010}"
+BASE_URL="${VCBET_SMOKE_BASE_URL:-http://127.0.0.1:8011}"
+SMOKE_HOST_PORT="${BASE_URL#http://}"
+SMOKE_HOST_PORT="${SMOKE_HOST_PORT#https://}"
+SMOKE_HOST="${SMOKE_HOST_PORT%%:*}"
+SMOKE_PORT="${SMOKE_HOST_PORT##*:}"
+SMOKE_PORT="${SMOKE_PORT%%/*}"
 SMOKE_TMP="$(mktemp -d)"
 SERVER_PID=""
 STARTED_SERVER=0
@@ -69,6 +74,8 @@ else
   read -r -a SERVICE_CMD <<<"$(service_command)"
   VCBET_SERVICE_JOBS_DIR="$SMOKE_TMP/jobs" \
   VCBET_SERVICE_LOGS_DIR="$SMOKE_TMP/logs" \
+  VCBET_SERVICE_HOST="$SMOKE_HOST" \
+  VCBET_SERVICE_PORT="$SMOKE_PORT" \
   setsid "${SERVICE_CMD[@]}" run_service.py \
     >"$SMOKE_TMP/service.log" 2>&1 &
   SERVER_PID="$!"
