@@ -17,10 +17,10 @@ echo "[gate] VCBet minimal release gate"
 echo "[gate] project: $PROJECT_ROOT"
 echo "[gate] env:     $CONDA_ENV via $CONDA_BIN"
 
-echo "[gate] 1/4 focused structural regression tests"
+echo "[gate] 1/5 focused structural regression tests"
 run_python -m unittest discover -s tests -p 'test_*.py'
 
-echo "[gate] 2/4 operational entrypoint smoke"
+echo "[gate] 2/5 operational entrypoint smoke"
 bash run_project.sh --help >/dev/null
 fake_python="$GATE_TMP/fake_python.sh"
 fake_output_dir="$GATE_TMP/runs"
@@ -63,7 +63,7 @@ bash run_project.sh \
 grep -q -- "--config-name" "$fake_args_log"
 grep -q -- "legacy_v2" "$fake_args_log"
 
-echo "[gate] 3/4 config and project guidance smoke"
+echo "[gate] 3/5 config and project guidance smoke"
 run_python - <<'PY'
 from pathlib import Path
 import json
@@ -75,7 +75,7 @@ for path in sorted((root / "configs").glob("*.json")) + [root / "ligas.json", ro
 print("json_ok")
 PY
 
-echo "[gate] 4/4 service/command import smoke"
+echo "[gate] 4/5 service/command import smoke"
 VCBET_SERVICE_JOBS_DIR="$GATE_TMP/jobs" VCBET_SERVICE_LOGS_DIR="$GATE_TMP/logs" run_python - <<'PY'
 from pathlib import Path
 
@@ -96,5 +96,8 @@ assert commands and "--config-name" in commands[0].command
 assert len(app.routes) > 0
 print("service_ok")
 PY
+
+echo "[gate] 5/5 web UI runtime smoke"
+bash scripts/smoke_ui.sh
 
 echo "[gate] PASS: structurally acceptable for this minimal release gate"
