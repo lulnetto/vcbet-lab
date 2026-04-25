@@ -38,6 +38,10 @@ class PendingAliasRow:
     suggestion: str | None
     score: int
     match_status: str
+    registry_status: str = "registry_pending"
+    registry_reason: str = ""
+    registry_pending_key: str = ""
+    recommended_action: str = "sync_team_registry"
 
 
 def now_str() -> str:
@@ -212,6 +216,10 @@ PENDING_ALIAS_COLUMNS = [
     "suggestion",
     "score",
     "match_status",
+    "registry_status",
+    "registry_reason",
+    "registry_pending_key",
+    "recommended_action",
 ]
 
 

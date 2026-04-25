@@ -271,35 +271,52 @@
   <section id="tab-aliases" class="tab">
     <div class="grid">
       <div class="card">
-        <div class="section-title"><h2>Qualidade de dados</h2><button class="ghost" onclick="loadAliasFiles(true)">Atualizar</button></div>
+        <div class="section-title"><h2>Registry de Times</h2><button class="ghost" onclick="loadTeamRegistry(true)">Atualizar</button></div>
+        <p class="muted">Fonte principal para aliases Betano ↔ FootyStats. Aprove pendências aqui para reutilizar em próximas runs.</p>
         <div class="row">
-          <div><label>Pendências encontradas</label><select id="aliasPendingFile"></select></div>
+          <div><label>Liga</label><select id="teamRegistryLeague"></select></div>
+          <div style="align-self:end;"><button id="teamRegistrySyncLeagueBtn" class="green" onclick="syncSelectedTeamRegistryLeague()">Sincronizar liga</button></div>
+          <div style="align-self:end;"><button id="teamRegistrySyncAllBtn" class="amber" onclick="syncAllTeamRegistryLeagues()">Sincronizar todas as ligas</button></div>
+          <div style="align-self:end;"><button class="ghost" onclick="loadTeamRegistry(true)">Atualizar pendências</button></div>
         </div>
-        <details class="advanced">
-          <summary>Avançado</summary>
-          <div class="row" style="margin-top:10px;">
-            <div><label>Alias file</label><input id="aliasFile" value="alias_times.json"></div>
-          </div>
-        </details>
-        <div class="inline" style="margin-top:10px;">
-          <label><input type="checkbox" id="aliasIncludeBlocked" checked> incluir blocked</label>
-          <button class="green" onclick="approveSelectedAliases()">Aceitar selecionados</button>
-          <button class="amber" onclick="approveAllVisibleAliases()">Aceitar todos visíveis</button>
-        </div>
-        <p class="muted">Revise nomes de times antes de rodadas sensíveis ou quando uma análise indicar pendência.</p>
+        <div id="teamRegistrySummary"></div>
       </div>
 
       <div class="card">
-        <h3>Resumo</h3>
-        <pre id="aliasSummary">Sem arquivo selecionado.</pre>
+        <h3>Status do registry</h3>
+        <pre id="teamRegistryStatus">Registry ainda não carregado.</pre>
       </div>
     </div>
 
     <div class="card">
-      <div class="section-title"><h3>Pendências de nomes</h3><div class="muted" id="aliasVisibleCount">0 aliases visíveis</div></div>
-      <div id="aliasEmptyState" class="state-box"><strong>Nenhuma pendência de qualidade agora.</strong>Não há aliases para revisar com os filtros atuais. Siga para Hoje para rodar a análise ou atualize a lista após novas coletas.</div>
-      <div class="table-wrap tall" id="aliasTableWrap" style="display:none;"><table id="tableAliasReview"></table></div>
+      <div class="section-title"><h3>Pendências do registry</h3><div class="muted" id="teamRegistryPendingCount">0 pendências</div></div>
+      <div id="teamRegistryEmptyState" class="state-box"><strong>Nenhuma pendência no registry.</strong>Quando o sync encontrar nomes ambíguos, eles aparecem aqui para aprovação global.</div>
+      <div class="table-wrap tall" id="teamRegistryTableWrap" style="display:none;"><table id="tableTeamRegistryPending"></table></div>
     </div>
+
+    <details class="card advanced">
+      <summary>Problemas detectados em runs</summary>
+      <div class="section-title"><h3>Diagnóstico legado</h3><button class="ghost" onclick="loadAliasFiles(true)">Atualizar diagnósticos</button></div>
+      <p class="muted">Estes arquivos são evidência de execução e diagnóstico. Resolva aliases no Registry de Times sempre que possível; `alias_times.json` continua disponível para compatibilidade legada.</p>
+      <div class="row">
+        <div><label>Pendências encontradas</label><select id="aliasPendingFile"></select></div>
+        <div><label>Escopo</label><select id="aliasDiagnosticScope" onchange="loadAliasFiles(true)"><option value="runs_recent">Runs recentes</option><option value="replays">Replays</option><option value="history">Histórico</option></select></div>
+      </div>
+      <details class="advanced">
+        <summary>Avançado</summary>
+        <div class="row" style="margin-top:10px;">
+          <div><label>Alias file legado</label><input id="aliasFile" value="alias_times.json"></div>
+        </div>
+      </details>
+      <div class="inline" style="margin-top:10px;">
+        <label><input type="checkbox" id="aliasIncludeBlocked" checked> incluir blocked</label>
+        <label><input type="checkbox" id="aliasIncludeResolved"> mostrar resolvidos/antigos</label>
+      </div>
+      <pre id="aliasSummary">Sem arquivo selecionado.</pre>
+      <div class="section-title"><h3>Pendências diagnósticas</h3><div class="muted" id="aliasVisibleCount">0 aliases visíveis</div></div>
+      <div id="aliasEmptyState" class="state-box"><strong>Nenhuma pendência diagnóstica agora.</strong>Não há aliases de run para revisar com os filtros atuais.</div>
+      <div class="table-wrap tall" id="aliasTableWrap" style="display:none;"><table id="tableAliasReview"></table></div>
+    </details>
   </section>
 
   <section id="tab-jobs" class="tab">

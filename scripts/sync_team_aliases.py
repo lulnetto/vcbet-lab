@@ -19,7 +19,9 @@ from vcbet.core.team_registry import (
     DEFAULT_SNAPSHOT_FILE,
     BetanoTeam,
     build_registry_matches,
-    parse_betano_standings_html,
+    is_valid_betano_team_identity,
+    normalize_team_name,
+    parse_betano_standings_html_with_diagnostics,
     write_registry_aliases,
     write_review_aliases,
 )
@@ -62,21 +64,79 @@ def load_footystats_teams(root: Path, league: str, xg_file: str | None = None) -
     return sorted(teams)
 
 
-def load_betano_teams(args: argparse.Namespace, league: str) -> tuple[list[BetanoTeam], str]:
+def load_betano_teams(args: argparse.Namespace, league: str) -> tuple[list[BetanoTeam], str, dict[str, object]]:
     if args.from_html:
         html_path = Path(args.from_html)
         html = html_path.read_text(encoding="utf-8", errors="replace")
-        return parse_betano_standings_html(html, league=league), str(html_path)
+        result = parse_betano_standings_html_with_diagnostics(html, league=league)
+        return result.teams, str(html_path), {
+            "raw_count": result.raw_count,
+            "duplicate_count": result.duplicate_count,
+            "duplicate_entries": result.duplicate_entries,
+            "found_standings_rows": result.found_standings_rows,
+        }
     url = args.url or standings_url_for_league(league)
     if not url:
-        return [], "missing_betano_url"
+        return [], "missing_betano_url", {"raw_count": 0, "duplicate_count": 0, "duplicate_entries": [], "found_standings_rows": False}
     html = fetch_html(url)
-    return parse_betano_standings_html(html, league=league), url
+    result = parse_betano_standings_html_with_diagnostics(html, league=league)
+    return result.teams, url, {
+        "raw_count": result.raw_count,
+        "duplicate_count": result.duplicate_count,
+        "duplicate_entries": result.duplicate_entries,
+        "found_standings_rows": result.found_standings_rows,
+    }
 
 
-def sync_league(args: argparse.Namespace, league: str) -> dict[str, object]:
-    root = project_root()
-    betano_teams, source = load_betano_teams(args, league)
+def coverage_status(betano_teams: list[BetanoTeam], footystats_teams: list[str], parse_diagnostics: dict[str, object]) -> tuple[str, str]:
+    if not parse_diagnostics.get("found_standings_rows"):
+        return "blocked", "standings_not_found_or_not_rendered"
+    valid = [team for team in betano_teams if is_valid_betano_team_identity(team.name, team.betano_team_id, team.betano_url)]
+    if len(valid) != len(betano_teams):
+        return "blocked", "invalid_betano_team_rows"
+    if len(footystats_teams) >= 10 and len(betano_teams) < max(8, int(len(footystats_teams) * 0.70)):
+        return "blocked", "failed_partial_coverage"
+    if not betano_teams or not footystats_teams:
+        return "blocked", "missing_team_universe"
+    return "ok", "ok"
+
+
+def coverage_diagnostics(
+    betano_teams: list[BetanoTeam],
+    footystats_teams: list[str],
+    approved: list[object],
+    review: list[object],
+) -> dict[str, object]:
+    matched_betano = {normalize_team_name(item.betano_name) for item in approved}
+    matched_betano.update(
+        normalize_team_name(item.betano_name)
+        for item in review
+        if getattr(item, "suggested_footystats_name", "")
+    )
+    matched_footystats = {normalize_team_name(item.footystats_name) for item in approved}
+    matched_footystats.update(
+        normalize_team_name(item.suggested_footystats_name)
+        for item in review
+        if getattr(item, "suggested_footystats_name", "")
+    )
+    return {
+        "total_betano": len(betano_teams),
+        "total_footystats": len(footystats_teams),
+        "matched_count": len(matched_betano),
+        "auto_count": len(approved),
+        "review_count": len(review),
+        "footystats_without_betano_candidate": [
+            name for name in footystats_teams if normalize_team_name(name) not in matched_footystats
+        ],
+        "betano_without_footystats_candidate": [
+            team.name for team in betano_teams if normalize_team_name(team.name) not in matched_betano
+        ],
+    }
+
+
+def sync_league(args: argparse.Namespace, league: str, root: Path | None = None) -> dict[str, object]:
+    root = root or project_root()
+    betano_teams, source, parse_diagnostics = load_betano_teams(args, league)
     footystats_teams = load_footystats_teams(root, league, args.xg_file)
     approved, review = build_registry_matches(
         betano_teams,
@@ -85,6 +145,7 @@ def sync_league(args: argparse.Namespace, league: str) -> dict[str, object]:
         margin=args.margin,
         source=source,
     )
+    sync_status, sync_coverage_status = coverage_status(betano_teams, footystats_teams, parse_diagnostics)
     snapshot = {
         "league": league,
         "source": source,
@@ -92,8 +153,14 @@ def sync_league(args: argparse.Namespace, league: str) -> dict[str, object]:
         "footystats_teams": footystats_teams,
         "approved_count": len(approved),
         "review_count": len(review),
+        "approved_aliases": [item.__dict__ for item in approved],
+        "review_aliases": [item.__dict__ for item in review],
+        "parse_diagnostics": parse_diagnostics,
+        "coverage": coverage_diagnostics(betano_teams, footystats_teams, approved, review),
+        "status": sync_status,
+        "coverage_status": sync_coverage_status,
     }
-    if not args.dry_run:
+    if not args.dry_run and sync_status == "ok":
         snapshot_path = root / DEFAULT_SNAPSHOT_FILE
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -119,6 +186,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", help="URL Betano standings explícita")
     parser.add_argument("--xg-file", help="Snapshot FootyStats/xG alternativo")
     parser.add_argument("--dry-run", action="store_true", help="Mostra resultados sem gravar CSVs")
+    parser.add_argument("--verbose", action="store_true", help="Imprime times extraídos e candidatos de revisão")
+    parser.add_argument("--debug-output", action="store_true", help="Alias de --verbose para diagnósticos")
     parser.add_argument("--threshold", type=float, default=0.94)
     parser.add_argument("--margin", type=float, default=0.08)
     return parser.parse_args()
@@ -137,11 +206,41 @@ def main() -> int:
             summary = sync_league(args, league)
             summaries.append(summary)
             print(
-                f"[ok] {league}: betano={len(summary['betano_teams'])} "
+                f"[{summary.get('status', 'ok')}] {league}: betano={len(summary['betano_teams'])} "
                 f"footystats={len(summary['footystats_teams'])} "
                 f"auto={summary['approved_count']} review={summary['review_count']} "
-                f"dry_run={summary['dry_run']}"
+                f"coverage={summary.get('coverage_status', 'ok')} dry_run={summary['dry_run']}"
             )
+            if args.verbose or args.debug_output:
+                coverage = summary["coverage"]
+                parse_diagnostics = summary["parse_diagnostics"]
+                print("[coverage]")
+                print(f"  total_betano={coverage['total_betano']}")
+                print(f"  total_footystats={coverage['total_footystats']}")
+                print(f"  matched={coverage['matched_count']} auto={coverage['auto_count']} review={coverage['review_count']}")
+                print(
+                    f"  betano_raw={parse_diagnostics['raw_count']} "
+                    f"deduped={parse_diagnostics['duplicate_count']}"
+                )
+                print("[footystats_without_betano_candidate]")
+                for name in coverage["footystats_without_betano_candidate"]:
+                    print(f"  - {name}")
+                print("[betano_without_footystats_candidate]")
+                for name in coverage["betano_without_footystats_candidate"]:
+                    print(f"  - {name}")
+                print("[deduped_betano_entries]")
+                for item in parse_diagnostics["duplicate_entries"]:
+                    print(f"  - {item}")
+                print("[betano_teams]")
+                for item in summary["betano_teams"]:
+                    print(f"  - {item.get('name')} | id={item.get('betano_team_id')} | url={item.get('betano_url')}")
+                print("[review_candidates]")
+                for item in summary["review_aliases"]:
+                    print(
+                        f"  - {item.get('betano_name')} -> {item.get('suggested_footystats_name')} "
+                        f"score={item.get('top_score')} reason={item.get('review_reason')} "
+                        f"options={item.get('ambiguous_options')}"
+                    )
         except Exception as exc:
             print(f"[erro] {league}: {exc}")
     total_auto = sum(int(item["approved_count"]) for item in summaries)

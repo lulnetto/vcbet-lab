@@ -66,9 +66,9 @@ Closing odds are not part of the default daily cycle. Use the watcher/manual mai
 
 ## Team Alias Registry
 
-Use the Betano ↔ FootyStats registry before sensitive runs when a quality report shows `MATCH_FUZZY`, `unresolved_team_match`, or `registry_stale`.
+Use the Betano ↔ FootyStats registry before sensitive runs when a quality report shows `MATCH_FUZZY`, `unresolved_team_match`, or `registry_stale`. The normal product path is now in the UI: open Qualidade de Dados, choose a league in `Registry de Times`, and click `Sincronizar liga`.
 
-Examples:
+The CLI remains available as a development/maintenance fallback:
 
 ```bash
 /home/otten/miniforge3/bin/conda run -n ubet python3 scripts/sync_team_aliases.py --league "Bundesliga"
@@ -76,6 +76,15 @@ Examples:
 ```
 
 Approved aliases are appended idempotently to `configs/team_registry/betano_footystats_aliases.csv`. Ambiguous cases are written to `data/team_registry/alias_review_pending.csv` with candidate options for manual review. The run pipeline trusts only approved registry aliases; fuzzy matches remain blocked by the official safety policy.
+
+Normal workflow:
+
+1. Sync the affected league in Qualidade de Dados.
+2. Review pending aliases in `Registry de Times`.
+3. Approve, edit-and-approve, or reject pending aliases.
+4. Rerun the analysis so matching uses the approved registry alias.
+
+Run-level alias files under `data/runs/` or `data/replays/` are diagnostics from an isolated run. They remain readable for legacy `alias_times.json` compatibility, but registry review is the primary global approval workflow. Replay diagnostics are hidden from the active alias queue by default; enable the diagnostic scope only when investigating historical/replay evidence.
 
 ## Operational Data
 

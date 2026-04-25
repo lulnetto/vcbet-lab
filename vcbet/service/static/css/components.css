@@ -49,3 +49,7 @@ pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:
 .drawer-panel { width:min(680px, 92vw); height:100vh; margin-left:auto; overflow:auto; background:var(--panel); border-left:1px solid var(--border); padding:20px; box-shadow:-12px 0 36px rgba(0,0,0,.32); }
 .drawer-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
 .drawer-head h2 { margin-top:4px; overflow-wrap:anywhere; }
+.candidate-list { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+.candidate-chip { display:inline-flex; gap:4px; align-items:center; border:1px solid var(--border); border-radius:999px; padding:3px 7px; font-size:12px; color:var(--muted); background:rgba(255,255,255,0.03); }
+.registry-actions { min-width:230px; }
+.registry-league-summary { margin-top:12px; display:grid; gap:6px; }

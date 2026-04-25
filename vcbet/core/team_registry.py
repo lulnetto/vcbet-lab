@@ -39,6 +39,9 @@ REVIEW_COLUMNS = [
     "review_reason",
     "ambiguous_options",
     "status",
+    "source",
+    "created_at",
+    "updated_at",
 ]
 
 GENERIC_TOKENS = {
@@ -117,6 +120,9 @@ class ReviewAlias:
     review_reason: str
     ambiguous_options: str
     status: str = "pending_review"
+    source: str = "sync_team_aliases"
+    created_at: str = ""
+    updated_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -127,6 +133,15 @@ class MatchCandidate:
     normalized_footystats: str
 
 
+@dataclass(frozen=True)
+class BetanoParseResult:
+    teams: list[BetanoTeam]
+    raw_count: int
+    duplicate_count: int
+    duplicate_entries: list[str]
+    found_standings_rows: bool
+
+
 class BetanoStandingsParser(html.parser.HTMLParser):
     def __init__(self, *, league: str, base_url: str = "https://www.betano.bet.br") -> None:
         super().__init__(convert_charrefs=True)
@@ -134,12 +149,36 @@ class BetanoStandingsParser(html.parser.HTMLParser):
         self.base_url = base_url
         self._anchor_href = ""
         self._anchor_chunks: list[str] = []
+        self._fallback_teams: list[BetanoTeam] = []
+        self._standings_row_depth = 0
+        self._row_anchor_href = ""
+        self._row_anchor_chunks: list[str] = []
+        self._row_team_captured = False
+        self.found_standings_rows = False
+        self.raw_teams: list[BetanoTeam] = []
         self.teams: list[BetanoTeam] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        data_qa = attrs_dict.get("data-qa", "")
+        if tag == "tr" and re.fullmatch(r"standings_team_\d+", data_qa):
+            self.found_standings_rows = True
+            self._standings_row_depth = 1
+            self._row_anchor_href = ""
+            self._row_anchor_chunks = []
+            self._row_team_captured = False
+            return
+
+        if self._standings_row_depth:
+            self._standings_row_depth += 1
+            href = attrs_dict.get("href", "")
+            if tag == "a" and not self._row_team_captured and _is_betano_team_href(href):
+                self._row_anchor_href = href
+                self._row_anchor_chunks = []
+            return
+
         if tag != "a":
             return
-        attrs_dict = {key: value or "" for key, value in attrs}
         href = attrs_dict.get("href", "")
         if not href or "/sport/futebol/" not in href:
             return
@@ -147,23 +186,42 @@ class BetanoStandingsParser(html.parser.HTMLParser):
         self._anchor_chunks = []
 
     def handle_data(self, data: str) -> None:
-        if self._anchor_href:
+        if self._standings_row_depth and self._row_anchor_href:
+            self._row_anchor_chunks.append(data)
+        elif self._anchor_href:
             self._anchor_chunks.append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if self._standings_row_depth:
+            if tag == "a" and self._row_anchor_href:
+                self._append_team_from_anchor(self._row_anchor_href, self._row_anchor_chunks, self.teams)
+                self._row_anchor_href = ""
+                self._row_anchor_chunks = []
+                self._row_team_captured = True
+            self._standings_row_depth -= 1
+            return
+
         if tag != "a" or not self._anchor_href:
             return
-        name = " ".join(" ".join(self._anchor_chunks).split()).strip()
-        href = self._anchor_href
+        self._append_team_from_anchor(self._anchor_href, self._anchor_chunks, self._fallback_teams)
         self._anchor_href = ""
         self._anchor_chunks = []
+
+    def close(self) -> None:
+        super().close()
+        raw = self.teams
+        self.raw_teams = list(raw)
+        self.teams = dedupe_betano_teams(raw)
+
+    def _append_team_from_anchor(self, href: str, chunks: list[str], output: list[BetanoTeam]) -> None:
+        if not href or "/sport/futebol/" not in href:
+            return
+        name = " ".join(" ".join(chunks).split()).strip()
         if not _looks_like_team_name(name):
             return
         team_id = extract_betano_team_id(href)
         url = urljoin(self.base_url, href)
-        team = BetanoTeam(self.league, name, team_id, url)
-        if team.name not in {item.name for item in self.teams}:
-            self.teams.append(team)
+        output.append(BetanoTeam(self.league, name, team_id, url))
 
 
 def _looks_like_team_name(value: str) -> bool:
@@ -174,14 +232,87 @@ def _looks_like_team_name(value: str) -> bool:
     blocked = {"classificacao", "resultados", "calendario", "ao vivo", "popular", "futebol"}
     if lowered in blocked:
         return False
-    if re.search(r"\d", text) and len(text.split()) <= 2:
+    folded = strip_accents(lowered)
+    blocked_fragments = (
+        "odds atualizadas",
+        "partidas da",
+        "partidas de",
+        "secao de futebol",
+        "seção de futebol",
+        "aposte",
+    )
+    if any(fragment in folded for fragment in blocked_fragments):
+        return False
+    if text.endswith(":"):
         return False
     return bool(re.search(r"[A-Za-zÀ-ÿ]", text))
 
 
 def extract_betano_team_id(url: str) -> str:
-    match = re.search(r"/(\d+)/?(?:$|[?#])", url)
-    return match.group(1) if match else ""
+    team_match = re.search(r"/(\d+)-t/?(?:$|[?#])", url)
+    if team_match:
+        return team_match.group(1)
+    matches = re.findall(r"/(\d+)(?:-[^/]*)?/", url)
+    return matches[-1] if matches else ""
+
+
+def _is_betano_team_href(url: str) -> bool:
+    return "/sport/futebol/competicoes/" in url and re.search(r"/\d+-t/?(?:$|[?#])", url) is not None
+
+
+def is_valid_betano_team_identity(name: str, team_id: str, url: str) -> bool:
+    return bool(_looks_like_team_name(name) and str(team_id).isdigit() and _is_betano_team_href(str(url)))
+
+
+def dedupe_betano_teams(teams: Iterable[BetanoTeam]) -> list[BetanoTeam]:
+    unique: list[BetanoTeam] = []
+    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
+    seen_names: set[tuple[str, str]] = set()
+    for team in teams:
+        normalized_url = team.betano_url.rstrip("/")
+        normalized_name = normalize_team_name(team.name)
+        if team.betano_team_id and team.betano_team_id in seen_ids:
+            continue
+        if normalized_url and normalized_url in seen_urls:
+            continue
+        name_key = (team.league, normalized_name)
+        if name_key in seen_names:
+            continue
+        if team.betano_team_id:
+            seen_ids.add(team.betano_team_id)
+        if normalized_url:
+            seen_urls.add(normalized_url)
+        seen_names.add(name_key)
+        unique.append(team)
+    return unique
+
+
+def duplicate_betano_entries(teams: Iterable[BetanoTeam]) -> list[str]:
+    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
+    seen_names: set[tuple[str, str]] = set()
+    duplicates: list[str] = []
+    for team in teams:
+        normalized_url = team.betano_url.rstrip("/")
+        normalized_name = normalize_team_name(team.name)
+        name_key = (team.league, normalized_name)
+        duplicate = False
+        if team.betano_team_id and team.betano_team_id in seen_ids:
+            duplicate = True
+        if normalized_url and normalized_url in seen_urls:
+            duplicate = True
+        if name_key in seen_names:
+            duplicate = True
+        if duplicate:
+            duplicates.append(f"{team.name} | id={team.betano_team_id} | url={team.betano_url}")
+            continue
+        if team.betano_team_id:
+            seen_ids.add(team.betano_team_id)
+        if normalized_url:
+            seen_urls.add(normalized_url)
+        seen_names.add(name_key)
+    return duplicates
 
 
 def strip_accents(value: str) -> str:
@@ -268,6 +399,8 @@ def build_registry_matches(
     approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     footy = list(footystats_names)
     for team in betano_teams:
+        if not is_valid_betano_team_identity(team.name, team.betano_team_id, team.betano_url):
+            continue
         ranked = rank_candidates(team.name, footy)
         reason = ambiguity_reason(team.name, ranked, threshold=threshold, margin=margin)
         top = ranked[0] if ranked else MatchCandidate("", 0.0, "", "")
@@ -283,6 +416,9 @@ def build_registry_matches(
                     top_score=f"{top.score:.4f}",
                     review_reason=reason,
                     ambiguous_options=options,
+                    source=source,
+                    created_at=approved_at,
+                    updated_at=approved_at,
                 )
             )
             continue
@@ -304,9 +440,26 @@ def build_registry_matches(
 
 
 def parse_betano_standings_html(html: str, *, league: str, base_url: str = "https://www.betano.bet.br") -> list[BetanoTeam]:
+    return parse_betano_standings_html_with_diagnostics(html, league=league, base_url=base_url).teams
+
+
+def parse_betano_standings_html_with_diagnostics(
+    html: str,
+    *,
+    league: str,
+    base_url: str = "https://www.betano.bet.br",
+) -> BetanoParseResult:
     parser = BetanoStandingsParser(league=league, base_url=base_url)
     parser.feed(html)
-    return parser.teams
+    parser.close()
+    duplicates = duplicate_betano_entries(parser.raw_teams)
+    return BetanoParseResult(
+        teams=parser.teams,
+        raw_count=len(parser.raw_teams),
+        duplicate_count=len(duplicates),
+        duplicate_entries=duplicates,
+        found_standings_rows=parser.found_standings_rows,
+    )
 
 
 def read_registry(path: str | Path = DEFAULT_REGISTRY_FILE) -> list[RegistryAlias]:
@@ -355,10 +508,15 @@ def registry_lookup(
 def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT_REGISTRY_FILE) -> tuple[int, int]:
     registry_path = Path(path)
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = read_registry(registry_path)
+    existing = [
+        row for row in read_registry(registry_path)
+        if is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url)
+    ]
     by_key = {(row.league, normalize_team_name(row.betano_name)): row for row in existing}
     added = 0
     for row in rows:
+        if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
+            continue
         key = (row.league, normalize_team_name(row.betano_name))
         if key in by_key:
             continue

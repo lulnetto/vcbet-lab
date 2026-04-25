@@ -34,3 +34,55 @@ function fetchRuns() {
 function fetchReplays() {
   return api('/api/entities/replays?limit=300');
 }
+
+function fetchTeamRegistryPending() {
+  return api('/api/team-registry/pending');
+}
+
+function fetchTeamRegistryApproved() {
+  return api('/api/team-registry/approved');
+}
+
+function fetchTeamRegistryLeagues() {
+  return api('/api/team-registry/leagues');
+}
+
+function syncTeamRegistry(payload) {
+  return api('/api/team-registry/sync', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function syncAllTeamRegistry(payload = {}) {
+  return api('/api/team-registry/sync-all', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function approveTeamRegistryAlias(payload) {
+  return api('/api/team-registry/approve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function rejectTeamRegistryAlias(payload) {
+  return api('/api/team-registry/reject', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function updateTeamRegistryAlias(payload) {
+  return api('/api/team-registry/update', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}

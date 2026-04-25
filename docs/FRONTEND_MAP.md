@@ -43,5 +43,7 @@ Hoje exposes three primary operator actions: `Gerar/Atualizar análise do dia`, 
 - Hoje: operational cockpit and daily workflow context.
 - Carteira: ledger/picks/portfolio review.
 - Replay Lab: replay and config comparison workflow.
-- Qualidade de Dados: aliases and data-quality issue review.
+- Qualidade de Dados: global team registry review first, plus run-level alias diagnostics.
 - Monitor: jobs, logs, and observability.
+
+`Registry de Times` is the primary Betano ↔ FootyStats alias workflow in Qualidade de Dados. It lets the operator sync a configured league, reads approved aliases from `configs/team_registry/betano_footystats_aliases.csv`, reads pending review items from `data/team_registry/alias_review_pending.csv`, and keeps run/replay alias artifacts collapsed as diagnostics for compatibility with legacy `alias_times.json`. Replay diagnostics are hidden from the active queue by default.

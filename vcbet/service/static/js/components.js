@@ -327,6 +327,76 @@ function renderTable(id, rows, cols, emptyMessage = 'Sem dados para os filtros a
   el.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
+function parseAmbiguousOptions(value) {
+  return String(value || '').split('|').map(item => {
+    const text = item.trim();
+    if (!text) return null;
+    const parts = text.split(':');
+    const score = parts.length > 1 ? parts.pop().trim() : '';
+    return { name: parts.join(':').trim(), score };
+  }).filter(Boolean);
+}
+
+function renderAmbiguousOptions(value, index = null) {
+  const options = parseAmbiguousOptions(value);
+  if (!options.length) return '<span class="muted">sem opções</span>';
+  const list = options.slice(0, 5).map(item => `<span class="candidate-chip">${escapeHtml(item.name)}${item.score ? ` <strong>${escapeHtml(item.score)}</strong>` : ''}</span>`).join('');
+  if (index === null) return `<div class="candidate-list">${list}</div>`;
+  const select = `<select class="registry-candidate-select" data-registry-index="${Number(index)}">
+    <option value="">Sugestão atual</option>
+    ${options.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}${item.score ? ` (${escapeHtml(item.score)})` : ''}</option>`).join('')}
+  </select>`;
+  return `<div class="candidate-list">${list}</div>${select}`;
+}
+
+function renderTeamRegistrySummary(registry) {
+  const pending = registry?.pending || [];
+  const approved = registry?.approved || [];
+  const leagues = [...new Set([...pending, ...approved].map(item => item.league || 'sem_liga'))].sort();
+  const leagueRows = leagues.map(league => `<div class="summary-row"><span>${escapeHtml(league)}</span><strong>${Number(registry.pendingByLeague?.[league] || 0)} pend. / ${Number(registry.approvedByLeague?.[league] || 0)} aprov.</strong></div>`).join('');
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="label">Pendentes no registry</div><div class="value">${pending.length}</div></div>
+      <div class="kpi"><div class="label">Aliases aprovados</div><div class="value">${approved.length}</div></div>
+    </div>
+    <div class="registry-league-summary">${leagueRows || '<div class="muted">Sem ligas para resumir.</div>'}</div>`;
+}
+
+function renderRegistryReviewActions(item, index) {
+  const blocked = item.approval_blocked === 'true';
+  const low = item.manual_override_required === 'true';
+  return `<div class="inline registry-actions">
+    <button class="green small" ${blocked ? 'disabled' : ''} onclick="approveRegistrySuggestion(${Number(index)})">${low ? 'Aprovar com justificativa' : 'Aprovar sugestão'}</button>
+    <button class="amber small" ${blocked ? 'disabled' : ''} onclick="approveRegistryEdited(${Number(index)})">Editar e aprovar</button>
+    <button class="danger small" onclick="rejectRegistryAlias(${Number(index)})">Rejeitar / ignorar</button>
+  </div>`;
+}
+
+function renderTeamRegistryPendingTable(items) {
+  const rows = (items || []).map((item, index) => ({
+    ...item,
+    suggested_edit: `<input class="registry-footy-input" data-registry-index="${index}" value="${escapeHtml(item.suggested_footystats_name || '')}">`,
+    options_html: renderAmbiguousOptions(item.ambiguous_options, index),
+    status_html: statusPill(item.status || 'pending_review'),
+    score_html: statusPill(item.top_score || '-'),
+    warnings_html: String(item.validation_warnings || '').split('|').filter(Boolean).map(w => `<span class="pill bad">${escapeHtml(w)}</span>`).join(' ') || '<span class="muted">sem alertas</span>',
+    betano_html: `<strong>${escapeHtml(item.betano_name || '')}</strong><div class="muted">id=${escapeHtml(item.betano_team_id || '-')}</div><div class="muted">${escapeHtml(item.betano_url || '')}</div>`,
+    actions_html: renderRegistryReviewActions(item, index),
+  }));
+  renderTable('tableTeamRegistryPending', rows, [
+    {key:'league', label:'Liga'},
+    {key:'betano_html', label:'Betano', html:true},
+    {key:'suggested_edit', label:'FootyStats', html:true},
+    {key:'score_html', label:'Score', html:true},
+    {key:'review_reason', label:'Motivo'},
+    {key:'options_html', label:'Opções ambíguas', html:true},
+    {key:'warnings_html', label:'Alertas', html:true},
+    {key:'source', label:'Fonte'},
+    {key:'status_html', label:'Status', html:true},
+    {key:'actions_html', label:'Ações', html:true},
+  ], 'Nenhum alias pendente no registry global.');
+}
+
 function stepStatus(value) {
   const cls = { ok:'ok', 'atenção':'warn', pendente:'warn', rodando:'warn', indisponível:'' }[value] || '';
   return `<span class="pill ${cls}">${escapeHtml(value)}</span>`;

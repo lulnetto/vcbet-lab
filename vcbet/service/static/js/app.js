@@ -45,6 +45,7 @@ async function loadHealth() {
 async function boot() {
   bindTabs();
   document.getElementById('aliasIncludeBlocked').onchange = () => loadAliasFiles(true);
+  document.getElementById('aliasIncludeResolved').onchange = () => loadAliasFiles(true);
   await loadHealth();
   await loadConfigs();
   bindOperationalInputs();

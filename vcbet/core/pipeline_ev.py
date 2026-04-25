@@ -235,6 +235,10 @@ def processar_pipeline(
                         suggestion=res.suggestion,
                         score=res.score,
                         match_status=res.match_status,
+                        registry_status="registry_pending" if res.match_status == "pending_review" else "registry_stale",
+                        registry_reason="match_requires_registry_review" if res.match_status == "pending_review" else "unresolved_or_blocked_team_match",
+                        registry_pending_key=f"{liga_jogo}|{res.source_name}",
+                        recommended_action="sync_team_registry",
                     ))
 
         if not home_match.matched_name or not away_match.matched_name:
@@ -466,7 +470,13 @@ def processar_pipeline(
                 or processing_discard_counts.get("unresolved_team_match", 0)
             ),
             "registry_stale_leagues": sorted(registry_stale_leagues),
-            "registry_recommendation": "Rode scripts/sync_team_aliases.py --league '<liga>' para ligas com MATCH_FUZZY ou unresolved_team_match.",
+            "registry_pending": bool(unique_pending_counts.get("pending_review", 0) or unique_pending_counts.get("blocked", 0)),
+            "registry_issue_counts_by_league": to_sorted_dict(unique_pending_by_league),
+            "registry_recommendation": "Rode python3 scripts/sync_team_aliases.py --league '<liga>' para ligas com MATCH_FUZZY ou unresolved_team_match.",
+            "registry_recommended_commands": [
+                f"python3 scripts/sync_team_aliases.py --league \"{league}\""
+                for league in sorted(registry_stale_leagues)
+            ],
         },
         "processing": {
             "raw_candidates_total": int(len(df_raw_candidates)),

@@ -41,8 +41,21 @@ from .schemas import (
     ResultsCollectionRequest,
     ResultsSettlementRequest,
     SettlementRequest,
+    TeamRegistryAliasRequest,
+    TeamRegistrySyncAllRequest,
+    TeamRegistrySyncRequest,
 )
 from .settings import ServiceSettings
+from .team_registry_api import (
+    approve_registry_alias,
+    load_approved_registry_aliases,
+    load_pending_registry_reviews,
+    list_registry_leagues,
+    reject_registry_alias,
+    sync_all_registry_leagues,
+    sync_registry_league,
+    update_registry_pending_alias,
+)
 
 settings = ServiceSettings.load()
 store = JobStore(settings.jobs_dir)
@@ -190,9 +203,14 @@ def _save_alias_map(alias_file: Path, payload: dict[str, str]) -> None:
     alias_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _alias_candidate_files() -> list[Path]:
+def _alias_candidate_files(scope: str = "runs_recent") -> list[Path]:
     candidates: list[Path] = []
-    for base in [settings.project_root / "data" / "runs", settings.project_root / "data" / "replays"]:
+    bases = [settings.project_root / "data" / "runs"]
+    if scope == "replays":
+        bases = [settings.project_root / "data" / "replays"]
+    elif scope == "history":
+        bases = [settings.project_root / "data" / "runs", settings.project_root / "data" / "replays"]
+    for base in bases:
         if not base.exists():
             continue
         candidates.extend(base.rglob("alias_review_pending.csv"))
@@ -215,7 +233,21 @@ def _normalize_alias_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return normalized
 
 
-def _alias_file_payload(path: Path, include_blocked: bool = True, cleanup_empty: bool = True) -> dict[str, object] | None:
+def _registry_approved_keys() -> set[tuple[str, str]]:
+    approved = load_approved_registry_aliases(settings.project_root)
+    return {
+        (str(item.get("league") or ""), str(item.get("betano_name") or "").casefold())
+        for item in approved.get("items", [])
+    }
+
+
+def _alias_file_payload(
+    path: Path,
+    include_blocked: bool = True,
+    cleanup_empty: bool = True,
+    include_resolved: bool = False,
+    approved_keys: set[tuple[str, str]] | None = None,
+) -> dict[str, object] | None:
     rows, delimiter, fieldnames = _read_text_csv(path)
     if not rows:
         if cleanup_empty and path.exists():
@@ -223,10 +255,17 @@ def _alias_file_payload(path: Path, include_blocked: bool = True, cleanup_empty:
         return None
 
     normalized = _normalize_alias_rows(rows)
-    visible = [
-        row for row in normalized
-        if row.get("match_status") == "pending_review" or (include_blocked and row.get("match_status") == "blocked")
-    ]
+    visible = []
+    covered = 0
+    for row in normalized:
+        is_active = row.get("match_status") == "pending_review" or (include_blocked and row.get("match_status") == "blocked")
+        if approved_keys and (row.get("league", ""), row.get("source_name", "").casefold()) in approved_keys:
+            covered += 1
+            if include_resolved:
+                visible.append({**row, "diagnostic_status": "covered_by_registry"})
+            continue
+        if is_active:
+            visible.append(row)
     counts = {
         "pending_review": sum(1 for row in normalized if row.get("match_status") == "pending_review"),
         "blocked": sum(1 for row in normalized if row.get("match_status") == "blocked"),
@@ -242,6 +281,7 @@ def _alias_file_payload(path: Path, include_blocked: bool = True, cleanup_empty:
         "delimiter": delimiter,
         "fieldnames": fieldnames,
         "status_counts": counts,
+        "covered_by_registry": covered,
         "items": visible,
         "total": len(visible),
     }
@@ -618,11 +658,20 @@ def get_replay_picks(summary_file: str, config_name: str, limit: int = 500):
 
 
 @app.get("/aliases/files")
-def list_alias_files(include_blocked: bool = True):
+def list_alias_files(include_blocked: bool = True, scope: str = "runs_recent", include_resolved: bool = False):
     items = []
-    for file_path in _alias_candidate_files():
-        payload = _alias_file_payload(file_path, include_blocked=include_blocked, cleanup_empty=True)
+    approved_keys = _registry_approved_keys()
+    for file_path in _alias_candidate_files(scope=scope):
+        payload = _alias_file_payload(
+            file_path,
+            include_blocked=include_blocked,
+            cleanup_empty=True,
+            include_resolved=include_resolved,
+            approved_keys=approved_keys,
+        )
         if not payload:
+            continue
+        if not include_resolved and int(payload.get("total") or 0) == 0:
             continue
         items.append({
             "pending_file": payload["pending_file"],
@@ -634,9 +683,15 @@ def list_alias_files(include_blocked: bool = True):
 
 
 @app.get("/aliases/review")
-def get_alias_review(pending_file: str, alias_file: str = "alias_times.json", include_blocked: bool = True):
+def get_alias_review(pending_file: str, alias_file: str = "alias_times.json", include_blocked: bool = True, include_resolved: bool = False):
     pending_path = _resolve_project_path(pending_file)
-    payload = _alias_file_payload(pending_path, include_blocked=include_blocked, cleanup_empty=False)
+    payload = _alias_file_payload(
+        pending_path,
+        include_blocked=include_blocked,
+        cleanup_empty=False,
+        include_resolved=include_resolved,
+        approved_keys=_registry_approved_keys(),
+    )
     if not payload:
         return {
             "pending_file": pending_file,
@@ -694,6 +749,59 @@ def approve_aliases(req: AliasApproveRequest):
         "deleted_pending_file": deleted,
         "alias_file": str(alias_path),
     }
+
+
+@app.get("/api/team-registry/pending")
+def get_team_registry_pending():
+    return load_pending_registry_reviews(settings.project_root)
+
+
+@app.get("/api/team-registry/approved")
+def get_team_registry_approved():
+    return load_approved_registry_aliases(settings.project_root)
+
+
+@app.get("/api/team-registry/leagues")
+def get_team_registry_leagues():
+    return list_registry_leagues(settings.project_root)
+
+
+@app.post("/api/team-registry/sync")
+def sync_team_registry(req: TeamRegistrySyncRequest):
+    try:
+        result = sync_registry_league(settings.project_root, req.dict(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result.get("status") == "error":
+        raise HTTPException(status_code=502, detail=result)
+    return result
+
+
+@app.post("/api/team-registry/sync-all")
+def sync_all_team_registry(req: TeamRegistrySyncAllRequest | None = None):
+    payload = req.dict(exclude_none=True) if req else {}
+    return sync_all_registry_leagues(settings.project_root, payload)
+
+
+@app.post("/api/team-registry/approve")
+def approve_team_registry_alias(req: TeamRegistryAliasRequest):
+    try:
+        return approve_registry_alias(settings.project_root, req.dict(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/team-registry/reject")
+def reject_team_registry_alias(req: TeamRegistryAliasRequest):
+    return reject_registry_alias(settings.project_root, req.dict(exclude_none=True))
+
+
+@app.post("/api/team-registry/update")
+def update_team_registry_alias(req: TeamRegistryAliasRequest):
+    try:
+        return update_registry_pending_alias(settings.project_root, req.dict(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/dashboard/summary")

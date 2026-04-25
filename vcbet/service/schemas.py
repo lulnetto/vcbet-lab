@@ -148,6 +148,39 @@ class AliasApproveRequest(BaseModel):
     include_blocked: bool = True
 
 
+class TeamRegistryAliasRequest(BaseModel):
+    league: str
+    betano_name: str
+    betano_team_id: str = ""
+    betano_url: str = ""
+    suggested_footystats_name: str | None = None
+    footystats_name: str | None = None
+    top_score: str | None = None
+    review_reason: str | None = None
+    ambiguous_options: str | None = None
+    status: str | None = None
+    source: str | None = None
+    match_confidence: str | None = None
+    match_method: str | None = None
+    coverage_status: str | None = None
+    manual_override: bool = False
+    manual_override_reason: str | None = None
+
+
+class TeamRegistrySyncRequest(BaseModel):
+    league: str
+    source: Literal["configured_url", "saved_html"] = "configured_url"
+    html_path: str | None = None
+    xg_file: str | None = None
+    threshold: float = 0.94
+    margin: float = 0.08
+
+
+class TeamRegistrySyncAllRequest(BaseModel):
+    threshold: float = 0.94
+    margin: float = 0.08
+
+
 class ConfigInfo(BaseModel):
     name: str
     label: str

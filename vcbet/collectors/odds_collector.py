@@ -67,7 +67,7 @@ class BetanoExtractor:
 
     def extract_all_odds(self, match_path: str, min_odd: float, league_name: str, run_id: str) -> List[Dict]:
         event_url = f"{self.base_url}{match_path}" if match_path.startswith("/") else match_path
-        url = f"{event_url}?bt=14"
+        url = f"{event_url}?bt=99"
         collected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:

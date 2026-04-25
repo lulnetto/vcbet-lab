@@ -1,3 +1,2 @@
 league;betano_name;betano_team_id;betano_url;footystats_name;match_status;match_confidence;match_method;approved_at;source
-Bundesliga;Bayern de Munique;;;FC Bayern München;MATCH_REGISTRY_APPROVED;1.0000;registry_auto_strict;2026-04-25 02:13:23;patch_8_4_local_html_validation
-Bundesliga;Borussia Dortmund;;;BVB 09 Borussia Dortmund;MATCH_REGISTRY_APPROVED;1.0000;registry_auto_strict;2026-04-25 02:13:23;patch_8_4_local_html_validation
+Bundesliga;Bayer Leverkusen;108822;https://www.betano.bet.br/sport/futebol/competicoes/alemanha/216/bayer-leverkusen/108822-t/;Bayer 04 Leverkusen;MATCH_REGISTRY_APPROVED;1.0000;registry_auto_strict;2026-04-25 07:43:00;https://www.betano.bet.br/sport/futebol/alemanha/bundesliga/216/?bt=standings

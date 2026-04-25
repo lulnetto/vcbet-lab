@@ -129,7 +129,7 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
         },
         "safety_gates": {
             "enabled": True,
-            "block_flags": ["MATCH_FUZZY", "MATCH_DUVIDOSO", "DADO_INCOMPLETO_LIGA"],
+            "block_flags": ["MATCH_FUZZY", "MATCH_DUVIDOSO", "MATCH_REGISTRY_PENDING", "MATCH_UNRESOLVED", "DADO_INCOMPLETO_LIGA"],
         },
         "portfolio": {
             "max_picks_per_match": 2,

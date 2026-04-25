@@ -40,7 +40,7 @@ class BetanoClosingOddsCollector:
         return {}
 
     def fetch_market_rows(self, event_url: str) -> list[dict[str, Any]]:
-        url = f"{event_url}?bt=14"
+        url = f"{event_url}?bt=99"
         response = self.session.get(url, timeout=10)
         state = self._extract_hydration_state(response.text)
         event_data = state.get("data", {}).get("event", {})
