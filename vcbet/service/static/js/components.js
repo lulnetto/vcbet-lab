@@ -16,12 +16,138 @@ function formatLocalDateTime(value) {
   }).format(dt);
 }
 
+function formatPtDate(value) {
+  if (!value) return '';
+  const text = String(value).slice(0, 10);
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value);
+}
+
+function todayIsoDate() {
+  return typeof initialLocalDate === 'function' ? initialLocalDate() : new Date().toISOString().slice(0, 10);
+}
+
 function statusClass(value) {
   const text = String(value || '').toLowerCase();
   if (['done','completed','success','ok','settled','finished'].some(x => text.includes(x))) return 'ok';
   if (['queued','running','pending','open','atenção','pendente','rodando','parcial'].some(x => text.includes(x))) return 'warn';
   if (['fail','error','cancel','blocked','bad','erro'].some(x => text.includes(x))) return 'bad';
   return '';
+}
+
+function entityEmptyMessage(kind) {
+  if (kind === 'runs' || kind === 'replays') {
+    return 'Catálogo não encontrado. Rode scripts/build_run_catalog.py e scripts/build_replay_catalog.py ou gere uma nova execução.';
+  }
+  return 'Nenhum item encontrado.';
+}
+
+function renderDatePicker(id, value = state.selectedDate || todayIsoDate()) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.type = 'date';
+  if (!el.value) el.value = value;
+  el.onchange = () => {
+    state.selectedDate = el.value || todayIsoDate();
+    renderTodayCockpit();
+  };
+}
+
+function renderEntitySelect(id, items, options = {}) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const {
+    valueKey = 'id',
+    labelKey = 'label',
+    emptyLabel = 'nenhum item encontrado',
+    placeholder = 'Selecione',
+    keepEmpty = false,
+    selected = '',
+    onChange = null,
+  } = options;
+  const current = el.value || selected;
+  el.innerHTML = keepEmpty ? `<option value="">${escapeHtml(placeholder)}</option>` : '';
+  if (!items || !items.length) {
+    el.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
+    el.disabled = true;
+    if (onChange) onChange('');
+    return;
+  }
+  el.disabled = false;
+  items.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item[valueKey] ?? '';
+    opt.textContent = item[labelKey] ?? item[valueKey] ?? '';
+    Object.entries(item).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && typeof value !== 'object') opt.dataset[key] = value;
+    });
+    el.appendChild(opt);
+  });
+  if ([...el.options].some(o => o.value === current)) el.value = current;
+  else if (selected && [...el.options].some(o => o.value === selected)) el.value = selected;
+  if (onChange) {
+    el.onchange = () => onChange(el.value, items.find(item => String(item[valueKey] ?? '') === el.value));
+    onChange(el.value, items.find(item => String(item[valueKey] ?? '') === el.value));
+  }
+}
+
+function renderLedgerSelect(id, inputId) {
+  renderEntitySelect(id, state.entities.ledgers, {
+    valueKey: 'id',
+    labelKey: 'label',
+    selected: state.selectedLedger || 'official',
+    emptyLabel: entityEmptyMessage('ledgers'),
+    onChange: (value, item) => {
+      state.selectedLedger = value || state.selectedLedger || 'official';
+      const input = document.getElementById(inputId);
+      if (input && item?.path) input.value = item.path;
+    },
+  });
+}
+
+function renderRunSelect(id, inputId) {
+  renderEntitySelect(id, state.entities.runs, {
+    valueKey: 'run_dir',
+    labelKey: 'label',
+    selected: state.selectedRun,
+    keepEmpty: true,
+    placeholder: 'Selecione uma run',
+    emptyLabel: state.entities.catalogMessages.runs || 'Nenhuma run encontrada.',
+    onChange: (value) => {
+      state.selectedRun = value || '';
+      const input = document.getElementById(inputId);
+      if (input) input.value = value || '';
+    },
+  });
+}
+
+function renderReplaySelect(id) {
+  renderEntitySelect(id, state.entities.replays, {
+    valueKey: 'summary_file',
+    labelKey: 'label',
+    selected: state.selectedReplay,
+    keepEmpty: true,
+    placeholder: 'Selecione um replay',
+    emptyLabel: state.entities.catalogMessages.replays || 'Nenhum replay encontrado.',
+    onChange: (value) => { state.selectedReplay = value || ''; },
+  });
+}
+
+function renderConfigSelect(id, preferred = state.selectedConfig || 'legacy_v2') {
+  renderEntitySelect(id, state.entities.configs, {
+    valueKey: 'id',
+    labelKey: 'label',
+    selected: preferred,
+    emptyLabel: entityEmptyMessage('configs'),
+    onChange: (value) => {
+      if (value) state.selectedConfig = value;
+      renderTodayCockpit();
+    },
+  });
+}
+
+function renderManualPathToggle(summaryText = 'Avançado') {
+  return `<summary>${escapeHtml(summaryText)}</summary>`;
 }
 
 function statusPill(value) {

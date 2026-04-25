@@ -18,3 +18,19 @@ async function api(path, options = {}) {
   }
   return payload;
 }
+
+function fetchConfigs() {
+  return api('/api/entities/configs');
+}
+
+function fetchLedgers() {
+  return api('/api/entities/ledgers');
+}
+
+function fetchRuns() {
+  return api('/api/entities/runs?limit=300');
+}
+
+function fetchReplays() {
+  return api('/api/entities/replays?limit=300');
+}

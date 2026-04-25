@@ -17,6 +17,12 @@ It uses classic global scripts, not ES modules. Preserve global functions refere
 - `js/screens.js`: screen-specific load and render logic for Hoje, Carteira, Replay Lab, Qualidade de Dados, and Monitor.
 - `js/app.js`: application bootstrap, navigation wiring, initial loads, and global event setup.
 
+## Entity Selectors
+
+The normal UI uses selectors for operational dates, configs, ledgers, runs, and replays. The selectors are populated from read-only service endpoints and generated local catalogs when they exist. Manual text/path fields stay under `Avançado` so existing backend command payloads continue to receive the same strings.
+
+If `data/runs/catalog.jsonl` or `data/replays/catalog.jsonl` is missing, selector empty states should explain that the catalogs can be regenerated with `scripts/build_run_catalog.py` and `scripts/build_replay_catalog.py`.
+
 ## Development Rules
 
 - Keep the frontend framework-free for now.
