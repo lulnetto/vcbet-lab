@@ -29,7 +29,142 @@ function statusPill(value) {
 }
 
 function rowDetails(row, label = 'Detalhes') {
-  return `<details class="table-detail"><summary>${escapeHtml(label)}</summary><pre>${escapeHtml(JSON.stringify(row, null, 2))}</pre></details>`;
+  return `<details class="table-detail advanced"><summary>${escapeHtml(label)}</summary><pre>${escapeHtml(JSON.stringify(row, null, 2))}</pre></details>`;
+}
+
+function displayValue(value) {
+  if (value === undefined || value === null || value === '') return 'não disponível';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : 'não disponível';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return value;
+}
+
+function firstAvailable(row, keys) {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+  }
+  return null;
+}
+
+function pickWarnings(row) {
+  const warnings = [];
+  const knownChecks = [
+    ['alias', ['alias_status', 'aliases_pending', 'alias_pending', 'blocked_aliases']],
+    ['fallback replay', ['replay_fallback_used', 'fallback_used']],
+    ['trace incompleto', ['trace_complete', 'trace_status']],
+    ['odds snapshot', ['odds_snapshot_status', 'odds_snapshot_file', 'closing_odds_status']],
+    ['contrato temporal', ['temporal_contract_status']],
+  ];
+  knownChecks.forEach(([label, keys]) => {
+    const value = firstAvailable(row, keys);
+    const text = String(value ?? '').toLowerCase();
+    if (value === true || (label === 'trace incompleto' && value === false) || ['missing','weak','unavailable','incomplete','pending','blocked','bad','fallback'].some(x => text.includes(x))) {
+      warnings.push(`${label}: ${displayValue(value)}`);
+    }
+  });
+  Object.entries(row || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '' || value === false) return;
+    const keyText = key.toLowerCase();
+    if (!/(warning|flag|limitation|error)/.test(keyText)) return;
+    const text = displayValue(value);
+    if (text !== 'não disponível') warnings.push(`${key}: ${text}`);
+  });
+  return [...new Set(warnings)].slice(0, 6);
+}
+
+function warningList(items, emptyText = '') {
+  if (!items || !items.length) return emptyText ? `<div class="state-box subtle">${escapeHtml(emptyText)}</div>` : '';
+  return `<div class="warning-list">${items.map(item => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>`;
+}
+
+function pickDetailButton(source, index) {
+  return `<button class="ghost small" onclick="openPickDetail('${escapeHtml(source)}', ${Number(index)})">inspecionar</button>`;
+}
+
+function ensurePickDrawer() {
+  let root = document.getElementById('pickDetailDrawer');
+  if (root) return root;
+  root = document.createElement('div');
+  root.id = 'pickDetailDrawer';
+  root.className = 'drawer-backdrop';
+  root.innerHTML = '<aside class="drawer-panel" role="dialog" aria-modal="true"></aside>';
+  root.onclick = event => {
+    if (event.target === root) closePickDetail();
+  };
+  document.body.appendChild(root);
+  return root;
+}
+
+function detailRow(label, value) {
+  return `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(displayValue(value))}</strong></div>`;
+}
+
+function openPickDetail(source, index) {
+  const collections = {
+    dashboard: state.dashboardEntries || [],
+    replay: state.replayPicks || [],
+  };
+  const row = collections[source]?.[index];
+  if (!row) return;
+  const root = ensurePickDrawer();
+  const panel = root.querySelector('.drawer-panel');
+  const warnings = pickWarnings(row);
+  const technicalKeys = [
+    'run_id', 'source_run_id', 'source_file', 'summary_file', 'config_name', 'created_at',
+    'candidate_stage', 'pick_safety_status', 'final_bet_status', 'final_settlement_status',
+    'trace_status', 'temporal_contract_status', 'replay_quality_status', 'replay_source_strength',
+  ];
+  panel.innerHTML = `
+    <div class="drawer-head">
+      <div>
+        <div class="muted">Inspeção de pick</div>
+        <h2>${escapeHtml(displayValue(firstAvailable(row, ['match_name', 'fixture', 'event_name'])))}</h2>
+      </div>
+      <button class="ghost small" onclick="closePickDetail()">fechar</button>
+    </div>
+    ${warnings.length ? warningList(warnings) : ''}
+    <div class="detail-grid">
+      ${detailRow('Liga', firstAvailable(row, ['league', 'competition']))}
+      ${detailRow('Mercado', firstAvailable(row, ['market_type', 'market']))}
+      ${detailRow('Seleção', firstAvailable(row, ['selection_raw', 'selection', 'side']))}
+      ${detailRow('Linha', firstAvailable(row, ['line', 'handicap']))}
+      ${detailRow('Odd entrada', firstAvailable(row, ['odd_entrada', 'odds', 'price']))}
+      ${detailRow('Odd justa/modelo', firstAvailable(row, ['fair_odds', 'model_odds', 'odd_fair', 'fair_price']))}
+      ${detailRow('EV / edge', firstAvailable(row, ['ev_percent', 'edge_percent', 'model_edge', 'ev']))}
+      ${detailRow('Confiança', firstAvailable(row, ['confidence_score', 'confidence']))}
+      ${detailRow('Status', firstAvailable(row, ['final_settlement_status', 'final_bet_status', 'pick_safety_status', 'candidate_stage']))}
+      ${detailRow('Config', firstAvailable(row, ['config_name', 'config']))}
+      ${detailRow('Run/fonte', firstAvailable(row, ['run_id', 'source_run_id', 'source_file', 'summary_file']))}
+    </div>
+    <details class="advanced" open>
+      <summary>Metadados técnicos</summary>
+      <div class="detail-grid compact">
+        ${technicalKeys.map(key => detailRow(key, row[key])).join('')}
+      </div>
+    </details>
+    <details class="advanced">
+      <summary>JSON bruto</summary>
+      <pre>${escapeHtml(JSON.stringify(row, null, 2))}</pre>
+    </details>`;
+  root.classList.add('open');
+}
+
+function closePickDetail() {
+  const root = document.getElementById('pickDetailDrawer');
+  if (root) root.classList.remove('open');
+}
+
+function jobActionContext(job) {
+  const type = String(job?.job_type || job?.title || '').toLowerCase();
+  const req = job?.request || {};
+  if (type.includes('replay')) return 'Replay Lab';
+  if (type.includes('closing')) return 'Atualizar closing odds';
+  if (type.includes('result')) return 'Atualizar resultados';
+  if (type.includes('settlement')) return 'Liquidar ledger';
+  if (type.includes('daily')) return 'Ciclo diário completo';
+  if (type.includes('analysis')) return 'Gerar picks';
+  if (req.config_name || req.target_date) return 'Rotina operacional';
+  return 'Ação não identificada';
 }
 
 function fillSelect(id, values, keepEmpty = false, emptyLabel = 'Todos') {

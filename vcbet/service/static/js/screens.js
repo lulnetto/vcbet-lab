@@ -61,6 +61,13 @@ function renderTodayCockpit() {
   const settled = Number(summary.settled_entries || 0);
   const clvCount = Number(state.dashboard?.clv?.count || 0);
   const incompleteReplay = state.replaySummaries.some(item => ['incomplete','blocked','bad'].some(x => String(item.replay_quality_status || item.temporal_contract_status || '').toLowerCase().includes(x)));
+  const warningItems = [];
+  if (aliases) warningItems.push(`${aliases} alias(es) pendente(s) em Qualidade de Dados.`);
+  if (failedJobs) warningItems.push(`${failedJobs} job(s) com erro no Monitor.`);
+  if (state.loadErrors.dashboard) warningItems.push('Carteira não verificada nesta carga.');
+  if (state.loadErrors.replay) warningItems.push('Replay Lab não verificado nesta carga.');
+  if (incompleteReplay) warningItems.push('Há replay com qualidade ou contrato temporal fraco/incompleto.');
+  if (!total && !state.loadErrors.dashboard) warningItems.push('Nenhuma pick disponível no filtro atual.');
 
   document.getElementById('todayDate').textContent = operationalDate() || 'não selecionada';
   document.getElementById('todayConfig').textContent = selectedConfigName() || 'não verificada';
@@ -83,6 +90,8 @@ function renderTodayCockpit() {
     ['Resultados pendentes', state.loadErrors.dashboard ? 'não verificado' : (open ? String(open) : '0')],
     ['Replay/diagnóstico', state.loadErrors.replay ? 'não verificado' : (incompleteReplay ? 'atenção' : (state.replaySummaries.length ? 'ok' : 'não verificado'))],
   ];
+  const warningsEl = document.getElementById('todayWarnings');
+  if (warningsEl) warningsEl.innerHTML = warningList(warningItems);
   document.getElementById('todayPending').innerHTML = pendingRows.map(([label, value]) => `<div class="summary-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
 
   const flags = (state.dashboard?.breakdowns?.by_flag || []).slice(0, 3).map(row => `${row.bucket}: ${row.picks}`).join(', ') || 'sem flags no filtro';
@@ -96,7 +105,7 @@ function renderTodayCockpit() {
   const relevantJobs = state.jobs.slice(0, 4);
   document.getElementById('todayJobs').innerHTML = state.loadErrors.jobs
     ? '<div class="state-box"><strong>Jobs não verificados.</strong>O restante do cockpit continua disponível.</div>'
-    : (relevantJobs.map(job => `<div class="compact-job"><div class="inline"><strong>${escapeHtml(job.title)}</strong>${statusPill(job.status)}</div><div class="muted">${escapeHtml(job.job_type)} | ${escapeHtml(job.id)}</div></div>`).join('') || '<div class="state-box"><strong>Nenhum job recente.</strong>Abra o Monitor para acompanhar novas execuções.</div>');
+    : (relevantJobs.map(job => `<div class="compact-job ${statusClass(job.status)}"><div class="inline"><strong>${escapeHtml(job.title)}</strong>${statusPill(job.status)}</div><div class="muted">${escapeHtml(jobActionContext(job))} | ${escapeHtml(job.job_type)} | ${escapeHtml(job.id)}</div></div>`).join('') || '<div class="state-box"><strong>Nenhum job recente.</strong>Abra o Monitor para acompanhar novas execuções.</div>');
   renderNextAction();
 }
 
@@ -168,13 +177,19 @@ async function loadEntries() {
     const payload = await api(`/dashboard/entries?${qs({...dashboardParams(), limit: 300})}`);
     state.dashboardEntries = payload.items || [];
     delete state.loadErrors.entries;
-    const rows = (payload.items || []).map(row => ({...row, status_html: statusPill(row.final_settlement_status || row.pick_safety_status || row.candidate_stage), details: rowDetails(row)}));
+    const rows = (payload.items || []).map((row, idx) => ({
+      ...row,
+      warning_html: warningList(pickWarnings(row), 'sem aviso'),
+      status_html: statusPill(row.final_settlement_status || row.pick_safety_status || row.candidate_stage),
+      inspect: pickDetailButton('dashboard', idx),
+      details: rowDetails(row, 'Avançado')
+    }));
     renderTable('tableEntries', rows, [
       {key:'match_datetime', label:'Jogo em', format:v => formatLocalDateTime(v)},
       {key:'league', label:'Liga'}, {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'},
       {key:'selection_raw', label:'Seleção'}, {key:'line', label:'Linha'}, {key:'odd_entrada', label:'Odd'},
       {key:'ev_percent', label:'EV %'}, {key:'confidence_score', label:'Conf.'}, {key:'stake_units', label:'Stake'},
-      {key:'status_html', label:'Status', html:true}, {key:'details', label:'', html:true},
+      {key:'status_html', label:'Status', html:true}, {key:'warning_html', label:'Avisos', html:true}, {key:'inspect', label:'', html:true}, {key:'details', label:'', html:true},
     ], 'Sem picks ou entradas para os filtros atuais. Ajuste filtros, selecione outra run ou rode uma análise em Hoje.');
     renderTodayCockpit();
   } catch (err) {
@@ -344,6 +359,23 @@ async function loadReplaySummaryDetail(index) {
   const ctx = payload.comparison_context || {};
   const replayContract = payload.replay_input_contract || {};
   const recMethod = ctx.recommendation_method || payload.recommended_configs?.method || 'manual_policy';
+  const replayWarnings = [];
+  const quality = payload.replay_quality_status || replayContract.replay_quality_status || '';
+  const temporal = payload.temporal_contract_status || replayContract.temporal_contract_status || '';
+  const strength = payload.replay_source_strength || replayContract.replay_source_strength || '';
+  if (['incomplete','blocked','bad','weak'].some(x => String(quality).toLowerCase().includes(x))) replayWarnings.push(`Qualidade do replay: ${quality}`);
+  if (['weak','unavailable','missing','incomplete','bad'].some(x => String(temporal).toLowerCase().includes(x))) replayWarnings.push(`Contrato temporal: ${temporal}`);
+  if (['fallback','weak','missing','unavailable'].some(x => String(strength).toLowerCase().includes(x))) replayWarnings.push(`Força da fonte: ${strength}`);
+  (payload.replay_limitations || replayContract.replay_limitations || []).forEach(item => replayWarnings.push(`Limitação: ${item}`));
+  const selectedConfigs = (payload.results || []).map(r => r.config_name).filter(Boolean);
+  const pickCounts = (payload.results || []).map(r => `${r.config_name || '-'}: ${displayValue(r.picks_total)} picks`);
+  document.getElementById('replayWarnings').innerHTML = warningList(replayWarnings, 'Nenhum aviso explícito de força/qualidade no payload.');
+  document.getElementById('replayComparisonBrief').innerHTML = `
+    <div class="comparison-brief">
+      ${detailRow('Configs selecionadas', selectedConfigs.join(', '))}
+      ${detailRow('Diferença visível', pickCounts.join(' | '))}
+      ${detailRow('Método de recomendação', recMethod)}
+    </div>`;
   document.getElementById('replaySummaryKpis').innerHTML = `
     <div class="kpi"><div class="label">Source run</div><div class="value">${escapeHtml(payload.source_run_id || '-')}</div></div>
     <div class="kpi"><div class="label">Data</div><div class="value">${escapeHtml(payload.target_date || '-')}</div></div>
@@ -362,13 +394,20 @@ async function loadReplaySummaryDetail(index) {
 
 async function loadReplayPicks(summaryFile, configName) {
   const payload = await api(`/replays/picks?${qs({summary_file: summaryFile, config_name: configName, limit: 400})}`);
+  state.replayPicks = payload.items || [];
   document.getElementById('replayPicksMeta').textContent = `${configName} | ${payload.total} picks | fonte=${payload.source_file || '-'}`;
-  const rows = (payload.items || []).map(row => ({...row, status_html: statusPill(row.final_bet_status || row.pick_safety_status || row.temporal_contract_status), details: rowDetails(row)}));
+  const rows = (payload.items || []).map((row, idx) => ({
+    ...row,
+    warning_html: warningList(pickWarnings(row), 'sem aviso'),
+    status_html: statusPill(row.final_bet_status || row.pick_safety_status || row.temporal_contract_status),
+    inspect: pickDetailButton('replay', idx),
+    details: rowDetails(row, 'Avançado')
+  }));
   renderTable('tableReplayPicks', rows, [
     {key:'league', label:'Liga'}, {key:'match_name', label:'Jogo'}, {key:'market_type', label:'Mercado'},
     {key:'selection_raw', label:'Seleção'}, {key:'line', label:'Linha'}, {key:'odd_entrada', label:'Odd'},
     {key:'ev_percent', label:'EV %'}, {key:'confidence_score', label:'Conf.'}, {key:'stake_units', label:'Stake'},
-    {key:'status_html', label:'Status', html:true}, {key:'details', label:'', html:true}
+    {key:'status_html', label:'Status', html:true}, {key:'warning_html', label:'Avisos', html:true}, {key:'inspect', label:'', html:true}, {key:'details', label:'', html:true}
   ], 'Este replay não retornou picks para a config selecionada. Confira a run origem ou escolha outra config.');
 }
 
@@ -487,9 +526,17 @@ function formatJob(job) {
   const replayCfg = req.configs ? ` | configs=${req.configs.join(',')}` : '';
   const canCancel = ['queued','running'].includes(job.status);
   const cancelButton = canCancel ? `<button class="danger small" onclick="cancelJob('${escapeHtml(job.id)}')">cancelar</button>` : '';
-  return `<div class="job">
+  const failed = ['failed','error'].includes(String(job.status || '').toLowerCase());
+  const requestBits = [
+    req.target_date ? `data=${req.target_date}` : '',
+    req.source_run_dir ? `run=${req.source_run_dir}` : '',
+    config.trim(),
+    replayCfg.trim(),
+  ].filter(Boolean).join(' | ');
+  return `<div class="job ${failed ? 'job-failed' : statusClass(job.status)}">
     <div class="inline"><strong>${escapeHtml(job.title)}</strong>${statusPill(job.status)}<span class="muted">${escapeHtml(job.id)}</span></div>
-    <div class="muted">${escapeHtml(job.job_type)}${escapeHtml(config)}${escapeHtml(replayCfg)}</div>
+    <div class="job-context"><strong>${escapeHtml(jobActionContext(job))}</strong><span>${escapeHtml(job.job_type || '-')}</span></div>
+    ${requestBits ? `<div class="muted">${escapeHtml(requestBits)}</div>` : ''}
     <div class="inline" style="margin-top:8px;">
       <button class="ghost small" onclick="viewLogs('${escapeHtml(job.id)}')">logs</button>
       ${cancelButton}
