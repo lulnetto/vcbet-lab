@@ -64,12 +64,26 @@ Closing odds are maintenance data, not the original decision odds. The original 
 
 Closing odds are not part of the default daily cycle. Use the watcher/manual maintenance tick only when closing capture is intentionally being run.
 
+## Team Alias Registry
+
+Use the Betano ↔ FootyStats registry before sensitive runs when a quality report shows `MATCH_FUZZY`, `unresolved_team_match`, or `registry_stale`.
+
+Examples:
+
+```bash
+/home/otten/miniforge3/bin/conda run -n ubet python3 scripts/sync_team_aliases.py --league "Bundesliga"
+/home/otten/miniforge3/bin/conda run -n ubet python3 scripts/sync_team_aliases.py --from-html /tmp/betano_bundesliga.html --league "Bundesliga" --dry-run
+```
+
+Approved aliases are appended idempotently to `configs/team_registry/betano_footystats_aliases.csv`. Ambiguous cases are written to `data/team_registry/alias_review_pending.csv` with candidate options for manual review. The run pipeline trusts only approved registry aliases; fuzzy matches remain blocked by the official safety policy.
+
 ## Operational Data
 
 - Daily analysis outputs are written under `data/runs/`.
 - Replay outputs are written under `data/replays/`.
 - Ledger/history files live under `data/history/`.
 - Results and overrides live under `data/results/`.
+- Team registry review/snapshot outputs live under `data/team_registry/`.
 - Service jobs and logs live under `data/service/jobs/` and `data/service/logs/`.
 - Run and replay selectors read generated local catalogs at `data/runs/catalog.jsonl` and `data/replays/catalog.jsonl` when available.
 - The official ledger is protected by a ledger-level portfolio gate before new official picks are appended. Cross-run/cross-config duplicate, correlated, or contradictory open exposures are blocked into a traceable review artifact instead of entering the official ledger silently.

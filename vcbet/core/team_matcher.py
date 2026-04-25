@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from thefuzz import fuzz, process
+from vcbet.core.team_registry import DEFAULT_REGISTRY_FILE, registry_lookup
 
 DEFAULT_ALIAS_FILE = Path("alias_times.json")
 PULAR_SENTINEL = "__PULAR__"
@@ -21,6 +22,9 @@ class TeamMatchResult:
     match_status: str
     score: int
     suggestion: str | None
+    match_source: str = ""
+    alias_confidence: str = ""
+    registry_file: str = ""
 
 
 @dataclass
@@ -88,6 +92,8 @@ def match_team_name(
     candidates: list[str],
     alias_cache: dict[str, str] | None = None,
     *,
+    league: str | None = None,
+    registry_file: str | Path | None = DEFAULT_REGISTRY_FILE,
     high_threshold: int = 90,
     review_threshold: int = 75,
 ) -> TeamMatchResult:
@@ -101,6 +107,25 @@ def match_team_name(
             score=0,
             suggestion=None,
         )
+
+    if league and registry_file:
+        registry_alias = registry_lookup(league, source_name, candidates, registry_file=registry_file)
+        if registry_alias:
+            confidence = registry_alias.match_confidence or "1.0000"
+            try:
+                score = int(round(float(confidence) * 100))
+            except ValueError:
+                score = 100
+            return TeamMatchResult(
+                source_name=source_name,
+                matched_name=registry_alias.footystats_name,
+                match_status="MATCH_REGISTRY_APPROVED",
+                score=score,
+                suggestion=registry_alias.footystats_name,
+                match_source="team_registry",
+                alias_confidence=confidence,
+                registry_file=str(registry_file),
+            )
 
     if source_name in alias_cache:
         cached_value = alias_cache[source_name]
@@ -120,6 +145,7 @@ def match_team_name(
                 match_status="manual_approved",
                 score=100,
                 suggestion=canonical_name,
+                match_source="alias_times",
             )
 
     exact = canonical_candidate_name(source_name, candidates)
@@ -130,6 +156,7 @@ def match_team_name(
             match_status="auto_exact",
             score=100,
             suggestion=exact,
+            match_source="exact",
         )
 
     extracted = process.extractOne(source_name, candidates, scorer=fuzz.token_set_ratio)
@@ -152,6 +179,7 @@ def match_team_name(
             match_status="auto_fuzzy_high",
             score=score,
             suggestion=best_match,
+            match_source="fuzzy",
         )
 
     if score >= review_threshold:
@@ -161,6 +189,7 @@ def match_team_name(
             match_status="pending_review",
             score=score,
             suggestion=best_match,
+            match_source="fuzzy",
         )
 
     return TeamMatchResult(
@@ -169,6 +198,7 @@ def match_team_name(
         match_status="blocked",
         score=score,
         suggestion=best_match,
+        match_source="fuzzy",
     )
 
 

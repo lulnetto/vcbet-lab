@@ -91,7 +91,7 @@ def _confidence_score(candidate: dict[str, Any], flags: list[str]) -> tuple[int,
         score += int(bonuses.get("complete_data", 1))
         reasons.append("DADO_COMPLETO")
 
-    if candidate.get("match_status_home") in {"auto_exact", "manual_approved"} and candidate.get("match_status_away") in {"auto_exact", "manual_approved"}:
+    if candidate.get("match_status_home") in {"auto_exact", "manual_approved", "MATCH_REGISTRY_APPROVED"} and candidate.get("match_status_away") in {"auto_exact", "manual_approved", "MATCH_REGISTRY_APPROVED"}:
         score += int(bonuses.get("reliable_match", 1))
         reasons.append("MATCH_CONFIAVEL")
 

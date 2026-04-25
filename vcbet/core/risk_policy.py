@@ -42,7 +42,8 @@ def assess_risk_flags(candidate: dict[str, Any]) -> list[str]:
 
     home_status = candidate.get("match_status_home")
     away_status = candidate.get("match_status_away")
-    if home_status not in {"auto_exact", "manual_approved", "auto_fuzzy_high"} or away_status not in {"auto_exact", "manual_approved", "auto_fuzzy_high"}:
+    reliable_statuses = {"auto_exact", "manual_approved", "MATCH_REGISTRY_APPROVED", "auto_fuzzy_high"}
+    if home_status not in reliable_statuses or away_status not in reliable_statuses:
         flags.append("MATCH_DUVIDOSO")
     elif home_status == "auto_fuzzy_high" or away_status == "auto_fuzzy_high":
         flags.append("MATCH_FUZZY")

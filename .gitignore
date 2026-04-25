@@ -12,6 +12,7 @@ Thumbs.db
 *.tmp
 *.bak
 
+dev_asset/*
 data/
 base_xg_stats.csv
 odds_multiplas_betano_*.csv

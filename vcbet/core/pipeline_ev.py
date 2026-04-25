@@ -184,7 +184,8 @@ def processar_pipeline(
     xg_by_league = {league: league_df.copy() for league, league_df in df_xg.groupby("league")}
     pending_rows: list[PendingAliasRow] = []
     pending_seen = set()
-    status_counts = {key: 0 for key in ["auto_exact", "auto_fuzzy_high", "manual_approved", "pending_review", "blocked"]}
+    registry_stale_leagues = set()
+    status_counts = {key: 0 for key in ["MATCH_REGISTRY_APPROVED", "auto_exact", "auto_fuzzy_high", "manual_approved", "pending_review", "blocked"]}
     generated_at = now_str()
     temporal_status = temporal_contract_status(
         decision_timestamp=generated_at,
@@ -213,11 +214,13 @@ def processar_pipeline(
             continue
 
         candidates = df_xg_liga["team_name"].tolist()
-        home_match = match_team_name(time_casa, candidates, alias_cache, high_threshold=HIGH_MATCH_THRESHOLD, review_threshold=REVIEW_MATCH_THRESHOLD)
-        away_match = match_team_name(time_fora, candidates, alias_cache, high_threshold=HIGH_MATCH_THRESHOLD, review_threshold=REVIEW_MATCH_THRESHOLD)
+        home_match = match_team_name(time_casa, candidates, alias_cache, league=liga_jogo, high_threshold=HIGH_MATCH_THRESHOLD, review_threshold=REVIEW_MATCH_THRESHOLD)
+        away_match = match_team_name(time_fora, candidates, alias_cache, league=liga_jogo, high_threshold=HIGH_MATCH_THRESHOLD, review_threshold=REVIEW_MATCH_THRESHOLD)
 
         for res, side in ((home_match, "home"), (away_match, "away")):
             status_counts[res.match_status] = status_counts.get(res.match_status, 0) + 1
+            if res.match_status in {"auto_fuzzy_high", "pending_review", "blocked"}:
+                registry_stale_leagues.add(str(liga_jogo))
             if res.match_status in {"pending_review", "blocked"}:
                 key = (liga_jogo, res.source_name, side)
                 if key not in pending_seen:
@@ -269,6 +272,12 @@ def processar_pipeline(
             row=linha,
             home_match_status=home_match.match_status,
             away_match_status=away_match.match_status,
+            home_match_source=home_match.match_source,
+            away_match_source=away_match.match_source,
+            home_alias_confidence=home_match.alias_confidence,
+            away_alias_confidence=away_match.alias_confidence,
+            home_registry_file=home_match.registry_file,
+            away_registry_file=away_match.registry_file,
             lambda_bundle=lambda_bundle,
             pricing_result=pricing_result,
             home_xg_row=home_xg_row,
@@ -291,6 +300,7 @@ def processar_pipeline(
     print(
         " -> Pareamento: "
         f"{status_counts['auto_exact']} exatos, "
+        f"{status_counts['MATCH_REGISTRY_APPROVED']} registry, "
         f"{status_counts['auto_fuzzy_high']} fuzzy altos, "
         f"{status_counts['manual_approved']} manuais, "
         f"{status_counts['pending_review']} pendentes, "
@@ -449,6 +459,14 @@ def processar_pipeline(
             "unique_alias_rows_total": int(len(pending_rows)),
             "unique_alias_rows_by_status": to_sorted_dict(unique_pending_counts),
             "unique_alias_rows_by_league": to_sorted_dict(unique_pending_by_league),
+            "registry_stale": bool(
+                status_counts.get("auto_fuzzy_high", 0)
+                or unique_pending_counts.get("pending_review", 0)
+                or unique_pending_counts.get("blocked", 0)
+                or processing_discard_counts.get("unresolved_team_match", 0)
+            ),
+            "registry_stale_leagues": sorted(registry_stale_leagues),
+            "registry_recommendation": "Rode scripts/sync_team_aliases.py --league '<liga>' para ligas com MATCH_FUZZY ou unresolved_team_match.",
         },
         "processing": {
             "raw_candidates_total": int(len(df_raw_candidates)),

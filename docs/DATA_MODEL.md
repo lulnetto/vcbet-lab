@@ -37,6 +37,14 @@ The service exposes this catalog as read-only UI entity data. If it is missing, 
 
 Debug result captures under paths such as `data/results/_debug/` are runtime/debug artifacts, not product sources of truth.
 
+## Team Registry
+
+Approved Betano ↔ FootyStats team aliases live in `configs/team_registry/betano_footystats_aliases.csv` so they can be reviewed and versioned with code/config changes.
+
+Runtime registry maintenance artifacts live under `data/team_registry/`, including `alias_review_pending.csv` for ambiguous candidates and `betano_teams_snapshot.json` for the latest sync snapshot. These are generated artifacts and should not be promoted to source of truth without review.
+
+The official matching order is registry-approved alias, legacy `alias_times.json`, exact match, then fuzzy fallback. Fuzzy matches remain safety-gated for official picks; recurring fuzzy or unresolved cases are registry maintenance signals.
+
 ## Service Jobs And Logs
 
 `data/service/jobs/` and `data/service/logs/` contain runtime service metadata. They are useful for debugging recent operations, but stale job/log files are not official betting history.
@@ -54,3 +62,4 @@ Cleanup is dry-run by default. No cleanup tool should touch `data/history/bets_l
 - Replay provenance: the replay folder plus its `run_manifest.json` or summary file.
 - Catalogs are indexes, not primary data. They can be regenerated from existing artifacts.
 - Partial historical manifests remain valid historical records.
+- Approved team aliases: `configs/team_registry/betano_footystats_aliases.csv`.
