@@ -94,6 +94,20 @@ class DecisionArchitectureTest(unittest.TestCase):
         self.assertEqual(blocked["pick_safety_status"], "blocked")
         self.assertEqual(blocked["candidate_stage"], "blocked_unsafe_candidate")
         self.assertEqual(blocked["decision_policy_status"], "blocked_by_risk_policy")
+        self.assertEqual(blocked["confidence_score_type"], "heuristic_operational")
+        self.assertEqual(blocked["pricing_signal_type"], "model_derived_not_calibrated")
+
+    def test_confidence_score_is_traceable_operational_heuristic(self) -> None:
+        evaluated, reject_reason, rejected = evaluate_pick_candidate_with_details(base_candidate())
+
+        self.assertIsNone(reject_reason)
+        self.assertIsNone(rejected)
+        assert evaluated is not None
+        self.assertEqual(evaluated["confidence_score"], 5)
+        self.assertEqual(evaluated["confidence_score_type"], "heuristic_operational")
+        self.assertEqual(evaluated["confidence_score_scale"], "0-5")
+        self.assertEqual(evaluated["pricing_signal_type"], "model_derived_not_calibrated")
+        self.assertIn("EDGE_FORTE", evaluated["entry_reason"])
 
     def test_line_selection_rejection_is_traceable_and_not_a_risk_block(self) -> None:
         first = {
@@ -133,6 +147,10 @@ class DecisionArchitectureTest(unittest.TestCase):
             "bet_id": "bet_test",
             "created_at": "2026-04-24 12:00:00",
             "ev_percent": 20.0,
+            "pricing_signal_type": "model_derived_not_calibrated",
+            "confidence_score": 5,
+            "confidence_score_type": "heuristic_operational",
+            "confidence_score_scale": "0-5",
             "stake_units": 1.0,
             "pick_safety_status": "safe",
             "candidate_stage": "official_accepted_pick",
@@ -148,6 +166,8 @@ class DecisionArchitectureTest(unittest.TestCase):
 
         self.assertEqual(payload["entries"][0]["decision_policy_status"], "eligible")
         self.assertEqual(payload["entries"][0]["selection_policy_status"], "selected")
+        self.assertEqual(payload["entries"][0]["confidence_score_type"], "heuristic_operational")
+        self.assertEqual(payload["entries"][0]["pricing_signal_type"], "model_derived_not_calibrated")
 
 
 if __name__ == "__main__":

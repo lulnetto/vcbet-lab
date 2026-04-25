@@ -6,6 +6,8 @@ from typing import Any
 import csv
 import pandas as pd
 
+from vcbet.core.ledger_manager import normalize_ledger_schema
+
 SETTLED_BET_STATUSES = {"settled", "voided", "postponed"}
 
 
@@ -42,7 +44,7 @@ def load_ledger(ledger_file: str | Path) -> pd.DataFrame:
     path = Path(ledger_file)
     if not path.exists():
         raise FileNotFoundError(f"ledger não encontrado: {path}")
-    df = _read_csv_auto(path)
+    df = normalize_ledger_schema(_read_csv_auto(path))
     for col in [
         "created_at",
         "executed_at",
@@ -130,7 +132,7 @@ def _aggregate_performance(df: pd.DataFrame, group_col: str) -> list[dict[str, A
     work["ev_percent"] = _safe_numeric(work, "ev_percent")
 
     group_values = work[group_col]
-    if pd.api.types.is_categorical_dtype(group_values):
+    if isinstance(group_values.dtype, pd.CategoricalDtype):
         group_values = group_values.astype(object)
     work[group_col] = group_values.where(group_values.notna(), "NA")
 
@@ -191,6 +193,10 @@ def _recent_entries(df: pd.DataFrame, limit: int = 100) -> list[dict[str, Any]]:
         "odd_entrada",
         "odd_justa",
         "ev_percent",
+        "pricing_signal_type",
+        "confidence_score",
+        "confidence_score_type",
+        "confidence_score_scale",
         "stake_units",
         "pick_safety_status",
         "candidate_stage",

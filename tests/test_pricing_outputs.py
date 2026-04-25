@@ -62,6 +62,10 @@ class PricingOutputTest(unittest.TestCase):
                     "bet_id": "bet_test",
                     "created_at": "2026-04-24 12:00:00",
                     "ev_percent": round(candidate["ev_decimal"] * 100, 2),
+                    "pricing_signal_type": "model_derived_not_calibrated",
+                    "confidence_score": 4,
+                    "confidence_score_type": "heuristic_operational",
+                    "confidence_score_scale": "0-5",
                     "stake_units": 1.0,
                     "final_bet_status": "open",
                     "final_settlement_status": "pending",
@@ -77,6 +81,8 @@ class PricingOutputTest(unittest.TestCase):
 
         self.assertEqual(payload["entries"][0]["odd_justa"], 1.75)
         self.assertEqual(payload["entries"][0]["ev_percent"], 10.0)
+        self.assertEqual(payload["entries"][0]["pricing_signal_type"], "model_derived_not_calibrated")
+        self.assertEqual(payload["entries"][0]["confidence_score_type"], "heuristic_operational")
 
 
 if __name__ == "__main__":

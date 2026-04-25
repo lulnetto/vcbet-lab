@@ -7,8 +7,13 @@ import pandas as pd
 
 from vcbet.paths import DEFAULT_LEDGER_FILE
 
+LEDGER_SCHEMA_VERSION = "phase11_csv_v1"
+
 LEDGER_COLUMNS = [
     "bet_id",
+    "ledger_schema_version",
+    "ledger_schema_status",
+    "ledger_schema_missing_columns",
     "run_id",
     "config_name",
     "config_fingerprint",
@@ -49,7 +54,10 @@ LEDGER_COLUMNS = [
     "odd_justa",
     "prob_model",
     "ev_percent",
+    "pricing_signal_type",
     "confidence_score",
+    "confidence_score_type",
+    "confidence_score_scale",
     "stake_units",
     "entry_reason",
     "risk_flags",
@@ -94,9 +102,96 @@ LEDGER_COLUMNS = [
     "result_units_real",
 ]
 
+LEDGER_SCHEMA_METADATA_COLUMNS = {
+    "ledger_schema_version",
+    "ledger_schema_status",
+    "ledger_schema_missing_columns",
+}
+
+LEDGER_REQUIRED_OPERATIONAL_COLUMNS = {
+    "bet_id",
+    "run_id",
+    "league",
+    "match_datetime",
+    "home_team",
+    "away_team",
+    "match_name",
+    "market_type",
+    "market_scope",
+    "side",
+    "line",
+    "selection_raw",
+    "odd_entrada",
+    "stake_units",
+    "final_bet_status",
+    "final_settlement_status",
+}
+
 
 def _empty_value():
     return pd.NA
+
+
+def normalize_ledger_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a ledger-compatible frame while preserving unknown future columns."""
+    work = df.copy()
+    original_columns = set(work.columns)
+    missing_known = [column for column in LEDGER_COLUMNS if column not in work.columns]
+    for column in missing_known:
+        work[column] = pd.NA
+
+    missing_required = sorted(LEDGER_REQUIRED_OPERATIONAL_COLUMNS - original_columns)
+    missing_optional = sorted(
+        set(LEDGER_COLUMNS)
+        - original_columns
+        - LEDGER_REQUIRED_OPERATIONAL_COLUMNS
+        - LEDGER_SCHEMA_METADATA_COLUMNS
+    )
+    if missing_required:
+        schema_status = "weak_missing_required"
+        missing_columns = "|".join(missing_required)
+    elif missing_optional:
+        schema_status = "compatible_missing_optional"
+        missing_columns = "|".join(missing_optional)
+    else:
+        schema_status = "complete"
+        missing_columns = ""
+
+    work["ledger_schema_version"] = work["ledger_schema_version"].fillna(LEDGER_SCHEMA_VERSION).replace("", LEDGER_SCHEMA_VERSION)
+    work["ledger_schema_status"] = work["ledger_schema_status"].fillna(schema_status).replace("", schema_status)
+    work["ledger_schema_missing_columns"] = work["ledger_schema_missing_columns"].fillna(missing_columns).replace("", missing_columns)
+
+    for column, default in {
+        "bet_executed": "no",
+        "auto_bet_status": "open",
+        "auto_settlement_status": "pending",
+        "final_bet_status": "open",
+        "final_settlement_status": "pending",
+    }.items():
+        work[column] = work[column].fillna(default).replace("", default)
+
+    legacy_result_map = {
+        "won": "win",
+        "lost": "loss",
+        "half_won": "half_win",
+        "half_lost": "half_loss",
+        "push": "push",
+        "voided": "void",
+        "cancelled": "void",
+    }
+    final_bet_status = work["final_bet_status"].astype(str).str.strip().str.lower()
+    final_settlement_status = work["final_settlement_status"].astype(str).str.strip().str.lower()
+    for old_status, settlement_status in legacy_result_map.items():
+        mask = final_bet_status.eq(old_status) & final_settlement_status.isin({"", "nan", "none", "<na>", "pending"})
+        work.loc[mask, "final_settlement_status"] = settlement_status
+    resolved_settlement = work["final_settlement_status"].astype(str).str.strip().str.lower()
+    settled_mask = resolved_settlement.isin({"win", "loss", "half_win", "half_loss", "push", "void"})
+    open_like = work["final_bet_status"].astype(str).str.strip().str.lower().isin({"", "nan", "none", "<na>", "open", "pending", "won", "lost", "half_won", "half_lost", "push"})
+    work.loc[settled_mask & open_like, "final_bet_status"] = "settled"
+
+    ordered = [column for column in LEDGER_COLUMNS if column in work.columns]
+    extra = [column for column in work.columns if column not in LEDGER_COLUMNS]
+    return work[ordered + extra].copy()
 
 
 
@@ -134,12 +229,9 @@ def bet_identity_key(row: pd.Series | dict) -> tuple[str, ...]:
 def deduplicate_ledger_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Remove duplicatas de oportunidade, preservando a linha mais rica."""
     if df.empty:
-        return df.copy(), 0
+        return normalize_ledger_schema(df), 0
 
-    work = df.copy()
-    for column in LEDGER_COLUMNS:
-        if column not in work.columns:
-            work[column] = pd.NA
+    work = normalize_ledger_schema(df)
 
     def row_score(row: pd.Series) -> tuple[int, str]:
         executed = str(row.get("bet_executed", "")).strip().lower() in {"yes", "true", "1", "sim"}
@@ -163,7 +255,7 @@ def deduplicate_ledger_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 
     cleaned = work.loc[sorted(keep_indices)].drop(columns=["__identity_key"], errors="ignore")
     removed = len(work) - len(cleaned)
-    return cleaned.reindex(columns=LEDGER_COLUMNS), removed
+    return normalize_ledger_schema(cleaned), removed
 
 def ensure_ledger(ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> Path:
     path = Path(ledger_file)
@@ -176,18 +268,12 @@ def ensure_ledger(ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> Path:
 def load_ledger(ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> pd.DataFrame:
     path = ensure_ledger(ledger_file)
     df = pd.read_csv(path, sep=";")
-    for column in LEDGER_COLUMNS:
-        if column not in df.columns:
-            df[column] = pd.NA
-    return df[LEDGER_COLUMNS].copy()
+    return normalize_ledger_schema(df)
 
 
 def save_ledger(df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> Path:
     path = ensure_ledger(ledger_file)
-    for column in LEDGER_COLUMNS:
-        if column not in df.columns:
-            df[column] = pd.NA
-    df[LEDGER_COLUMNS].to_csv(path, index=False, sep=";", encoding="utf-8-sig")
+    normalize_ledger_schema(df).to_csv(path, index=False, sep=";", encoding="utf-8-sig")
     return path
 
 
@@ -203,6 +289,9 @@ def _pick_to_ledger_row(pick: pd.Series) -> dict:
     decision_timestamp = _pick_value(pick, "decision_timestamp", "generated_at")
     return {
         "bet_id": pick["bet_id"],
+        "ledger_schema_version": LEDGER_SCHEMA_VERSION,
+        "ledger_schema_status": "complete",
+        "ledger_schema_missing_columns": "",
         "run_id": pick["run_id"],
         "config_name": _pick_value(pick, "config_name", "strategy_config_name"),
         "config_fingerprint": _pick_value(pick, "config_fingerprint", "strategy_config_fingerprint"),
@@ -243,7 +332,10 @@ def _pick_to_ledger_row(pick: pd.Series) -> dict:
         "odd_justa": pick.get("odd_justa"),
         "prob_model": pick.get("prob_model"),
         "ev_percent": pick.get("ev_percent"),
+        "pricing_signal_type": pick.get("pricing_signal_type"),
         "confidence_score": pick.get("confidence_score"),
+        "confidence_score_type": pick.get("confidence_score_type"),
+        "confidence_score_scale": pick.get("confidence_score_scale"),
         "stake_units": pick.get("stake_units"),
         "entry_reason": pick.get("entry_reason"),
         "risk_flags": pick.get("risk_flags"),
@@ -310,11 +402,11 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
         existing_keys.add(identity_key)
 
     if new_rows:
-        new_df = pd.DataFrame(new_rows)
         if ledger_df.empty:
-            ledger_df = new_df.reindex(columns=LEDGER_COLUMNS)
+            ledger_df = normalize_ledger_schema(pd.DataFrame(new_rows))
         else:
-            ledger_df = pd.concat([ledger_df, new_df.reindex(columns=LEDGER_COLUMNS)], ignore_index=True)
+            for new_row in new_rows:
+                ledger_df.loc[len(ledger_df)] = {column: new_row.get(column, pd.NA) for column in ledger_df.columns}
 
     ledger_df, _removed_duplicates = deduplicate_ledger_rows(ledger_df)
     save_ledger(ledger_df, path)

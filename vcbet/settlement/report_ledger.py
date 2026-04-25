@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from vcbet.core.ledger_manager import normalize_ledger_schema
+
 
 def _read_ledger(path: str | Path) -> pd.DataFrame:
-    df = pd.read_csv(path, sep=';')
+    df = normalize_ledger_schema(pd.read_csv(path, sep=';'))
     for col in [
         'stake_units', 'result_units_model', 'result_units_real', 'odd_entrada',
         'ev_percent', 'confidence_score', 'final_odd_fechamento'

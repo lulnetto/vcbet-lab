@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 
 from vcbet.core.config_ligas import obter_sofascore_unique_tournament_id
+from vcbet.core.ledger_manager import normalize_ledger_schema
 from vcbet.paths import DEFAULT_RESULTS_FILE, DEFAULT_RESULTS_DEBUG_DIR
 
 DEFAULT_DEBUG_DIR = DEFAULT_RESULTS_DEBUG_DIR
@@ -313,7 +314,7 @@ def format_target_datetime(value: datetime | None) -> str | None:
 
 
 def load_ledger(ledger_file: str | Path) -> pd.DataFrame:
-    return pd.read_csv(ledger_file, sep=";")
+    return normalize_ledger_schema(pd.read_csv(ledger_file, sep=";"))
 
 
 def infer_open_mask(df: pd.DataFrame) -> pd.Series:

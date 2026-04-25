@@ -147,6 +147,10 @@ class TemporalContractTest(unittest.TestCase):
             self.assertEqual(resolved["replay_input_contract"]["odds_snapshot_time"], "2026-04-24 10:00:00")
             self.assertEqual(resolved["replay_input_contract"]["xg_asof"], "2026-04-24 09:00:00")
             self.assertEqual(resolved["replay_input_contract"]["source_strength"], "strong")
+            self.assertEqual(resolved["replay_input_contract"]["replay_source_strength"], "strong_frozen_inputs")
+            self.assertEqual(resolved["replay_input_contract"]["replay_quality_status"], "strong_frozen_inputs_trace_incomplete")
+            self.assertEqual(resolved["replay_input_contract"]["frozen_components"], ["odds", "xg"])
+            self.assertIn("missing_historical_trace_fields", resolved["replay_input_contract"]["replay_limitations"])
 
     def test_replay_manifest_fallback_is_machine_readable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,6 +181,61 @@ class TemporalContractTest(unittest.TestCase):
             self.assertEqual(resolved["replay_input_contract"]["odds_snapshot_time"], "2026-04-24 10:00:00")
             self.assertEqual(resolved["replay_input_contract"]["xg_asof"], "2026-04-24 09:00:00")
             self.assertEqual(resolved["replay_input_contract"]["source_strength"], "weak_fallback")
+            self.assertEqual(resolved["replay_input_contract"]["replay_source_strength"], "partial_fallback_inputs")
+            self.assertEqual(resolved["replay_input_contract"]["replay_quality_status"], "partial_fallback_trace_incomplete")
+            self.assertEqual(resolved["replay_input_contract"]["fallback_components"], ["odds", "xg"])
+            self.assertIn("uses_manifest_reference_fallback_inputs", resolved["replay_input_contract"]["replay_limitations"])
+
+    def test_replay_quality_is_strong_when_frozen_inputs_and_trace_are_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_dir = Path(tmp) / "data" / "runs" / "2026-04-24" / "source_run"
+            source_dir.mkdir(parents=True)
+            (source_dir / "odds_snapshot.csv").write_text("run_id;collected_at\nlocal;2026-04-24 10:00:00\n", encoding="utf-8")
+            (source_dir / "xg_snapshot.csv").write_text("run_id;collected_at\nlocal;2026-04-24 09:00:00\n", encoding="utf-8")
+            (source_dir / "picks_snapshot.csv").write_text("run_id\nsource_run\n", encoding="utf-8")
+            (source_dir / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "source_run",
+                        "target_date": "2026-04-24",
+                        "decision_timestamp": "2026-04-24 10:05:00",
+                        "temporal_contract_status": "complete",
+                        "config_name": "legacy_v2",
+                        "config_fingerprint": "abc123",
+                        "config_snapshot_file": str(source_dir / "config_snapshot.json"),
+                        "signal_version": "signal_v1",
+                        "pipeline_version": "pipeline_v1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            resolved = _resolve_source_run(source_dir)
+            contract = resolved["replay_input_contract"]
+
+            self.assertEqual(contract["replay_quality_status"], "strong_frozen_traceable")
+            self.assertEqual(contract["replay_source_strength"], "strong_frozen_inputs")
+            self.assertEqual(contract["temporal_contract_status"], "complete")
+            self.assertEqual(contract["missing_trace_fields"], [])
+            self.assertEqual(contract["replay_limitations"], [])
+            self.assertEqual(contract["component_source_modes"]["picks"], "frozen_run_local")
+            self.assertEqual(contract["config_trace"]["config_fingerprint"], "abc123")
+            self.assertEqual(contract["code_trace"]["pipeline_version"], "pipeline_v1")
+
+    def test_legacy_replay_trace_fields_load_safely_as_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_dir = Path(tmp) / "source_run"
+            source_dir.mkdir()
+            (source_dir / "odds_snapshot.csv").write_text("run_id\nlegacy\n", encoding="utf-8")
+            (source_dir / "xg_snapshot.csv").write_text("run_id\nlegacy\n", encoding="utf-8")
+
+            resolved = _resolve_source_run(source_dir)
+            contract = resolved["replay_input_contract"]
+
+            self.assertEqual(contract["source_strength"], "strong")
+            self.assertEqual(contract["replay_quality_status"], "strong_frozen_inputs_trace_incomplete")
+            self.assertIn("decision_timestamp", contract["missing_trace_fields"])
+            self.assertIn("temporal_contract_not_complete", contract["replay_limitations"])
 
     def test_legacy_ledger_and_dashboard_load_without_temporal_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

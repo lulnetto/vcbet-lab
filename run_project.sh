@@ -261,6 +261,13 @@ if [[ "$DEBUG" -eq 1 ]]; then
   PIPELINE_ARGS+=(--debug)
 fi
 
+if [[ -n "$CONFIG_FILE" ]]; then
+  PIPELINE_ARGS+=(--config-file "$CONFIG_FILE")
+fi
+if [[ -n "$CONFIG_NAME" ]]; then
+  PIPELINE_ARGS+=(--config-name "$CONFIG_NAME")
+fi
+
 "$PYTHON_BIN" -m vcbet.collectors.footystats_xg_collector "${XG_ARGS[@]}"
 
 if [[ ! -f "$XG_SNAPSHOT" ]]; then

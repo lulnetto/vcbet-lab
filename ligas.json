@@ -51,7 +51,7 @@
     "betano_path": "/sport/futebol/league/ligue-2-franca/10467/",
     "footystats_url": "https://footystats.org/france/ligue-2",
     "flashscore_results_url": "https://www.flashscore.com/football/france/ligue-2/results/",
-    "sofascore_unique_tournament_id": null
+    "sofascore_unique_tournament_id": 182
   },
   {
     "nome": "Bundesliga",
@@ -87,7 +87,7 @@
     "betano_path": "/sport/futebol/italia/serie-b/10210/",
     "footystats_url": "https://footystats.org/italy/serie-b",
     "flashscore_results_url": "https://www.flashscore.com/football/italy/serie-b/results/",
-    "sofascore_unique_tournament_id": null
+    "sofascore_unique_tournament_id": 53
   },
   {
     "nome": "Liga NOS",
@@ -114,7 +114,7 @@
     "betano_path": "/sport/futebol/brasil/brasileirao-serie-a-betano/10016/",
     "footystats_url": "https://footystats.org/brazil/serie-a",
     "flashscore_results_url": "https://www.flashscore.com/football/brazil/serie-a-betano/results/",
-    "sofascore_unique_tournament_id": null
+    "sofascore_unique_tournament_id": 325
   },
   {
     "nome": "Liga dos Campeões",

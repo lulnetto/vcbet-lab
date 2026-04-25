@@ -8,6 +8,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
+import pandas as pd
+
+from vcbet.core.ledger_manager import normalize_ledger_schema
 from vcbet.core.strategy_config import ConfigResolutionError, list_available_configs
 from .commands import (
     build_analysis_command,
@@ -89,6 +92,13 @@ def _read_csv_rows(path: Path, limit: int = 500) -> list[dict[str, str]]:
     return rows[:limit]
 
 
+def _read_ledger_rows(path: Path, limit: int = 500) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    df = normalize_ledger_schema(pd.read_csv(path, sep=";")).head(limit).fillna("")
+    return [{str(k): str(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
+
+
 def _compact_pick_row(row: dict[str, str]) -> dict[str, str | float | None]:
     def pick(*names: str) -> str:
         for name in names:
@@ -116,7 +126,10 @@ def _compact_pick_row(row: dict[str, str]) -> dict[str, str | float | None]:
         "odd_entrada": num("odd_entrada", "entry_odd", "odd"),
         "odd_justa": num("odd_justa", "fair_odd"),
         "ev_percent": num("ev_percent"),
+        "pricing_signal_type": pick("pricing_signal_type"),
         "confidence_score": num("confidence_score"),
+        "confidence_score_type": pick("confidence_score_type"),
+        "confidence_score_scale": pick("confidence_score_scale"),
         "stake_units": num("stake_units"),
         "run_id": pick("run_id"),
         "config_name": pick("config_name", "strategy_config_name"),
@@ -295,6 +308,10 @@ def list_replay_summaries(base_dir: str = Query("data/replays"), limit: int = 50
             "source_run_id": payload.get("source_run_id"),
             "target_date": payload.get("target_date"),
             "replay_input_contract": payload.get("replay_input_contract", {}),
+            "replay_quality_status": payload.get("replay_quality_status") or (payload.get("replay_input_contract", {}) or {}).get("replay_quality_status"),
+            "replay_source_strength": payload.get("replay_source_strength") or (payload.get("replay_input_contract", {}) or {}).get("replay_source_strength"),
+            "temporal_contract_status": payload.get("temporal_contract_status") or (payload.get("replay_input_contract", {}) or {}).get("temporal_contract_status"),
+            "replay_limitations": payload.get("replay_limitations") or (payload.get("replay_input_contract", {}) or {}).get("replay_limitations", []),
             "configs": [item.get("config_name") for item in results],
             "results_count": len(results),
             "mtime": summary_file.stat().st_mtime,
@@ -345,7 +362,7 @@ def get_replay_picks(summary_file: str, config_name: str, limit: int = 500):
     picks_file = replay_dir / "picks_snapshot.csv"
     if ledger_file.exists():
         source = str(ledger_file.relative_to(settings.project_root)) if str(ledger_file).startswith(str(settings.project_root)) else str(ledger_file)
-        rows = _read_csv_rows(ledger_file, limit=limit)
+        rows = _read_ledger_rows(ledger_file, limit=limit)
     elif picks_file.exists():
         source = str(picks_file.relative_to(settings.project_root)) if str(picks_file).startswith(str(settings.project_root)) else str(picks_file)
         rows = _read_csv_rows(picks_file, limit=limit)

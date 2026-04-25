@@ -478,6 +478,45 @@ Em `data/replays/<data>/<replay_run>/`:
 
 ## 12. Comandos operacionais recomendados
 
+### Gate mínimo de validação/release
+
+Ambiente canônico:
+
+```bash
+cd /mnt/c/Users/Netto/Documents/VCBet
+bash scripts/validate_release.sh
+```
+
+O script usa por padrão:
+
+```bash
+/home/otten/miniforge3/bin/conda run -n ubet python ...
+```
+
+Esse é o gate oficial mínimo antes de confiar em uma mudança estrutural relevante ou preparar uma release/patch maior.
+
+Ele executa:
+
+- subconjunto focado de testes unitários/regressão para mercados, safety gates, pricing, decisão, risco, ledger, contrato temporal, replay e seleção de config diária
+- smoke de help do `run_project.sh`
+- validação básica de JSONs operacionais versionados
+- smoke de import do serviço/API e montagem de comandos com diretórios temporários
+
+Critério prático:
+
+- **estruturalmente aceitável**: o gate passa, a mudança não altera sem justificativa os artefatos oficiais esperados e qualquer limitação operacional nova está documentada
+- **precisa investigação**: qualquer teste falha, o smoke de serviço/comandos falha, JSON operacional fica inválido, ou a mudança exige dado/live provider para explicar uma regressão estrutural
+
+O que esse gate não prova:
+
+- calibração estatística do modelo
+- existência real de edge nas odds
+- disponibilidade de provedores externos no momento da execução
+- congelamento perfeito de histórico/configs além dos snapshots disponíveis
+- qualidade de UX além do import/smoke mínimo do serviço
+
+Para mudanças pequenas e isoladas, rode pelo menos o teste focado correspondente. Para mudanças em pricing, decisão, replay, ledger, serviço, scripts operacionais ou contrato temporal, rode o gate completo.
+
 ### Subir o serviço
 
 ```bash
@@ -585,4 +624,3 @@ Se alguém pegar o projeto do zero, precisa saber só isso:
 - alias pendente impacta cobertura e precisa de revisão visível
 - a UI existe para operar o sistema, não só para visualizar dados
 - o ledger não deve ser tratado como snapshot descartável
-

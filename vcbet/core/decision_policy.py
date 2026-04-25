@@ -17,6 +17,11 @@ from vcbet.core.risk_policy import assess_risk_flags, safety_gate_flags
 from vcbet.core.strategy_config import get_runtime_config
 
 
+PRICING_SIGNAL_TYPE = "model_derived_not_calibrated"
+CONFIDENCE_SCORE_TYPE = "heuristic_operational"
+CONFIDENCE_SCORE_SCALE = "0-5"
+
+
 def _normalize_identity_part(value: Any) -> str:
     if value is None:
         return ""
@@ -145,7 +150,10 @@ def _rejected_candidate_payload(
     return {
         **candidate,
         "bet_id": _candidate_identity(candidate),
+        "pricing_signal_type": PRICING_SIGNAL_TYPE,
         "confidence_score": confidence_score,
+        "confidence_score_type": CONFIDENCE_SCORE_TYPE,
+        "confidence_score_scale": CONFIDENCE_SCORE_SCALE,
         "confidence_cap": confidence_cap,
         "risk_flags": "|".join(flags) if flags else "SEM_FLAG",
         "pick_safety_status": "blocked" if safety_gate_flags else "rejected",
@@ -231,7 +239,10 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
         "bet_id": _candidate_identity(candidate),
         "odd_justa": fair_odd,
         "ev_percent": round(ev_decimal * 100, 2),
+        "pricing_signal_type": PRICING_SIGNAL_TYPE,
         "confidence_score": confidence_score,
+        "confidence_score_type": CONFIDENCE_SCORE_TYPE,
+        "confidence_score_scale": CONFIDENCE_SCORE_SCALE,
         "confidence_cap": cap_value,
         "stake_units": stake_units,
         "entry_reason": "|".join(reasons[:4]) if reasons else "SEM_MOTIVO",
