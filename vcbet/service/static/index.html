@@ -121,7 +121,7 @@
 
     <div class="grid">
       <div class="card">
-        <h2>Gerar picks</h2>
+        <h2>Gerar/Atualizar análise do dia</h2>
         <p class="muted">Executa a análise do dia e produz a carteira sugerida.</p>
         <div class="row">
           <div><label>Data</label><input id="analysisDate" type="date"></div>
@@ -139,11 +139,12 @@
             <label><input type="checkbox" id="analysisDryRun"> dry-run</label>
           </div>
         </details>
-        <button class="green" onclick="submitAnalysis()">Rodar análise</button>
+        <button class="green" onclick="submitAnalysis()">Gerar/Atualizar análise do dia</button>
       </div>
 
       <div class="card">
         <h2>Ciclo diário completo</h2>
+        <p class="muted">Executa análise, resultados, settlement e atualização de catálogos. Closing odds fica fora do ciclo padrão.</p>
         <div class="row">
           <div><label>Data</label><input id="dailyDate" type="date"></div>
           <div><label>Config</label><select id="dailyConfig"></select></div>
@@ -159,9 +160,10 @@
             <label><input type="checkbox" id="dailyDebug"> debug</label>
             <label><input type="checkbox" id="skipResults"> pular results</label>
             <label><input type="checkbox" id="skipSettlement"> pular settlement</label>
+            <label><input type="checkbox" id="dailyRefreshCatalogs" checked> atualizar catálogos</label>
           </div>
         </details>
-        <button onclick="submitDailyRun()">Rodar daily run</button>
+        <button onclick="submitDailyRun()">Rodar ciclo diário completo</button>
       </div>
 
       <div class="card">
@@ -180,14 +182,15 @@
           <div class="inline" style="margin-top:10px;">
             <label><input type="checkbox" id="closingAllPending"> todos pendentes</label>
           </div>
-        </details>
-          <button class="ghost" onclick="submitClosingOdds()">Rodar tick manual</button>
+          <div class="inline" style="margin-top:10px;">
+            <button class="ghost" onclick="submitClosingOdds()">Rodar tick manual</button>
+          </div>
         </details>
       </div>
 
       <div class="card">
-        <h2>Atualizar resultados</h2>
-        <p class="muted">Coleta resultados reais das entradas pendentes.</p>
+        <h2>Atualizar resultados e liquidar</h2>
+        <p class="muted">Coleta resultados reais das entradas pendentes e aplica settlement em seguida.</p>
         <div class="row">
           <div><label>Grace minutes</label><input id="resultsGrace" value="110"></div>
           <div><label>Máx. páginas</label><input id="resultsMaxPages" value="6"></div>
@@ -198,31 +201,19 @@
           <div class="row" style="margin-top:10px;">
             <div><label>Ledger file manual</label><input id="resultsLedger" value="data/history/bets_ledger.csv"></div>
             <div><label>Results file</label><input id="resultsFile" value="data/results/results_auto.csv"></div>
+            <div><label>Overrides file</label><input id="settlementOverrides" placeholder="data/results/results_overrides.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
             <label><input type="checkbox" id="resultsAllPending"> todos pendentes</label>
             <label><input type="checkbox" id="resultsDebug"> debug</label>
             <label>Fonte <select id="resultsSource" style="width:auto;"><option value="">auto</option><option value="browser">browser</option><option value="api">api</option></select></label>
           </div>
-        </details>
-        <button class="amber" onclick="submitResultsCollection()">Atualizar resultados</button>
-      </div>
-
-      <div class="card">
-        <h2>Liquidar ledger</h2>
-        <p class="muted">Aplica resultados coletados no ledger operacional.</p>
-        <div class="row">
-          <div><label>Ledger</label><select id="settlementLedgerSelect"></select></div>
-        </div>
-        <details class="advanced">
-          <summary>Avançado / arquivos usados</summary>
-          <div class="row" style="margin-top:10px;">
-            <div><label>Ledger file manual</label><input id="settlementLedger" value="data/history/bets_ledger.csv"></div>
-            <div><label>Results file</label><input id="settlementResults" value="data/results/results_auto.csv"></div>
-            <div><label>Overrides file</label><input id="settlementOverrides" placeholder="data/results/results_overrides.csv"></div>
+          <div class="inline" style="margin-top:10px;">
+            <button class="ghost small" onclick="submitResultsCollection()">Só atualizar resultados</button>
+            <button class="ghost small" onclick="submitSettlement()">Só liquidar ledger</button>
           </div>
         </details>
-        <button class="ghost" onclick="submitSettlement()">Liquidar ledger</button>
+        <button class="amber" onclick="submitResultsSettlement()">Atualizar resultados e liquidar</button>
       </div>
     </div>
     <div class="card"><h3>Retorno da ação</h3><pre id="actionResult">Nenhuma ação executada nesta sessão.</pre></div>
@@ -233,7 +224,7 @@
       <div class="card">
         <div class="section-title"><h2>Replay Lab</h2><button class="ghost" onclick="loadReplayRuns()">Recarregar runs</button></div>
         <div class="row">
-          <div><label>Run histórica</label><select id="replaySourceRunSelect"></select></div>
+          <div><label>Run de origem</label><select id="replaySourceRunSelect"></select></div>
         </div>
         <details class="advanced">
           <summary>Avançado</summary>

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 JobStatus = Literal["queued", "running", "success", "failed", "cancelled", "blocked", "interrupted"]
-JobType = Literal["analysis", "closing_odds", "results_collection", "settlement", "daily_run", "replay_run"]
+JobType = Literal["analysis", "closing_odds", "results_collection", "settlement", "results_settlement_cycle", "daily_run", "replay_run"]
 
 
 class JobPhase(BaseModel):
@@ -83,6 +83,19 @@ class SettlementRequest(BaseModel):
     python_bin: str = "python3"
 
 
+class ResultsSettlementRequest(BaseModel):
+    ledger_file: str = "data/history/bets_ledger.csv"
+    results_file: str = "data/results/results_auto.csv"
+    overrides_file: str | None = None
+    all_pending: bool = False
+    results_grace_minutes: int = 110
+    results_max_pages: int = 6
+    results_source: str | None = None
+    results_debug: bool = False
+    no_overrides: bool = False
+    python_bin: str = "python3"
+
+
 class DailyRunRequest(BaseModel):
     date: str | None = None
     run_id: str | None = None
@@ -104,6 +117,7 @@ class DailyRunRequest(BaseModel):
     skip_closing_odds: bool = True
     skip_results_collection: bool = False
     skip_settlement: bool = False
+    refresh_catalogs: bool = True
     config_file: str | None = None
     config_name: str | None = None
 

@@ -23,6 +23,10 @@ The normal UI uses selectors for operational dates, configs, ledgers, runs, and 
 
 If `data/runs/catalog.jsonl` or `data/replays/catalog.jsonl` is missing, selector empty states should explain that the catalogs can be regenerated with `scripts/build_run_catalog.py` and `scripts/build_replay_catalog.py`.
 
+## Operator Actions
+
+Hoje exposes three primary operator actions: `Gerar/Atualizar análise do dia`, `Atualizar resultados e liquidar`, and `Ciclo diário completo`. These are composed UI workflows; Monitor still shows the internal phases such as analysis, results collection, settlement, and catalog refresh. Closing odds remains an advanced maintenance action and is not part of the default daily cycle.
+
 ## Development Rules
 
 - Keep the frontend framework-free for now.

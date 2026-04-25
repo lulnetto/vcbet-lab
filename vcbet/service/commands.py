@@ -9,6 +9,7 @@ from .schemas import (
     DailyRunRequest,
     ReplayRunRequest,
     ResultsCollectionRequest,
+    ResultsSettlementRequest,
     SettlementRequest,
 )
 
@@ -106,8 +107,53 @@ def build_settlement_command(project_root: Path, req: SettlementRequest) -> Comm
     return CommandSpec(name="settlement", command=args, cwd=project_root)
 
 
+def build_run_catalog_command(project_root: Path) -> CommandSpec:
+    return CommandSpec(
+        name="refresh_run_catalog",
+        command=["python3", str(project_root / "scripts" / "build_run_catalog.py")],
+        cwd=project_root,
+    )
+
+
+def build_replay_catalog_command(project_root: Path) -> CommandSpec:
+    return CommandSpec(
+        name="refresh_replay_catalog",
+        command=["python3", str(project_root / "scripts" / "build_replay_catalog.py")],
+        cwd=project_root,
+    )
+
+
+def build_results_settlement_commands(project_root: Path, req: ResultsSettlementRequest) -> list[CommandSpec]:
+    return [
+        build_results_command(
+            project_root,
+            ResultsCollectionRequest(
+                ledger_file=req.ledger_file,
+                output_file=req.results_file,
+                all_pending=req.all_pending,
+                grace_minutes=req.results_grace_minutes,
+                debug=req.results_debug,
+                max_pages=req.results_max_pages,
+                source=req.results_source,
+                python_bin=req.python_bin,
+            ),
+        ),
+        build_settlement_command(
+            project_root,
+            SettlementRequest(
+                ledger_file=req.ledger_file,
+                results_file=req.results_file,
+                overrides_file=req.overrides_file,
+                no_overrides=req.no_overrides,
+                python_bin=req.python_bin,
+            ),
+        ),
+    ]
+
+
 def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[CommandSpec]:
     commands: list[CommandSpec] = []
+    added_analysis = False
 
     if not req.skip_analysis:
         commands.append(
@@ -129,6 +175,8 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
                 ),
             )
         )
+        commands.append(build_run_catalog_command(project_root))
+        added_analysis = True
 
     if not req.skip_closing_odds:
         commands.append(
@@ -172,6 +220,11 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
                 ),
             )
         )
+
+    if req.refresh_catalogs:
+        if not added_analysis:
+            commands.append(build_run_catalog_command(project_root))
+        commands.append(build_replay_catalog_command(project_root))
 
     return commands
 

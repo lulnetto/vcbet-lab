@@ -51,14 +51,18 @@ The service defaults to `127.0.0.1:8010`. Host and port can be overridden with `
 1. Open Hoje.
 2. Check the next action and current pipeline status.
 3. Resolve data-quality issues in Qualidade de Dados if any are blocking confidence.
-4. Run or check the daily analysis.
+4. Run or check `Gerar/Atualizar análise do dia`.
 5. Review suggested picks and carteira impact in Carteira.
-6. Update results and settlement when matches are complete.
+6. Use `Atualizar resultados e liquidar` when matches are complete.
 7. Inspect jobs, logs, and errors in Monitor.
 
 Normal operation should use the UI selectors for date, config, ledger, run, and replay. Manual paths remain available under `Avançado` for recovery cases, old artifacts, or data that has not been cataloged yet.
 
+Operator actions are intentionally composed: `Atualizar resultados e liquidar` records separate results and settlement phases, and `Ciclo diário completo` records analysis, results, settlement, and catalog refresh phases. The Monitor remains the audit trail for substep success/failure.
+
 Closing odds are maintenance data, not the original decision odds. The original `odd_entrada` remains immutable; automated/manual closing updates write only dedicated closing fields such as `closing_odd`, `closing_snapshot_time`, `closing_source`, and update status/error fields. The closing watcher/tick is disabled unless explicitly invoked, and `event_url` is optional but recommended for reliable collection.
+
+Closing odds are not part of the default daily cycle. Use the watcher/manual maintenance tick only when closing capture is intentionally being run.
 
 ## Operational Data
 

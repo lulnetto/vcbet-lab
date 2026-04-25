@@ -9,6 +9,14 @@ import pandas as pd
 from vcbet.core.ledger_manager import normalize_ledger_schema
 
 SETTLED_BET_STATUSES = {"settled", "voided", "postponed"}
+EVENT_DATE_PRIORITY = [
+    "match_date",
+    "event_date",
+    "game_date",
+    "date",
+    "target_date",
+    "match_datetime",
+]
 
 
 def _safe_numeric(df: pd.DataFrame, col: str) -> pd.Series:
@@ -59,6 +67,16 @@ def load_ledger(ledger_file: str | Path) -> pd.DataFrame:
     return df
 
 
+def _event_date_series(df: pd.DataFrame) -> pd.Series:
+    dates = pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns]")
+    for col in EVENT_DATE_PRIORITY:
+        if col not in df.columns:
+            continue
+        values = pd.to_datetime(df[col], errors="coerce").dt.normalize()
+        dates = dates.where(dates.notna(), values)
+    return dates
+
+
 def apply_filters(
     df: pd.DataFrame,
     *,
@@ -80,17 +98,13 @@ def apply_filters(
     if date_from:
         dt = pd.to_datetime(date_from, errors="coerce")
         if pd.notna(dt):
-            if "match_datetime" in out.columns:
-                out = out[out["match_datetime"] >= dt]
-            elif "created_at" in out.columns:
-                out = out[out["created_at"] >= dt]
+            event_dates = _event_date_series(out)
+            out = out[event_dates.isna() | (event_dates >= dt.normalize())]
     if date_to:
         dt = pd.to_datetime(date_to, errors="coerce")
         if pd.notna(dt):
-            if "match_datetime" in out.columns:
-                out = out[out["match_datetime"] <= dt]
-            elif "created_at" in out.columns:
-                out = out[out["created_at"] <= dt]
+            event_dates = _event_date_series(out)
+            out = out[event_dates.isna() | (event_dates <= dt.normalize())]
     if only_executed and "bet_executed" in out.columns:
         out = out[out["bet_executed"].astype(str).str.lower() == "yes"]
     if only_settled and "final_bet_status" in out.columns:
@@ -168,6 +182,11 @@ def _recent_entries(df: pd.DataFrame, limit: int = 100) -> list[dict[str, Any]]:
     recent_entries = recent_entries.head(limit).copy()
     recent_cols = [
         "bet_id",
+        "match_date",
+        "event_date",
+        "game_date",
+        "date",
+        "target_date",
         "match_datetime",
         "created_at",
         "run_id",
@@ -220,7 +239,7 @@ def _recent_entries(df: pd.DataFrame, limit: int = 100) -> list[dict[str, Any]]:
     ]
     recent_cols = [c for c in recent_cols if c in recent_entries.columns]
     recent_entries = recent_entries[recent_cols].fillna("")
-    for dt_col in ["match_datetime", "created_at"]:
+    for dt_col in ["match_date", "event_date", "game_date", "date", "target_date", "match_datetime", "created_at"]:
         if dt_col in recent_entries.columns:
             recent_entries[dt_col] = recent_entries[dt_col].astype(str)
     return recent_entries.to_dict(orient="records")

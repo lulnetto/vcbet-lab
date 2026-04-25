@@ -15,6 +15,7 @@ const state = {
   selectedLedger: 'official',
   selectedRun: '',
   selectedReplay: '',
+  selectedReplayHistory: '',
   jobsPage: 1,
   jobsPageSize: 10,
 };

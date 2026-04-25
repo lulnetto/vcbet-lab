@@ -125,11 +125,14 @@ function renderReplaySelect(id) {
   renderEntitySelect(id, state.entities.replays, {
     valueKey: 'summary_file',
     labelKey: 'label',
-    selected: state.selectedReplay,
+    selected: state.selectedReplayHistory || state.selectedReplay,
     keepEmpty: true,
     placeholder: 'Selecione um replay',
     emptyLabel: state.entities.catalogMessages.replays || 'Nenhum replay encontrado.',
-    onChange: (value) => { state.selectedReplay = value || ''; },
+    onChange: (value) => {
+      state.selectedReplayHistory = value || '';
+      state.selectedReplay = value || '';
+    },
   });
 }
 
@@ -285,10 +288,11 @@ function jobActionContext(job) {
   const req = job?.request || {};
   if (type.includes('replay')) return 'Replay Lab';
   if (type.includes('closing')) return 'Atualizar closing odds';
+  if (type.includes('results_settlement') || (type.includes('result') && type.includes('settlement'))) return 'Resultados + settlement';
   if (type.includes('result')) return 'Atualizar resultados';
   if (type.includes('settlement')) return 'Liquidar ledger';
   if (type.includes('daily')) return 'Ciclo diário completo';
-  if (type.includes('analysis')) return 'Gerar picks';
+  if (type.includes('analysis')) return 'Análise do dia';
   if (req.config_name || req.target_date) return 'Rotina operacional';
   return 'Ação não identificada';
 }

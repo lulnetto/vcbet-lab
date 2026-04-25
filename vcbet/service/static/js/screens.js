@@ -38,8 +38,8 @@ function getNextAction() {
   const open = Number(summary.open_entries || 0);
   if (running) return { text:'Acompanhar job em execução. Aguarde a rotina terminar antes de disparar outra etapa.', button:'Abrir Monitor', handler:() => switchTab('jobs') };
   if (aliases) return { text:`Revisar pendências de Qualidade de Dados: ${aliases} alias(es) aguardando decisão.`, button:'Revisar qualidade', handler:() => switchTab('aliases') };
-  if (!hasPicks) return { text:'Rodar análise do dia. Ainda não há run/picks verificados para o contexto atual.', button:'Rodar análise', handler:() => document.getElementById('analysisDate')?.focus() };
-  if (open) return { text:`Atualizar resultados / settlement. Há ${open} pick(s) abertas no filtro atual.`, button:'Atualizar resultados', handler:() => document.getElementById('resultsGrace')?.focus() };
+  if (!hasPicks) return { text:'Gerar/Atualizar análise do dia. Ainda não há run/picks verificados para o contexto atual.', button:'Gerar análise', handler:() => document.getElementById('analysisDate')?.focus() };
+  if (open) return { text:`Atualizar resultados e liquidar. Há ${open} pick(s) abertas no filtro atual.`, button:'Resultados + settlement', handler:() => document.getElementById('resultsGrace')?.focus() };
   return { text:'Revisar Carteira. Dados carregados e nenhuma pendência bloqueante foi detectada.', button:'Ir para Carteira', handler:() => switchTab('dashboard') };
 }
 
@@ -76,10 +76,9 @@ function renderTodayCockpit() {
   document.getElementById('pipelineMeta').textContent = Object.keys(state.loadErrors).length ? 'estado parcial' : 'dados carregados';
 
   document.getElementById('todayPipeline').innerHTML = [
-    pipelineStep('Análise do dia', running ? 'rodando' : (total || hasRunForOperationalDate() ? 'ok' : 'pendente'), total ? `${total} pick(s) no filtro atual da carteira.` : 'Sem picks verificadas no contexto atual.', 'Rodar análise', "document.getElementById('analysisDate')?.focus()"),
+    pipelineStep('Análise do dia', running ? 'rodando' : (total || hasRunForOperationalDate() ? 'ok' : 'pendente'), total ? `${total} pick(s) no filtro atual da carteira.` : 'Sem picks verificadas no contexto atual.', 'Gerar/Atualizar', "document.getElementById('analysisDate')?.focus()"),
     pipelineStep('Closing odds', running ? 'rodando' : (clvCount ? 'ok' : (total ? 'atenção' : 'indisponível')), clvCount ? `${clvCount} entrada(s) com closing odds.` : (total ? 'Watcher/tick manual via Manutenção quando houver event_url.' : 'Depende de picks/ledger carregados.'), '', ''),
-    pipelineStep('Resultados', running ? 'rodando' : (open ? 'atenção' : (settled ? 'ok' : 'pendente')), open ? `${open} pick(s) abertas podem precisar de resultado.` : (settled ? 'Entradas liquidadas encontradas.' : 'Sem resultado verificado.'), 'Atualizar resultados', "document.getElementById('resultsGrace')?.focus()"),
-    pipelineStep('Settlement', running ? 'rodando' : (open ? 'atenção' : (settled ? 'ok' : 'pendente')), open ? 'Há entradas abertas no filtro atual.' : (settled ? `${settled} entrada(s) liquidadas.` : 'Settlement não verificado.'), 'Liquidar ledger', "document.getElementById('settlementLedger')?.focus()"),
+    pipelineStep('Resultados + settlement', running ? 'rodando' : (open ? 'atenção' : (settled ? 'ok' : 'pendente')), open ? `${open} pick(s) aberta(s) podem precisar de resultado e liquidação.` : (settled ? `${settled} entrada(s) liquidadas.` : 'Sem resultado/settlement verificado.'), 'Atualizar e liquidar', "document.getElementById('resultsGrace')?.focus()"),
     pipelineStep('Revisão', aliases || failedJobs ? 'atenção' : (total ? 'ok' : 'pendente'), aliases || failedJobs ? 'Existem pendências antes da revisão final.' : (total ? 'Carteira pronta para revisão operacional.' : 'Aguardando análise do dia.'), 'Carteira', "switchTab('dashboard')")
   ].join('');
 
@@ -155,14 +154,13 @@ function setupEntitySelectors() {
     ['dailyLedgerSelect', 'dailyLedger'],
     ['closingLedgerSelect', 'closingLedger'],
     ['resultsLedgerSelect', 'resultsLedger'],
-    ['settlementLedgerSelect', 'settlementLedger'],
   ].forEach(([selectId, inputId]) => renderLedgerSelect(selectId, inputId));
   renderRunSelect('replaySourceRunSelect', 'replaySourceRun');
   renderReplaySelect('replaySummarySelect');
 }
 
 function resetWalletToday(reload = true, force = true) {
-  const date = state.selectedDate || todayIsoDate();
+  const date = operationalDate();
   const from = document.getElementById('dashDateFrom');
   const to = document.getElementById('dashDateTo');
   if (from && (force || !from.value)) from.value = date;
@@ -280,6 +278,8 @@ async function submitDailyRun() {
     debug: document.getElementById('dailyDebug').checked,
     skip_results_collection: document.getElementById('skipResults').checked,
     skip_settlement: document.getElementById('skipSettlement').checked,
+    skip_closing_odds: true,
+    refresh_catalogs: document.getElementById('dailyRefreshCatalogs').checked,
   });
 }
 
@@ -306,9 +306,22 @@ async function submitResultsCollection() {
 
 async function submitSettlement() {
   await submitJob('/jobs/settlement', {
-    ledger_file: document.getElementById('settlementLedger').value,
-    results_file: document.getElementById('settlementResults').value,
+    ledger_file: document.getElementById('resultsLedger').value,
+    results_file: document.getElementById('resultsFile').value,
     overrides_file: document.getElementById('settlementOverrides').value || null,
+  });
+}
+
+async function submitResultsSettlement() {
+  await submitJob('/jobs/results-settlement-cycle', {
+    ledger_file: document.getElementById('resultsLedger').value,
+    results_file: document.getElementById('resultsFile').value,
+    overrides_file: document.getElementById('settlementOverrides').value || null,
+    all_pending: document.getElementById('resultsAllPending').checked,
+    results_grace_minutes: Number(document.getElementById('resultsGrace').value || 110),
+    results_max_pages: Number(document.getElementById('resultsMaxPages').value || 6),
+    results_debug: document.getElementById('resultsDebug').checked,
+    results_source: document.getElementById('resultsSource').value || null,
   });
 }
 
@@ -388,6 +401,8 @@ async function loadReplaySummaries() {
 async function openSelectedReplaySummary() {
   const selected = document.getElementById('replaySummarySelect')?.value;
   if (!selected) return;
+  state.selectedReplayHistory = selected;
+  state.selectedReplay = selected;
   const index = state.replaySummaries.findIndex(item => item.summary_file === selected);
   if (index >= 0) {
     await loadReplaySummaryDetail(index);
@@ -396,16 +411,18 @@ async function openSelectedReplaySummary() {
   const item = state.entities.replays.find(replay => replay.summary_file === selected);
   if (!item?.summary_file) return;
   const payload = await api(`/replays/summary?${qs({summary_file: item.summary_file})}`);
-  state.replaySummaryPayload = payload;
-  const synthetic = {summary_file: item.summary_file};
-  state.replaySummaries.unshift(synthetic);
-  await loadReplaySummaryDetail(0);
+  renderReplaySummaryPayload(payload, item.summary_file);
 }
 
 async function loadReplaySummaryDetail(index) {
   const item = state.replaySummaries[index];
   if (!item) return;
   const payload = await api(`/replays/summary?${qs({summary_file: item.summary_file})}`);
+  state.selectedReplay = item.summary_file || '';
+  renderReplaySummaryPayload(payload, item.summary_file);
+}
+
+function renderReplaySummaryPayload(payload, summaryFile) {
   state.replaySummaryPayload = payload;
   const rows = (payload.results || []).map((r, idx) => {
     const st = (r.settlement && r.settlement.settlement_summary) || {};
@@ -423,7 +440,7 @@ async function loadReplaySummaryDetail(index) {
       units: sc.model_result_summary?.model_units ?? st.model_units ?? 0,
       roi: sc.model_result_summary?.model_roi_percent ?? st.model_roi_percent ?? 0,
       status_html: statusPill(sc.primary_candidate_status || r.replay_quality_status || ''),
-      action: `<button class="ghost small" onclick="loadReplayPicks('${escapeHtml(item.summary_file)}','${escapeHtml(r.config_name)}')">ver picks</button>`
+      action: `<button class="ghost small" onclick="loadReplayPicks('${escapeHtml(summaryFile)}','${escapeHtml(r.config_name)}')">ver picks</button>`
     };
   });
   const ctx = payload.comparison_context || {};
@@ -603,10 +620,12 @@ function formatJob(job) {
     config.trim(),
     replayCfg.trim(),
   ].filter(Boolean).join(' | ');
+  const phases = (job.phases || []).map(phase => `${phase.name}:${phase.status}`).join(' | ');
   return `<div class="job ${failed ? 'job-failed' : statusClass(job.status)}">
     <div class="inline"><strong>${escapeHtml(job.title)}</strong>${statusPill(job.status)}<span class="muted">${escapeHtml(job.id)}</span></div>
     <div class="job-context"><strong>${escapeHtml(jobActionContext(job))}</strong><span>${escapeHtml(job.job_type || '-')}</span></div>
     ${requestBits ? `<div class="muted">${escapeHtml(requestBits)}</div>` : ''}
+    ${phases ? `<div class="muted">fases: ${escapeHtml(phases)}</div>` : ''}
     <div class="inline" style="margin-top:8px;">
       <button class="ghost small" onclick="viewLogs('${escapeHtml(job.id)}')">logs</button>
       ${cancelButton}

@@ -4,6 +4,7 @@ from datetime import datetime
 import csv
 import json
 from pathlib import Path
+import subprocess
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -18,7 +19,10 @@ from .commands import (
     build_closing_odds_command,
     build_daily_commands,
     build_replay_command,
+    build_replay_catalog_command,
+    build_run_catalog_command,
     build_results_command,
+    build_results_settlement_commands,
     build_settlement_command,
 )
 from .dashboard import apply_filters, build_dashboard_payload, load_ledger
@@ -35,6 +39,7 @@ from .schemas import (
     JobListResponse,
     ReplayRunRequest,
     ResultsCollectionRequest,
+    ResultsSettlementRequest,
     SettlementRequest,
 )
 from .settings import ServiceSettings
@@ -268,6 +273,52 @@ def _read_jsonl_catalog(path: Path) -> tuple[list[dict[str, object]], str]:
     return items, status
 
 
+def _catalog_source_paths(base: Path) -> list[Path]:
+    if not base.exists():
+        return []
+    return [path for path in base.glob("*/*") if path.is_dir()]
+
+
+def _catalog_is_stale(catalog: Path, source_base: Path) -> bool:
+    if not catalog.exists():
+        return True
+    try:
+        catalog_mtime = catalog.stat().st_mtime
+    except OSError:
+        return True
+    for source_dir in _catalog_source_paths(source_base):
+        try:
+            newest = max(
+                (path.stat().st_mtime for path in [source_dir, source_dir / "run_manifest.json"] if path.exists()),
+                default=source_dir.stat().st_mtime,
+            )
+        except OSError:
+            continue
+        if newest > catalog_mtime:
+            return True
+    return False
+
+
+def _refresh_catalog_if_needed(kind: str) -> str | None:
+    if kind == "runs":
+        catalog = settings.project_root / "data" / "runs" / "catalog.jsonl"
+        source_base = settings.project_root / "data" / "runs"
+        command = build_run_catalog_command(settings.project_root)
+    elif kind == "replays":
+        catalog = settings.project_root / "data" / "replays" / "catalog.jsonl"
+        source_base = settings.project_root / "data" / "replays"
+        command = build_replay_catalog_command(settings.project_root)
+    else:
+        return None
+    if not _catalog_is_stale(catalog, source_base):
+        return None
+    try:
+        subprocess.run(command.command, cwd=command.cwd, check=True, capture_output=True, text=True, timeout=30)
+        return "refreshed"
+    except Exception:
+        return "refresh_failed"
+
+
 def _format_date_label(value: object) -> str:
     text = str(value or "")
     try:
@@ -389,6 +440,7 @@ def entity_ledgers():
 @app.get("/api/entities/runs")
 def entity_runs(limit: int = Query(300)):
     catalog = settings.project_root / "data" / "runs" / "catalog.jsonl"
+    refresh_status = _refresh_catalog_if_needed("runs")
     records, status = _read_jsonl_catalog(catalog)
     items = []
     for item in _active_catalog_items(records, "run_dir")[:_safe_limit(limit)]:
@@ -408,12 +460,13 @@ def entity_runs(limit: int = Query(300)):
     message = None
     if status == "missing":
         message = "Catálogo não encontrado. Rode scripts/build_run_catalog.py e scripts/build_replay_catalog.py ou gere uma nova execução."
-    return {"items": items, "status": status, "catalog_file": "data/runs/catalog.jsonl", "message": message}
+    return {"items": items, "status": status, "refresh_status": refresh_status, "catalog_file": "data/runs/catalog.jsonl", "message": message}
 
 
 @app.get("/api/entities/replays")
 def entity_replays(limit: int = Query(300)):
     catalog = settings.project_root / "data" / "replays" / "catalog.jsonl"
+    refresh_status = _refresh_catalog_if_needed("replays")
     records, status = _read_jsonl_catalog(catalog)
     items = []
     for item in _active_catalog_items(records, "replay_dir")[:_safe_limit(limit)]:
@@ -434,7 +487,7 @@ def entity_replays(limit: int = Query(300)):
     message = None
     if status == "missing":
         message = "Catálogo não encontrado. Rode scripts/build_run_catalog.py e scripts/build_replay_catalog.py ou gere uma nova execução."
-    return {"items": items, "status": status, "catalog_file": "data/replays/catalog.jsonl", "message": message}
+    return {"items": items, "status": status, "refresh_status": refresh_status, "catalog_file": "data/replays/catalog.jsonl", "message": message}
 
 
 @app.get("/runs")
@@ -756,11 +809,12 @@ def cancel_job(job_id: str):
 def start_analysis(req: AnalysisRequest) -> JobCreatedResponse:
     try:
         command = build_analysis_command(settings.project_root, req)
-        job = manager.submit_command_job(
-            title=f"Gerar picks {req.mode}",
+        commands = [command, build_run_catalog_command(settings.project_root)]
+        job = manager.submit_pipeline_job(
+            title="Análise do dia",
             job_type="analysis",
             request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
-            command=command,
+            commands=commands,
             resource_key=_resource_key(settings.project_root, req.ledger_file),
         )
     except (ResourceBusyError, ConfigResolutionError) as exc:
@@ -817,6 +871,22 @@ def start_settlement(req: SettlementRequest) -> JobCreatedResponse:
     return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
 
 
+@app.post("/jobs/results-settlement-cycle", response_model=JobCreatedResponse)
+def start_results_settlement_cycle(req: ResultsSettlementRequest) -> JobCreatedResponse:
+    commands = build_results_settlement_commands(settings.project_root, req)
+    try:
+        job = manager.submit_pipeline_job(
+            title="Resultados + settlement",
+            job_type="results_settlement_cycle",
+            request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+            commands=commands,
+            resource_key=_resource_key(settings.project_root, req.ledger_file),
+        )
+    except ResourceBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
+
+
 @app.post("/jobs/daily-run", response_model=JobCreatedResponse)
 def start_daily_run(req: DailyRunRequest) -> JobCreatedResponse:
     try:
@@ -824,7 +894,7 @@ def start_daily_run(req: DailyRunRequest) -> JobCreatedResponse:
         if not commands:
             raise HTTPException(status_code=400, detail="daily-run sem passos habilitados")
         job = manager.submit_pipeline_job(
-            title="Daily run",
+            title="Ciclo diário completo",
             job_type="daily_run",
             request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
             commands=commands,
@@ -840,11 +910,12 @@ def start_daily_run(req: DailyRunRequest) -> JobCreatedResponse:
 def start_replay_run(req: ReplayRunRequest) -> JobCreatedResponse:
     try:
         command = build_replay_command(settings.project_root, req)
-        job = manager.submit_command_job(
+        commands = [command, build_replay_catalog_command(settings.project_root)]
+        job = manager.submit_pipeline_job(
             title="Replay run",
             job_type="replay_run",
             request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
-            command=command,
+            commands=commands,
             resource_key=None,
         )
     except (ResourceBusyError, ConfigResolutionError) as exc:
