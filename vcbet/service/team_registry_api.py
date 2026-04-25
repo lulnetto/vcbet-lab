@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.sync_team_aliases import standings_url_for_league, sync_league
 from vcbet.core.config_ligas import carregar_ligas
 from vcbet.core.team_registry import (
     APPROVED_COLUMNS,
@@ -20,6 +19,7 @@ from vcbet.core.team_registry import (
     normalize_team_name,
     read_registry,
 )
+from vcbet.team_identity.sync_service import standings_url_for_league, sync_league
 
 
 APPROVED_OUTPUT_COLUMNS = [
