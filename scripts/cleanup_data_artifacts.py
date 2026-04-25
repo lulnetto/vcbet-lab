@@ -37,12 +37,16 @@ def selected_actions(root: Path, *, delete: bool) -> list[Action]:
             continue
         if item.classification == "archive":
             destination = ARCHIVE_ROOT / item.path
+            if (root / destination).exists():
+                continue
             actions.append(Action("archive", item.path, destination.as_posix(), item.reason))
         elif item.classification == "delete_candidate":
             if delete:
                 actions.append(Action("delete", item.path, None, item.reason))
             else:
                 destination = ARCHIVE_ROOT / item.path
+                if (root / destination).exists():
+                    continue
                 actions.append(Action("archive", item.path, destination.as_posix(), item.reason))
     return actions
 
