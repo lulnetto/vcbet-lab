@@ -8,6 +8,10 @@ VCBet keeps runtime data as files under `data/`. The product source of truth rem
 - Other ledger-like files may exist for sandbox, replay, debug, rerun, or legacy development work.
 - Ledger-like files outside the canonical path should be treated as non-official unless a human explicitly promotes them.
 - The official ledger schema is not changed by catalog generation or cleanup tooling.
+- `event_url` is optional for backward compatibility, but recommended because it enables closing odds collection.
+- Official appends pass through a ledger-level portfolio gate that checks open/unsettled exposure already present in the canonical ledger. Blocked cross-run/cross-config duplicates, correlations, and contradictions are written to a review artifact instead of being appended silently.
+
+Closing odds are stored in closing-specific fields (`closing_odd`, `closing_bookmaker`, `closing_snapshot_time`, `closing_source`, `closing_update_status`, `closing_update_error`). They must not overwrite `odd_entrada`, model odds, or other original decision fields.
 
 ## Runs
 
@@ -17,11 +21,15 @@ Run folders are not collapsed into daily append files. Keeping the folder bounda
 
 `data/runs/catalog.jsonl` is the navigable index for run folders. It is generated from existing folders and manifests, tolerates old partial manifests, and stores project-relative paths when possible.
 
+The service exposes this catalog as read-only UI entity data. The catalog is a local runtime artifact and is not required to be versioned.
+
 ## Replays
 
 Replays live under `data/replays/<target-date>/<replay-id>/`. Replay folders may contain replay ledgers, replay results, comparison summaries, picks, quality reports, config snapshots, and `run_manifest.json`.
 
 `data/replays/catalog.jsonl` is the navigable index for replay and comparison folders. It prepares the UI and operators to select known artifacts without manually typing paths.
+
+The service exposes this catalog as read-only UI entity data. If it is missing, the UI should fall back to a clear empty state and manual `Avançado` paths.
 
 ## Results
 
@@ -46,4 +54,3 @@ Cleanup is dry-run by default. No cleanup tool should touch `data/history/bets_l
 - Replay provenance: the replay folder plus its `run_manifest.json` or summary file.
 - Catalogs are indexes, not primary data. They can be regenerated from existing artifacts.
 - Partial historical manifests remain valid historical records.
-

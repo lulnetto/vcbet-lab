@@ -56,7 +56,7 @@ class AnalysisRequest(BaseModel):
 
 class ClosingOddsRequest(BaseModel):
     ledger_file: str = "data/history/bets_ledger.csv"
-    window_minutes: int = 20
+    window_minutes: int = 60
     allow_past_minutes: int = 10
     all_pending: bool = False
     bet_ids: list[str] = Field(default_factory=list)
@@ -95,13 +95,13 @@ class DailyRunRequest(BaseModel):
     json_output: bool = False
     debug: bool = False
     dry_run: bool = False
-    closing_window_minutes: int = 20
+    closing_window_minutes: int = 60
     closing_allow_past_minutes: int = 10
     results_grace_minutes: int = 110
     results_max_pages: int = 6
     results_source: str | None = None
     skip_analysis: bool = False
-    skip_closing_odds: bool = False
+    skip_closing_odds: bool = True
     skip_results_collection: bool = False
     skip_settlement: bool = False
     config_file: str | None = None

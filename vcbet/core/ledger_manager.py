@@ -5,6 +5,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from vcbet.core.ledger_portfolio_gate import check_against_open_ledger, is_official_ledger_path
 from vcbet.paths import DEFAULT_LEDGER_FILE
 
 LEDGER_SCHEMA_VERSION = "phase11_csv_v1"
@@ -72,6 +73,10 @@ LEDGER_COLUMNS = [
     "portfolio_risk_reason",
     "portfolio_exposure_scope",
     "portfolio_exposure_after",
+    "ledger_portfolio_gate_status",
+    "ledger_portfolio_gate_reason",
+    "ledger_portfolio_related_bet_id",
+    "ledger_portfolio_gate_details",
     "market_family",
     "bet_executed",
     "executed_at",
@@ -93,6 +98,12 @@ LEDGER_COLUMNS = [
     "final_bet_status",
     "final_settlement_status",
     "final_odd_fechamento",
+    "closing_odd",
+    "closing_bookmaker",
+    "closing_snapshot_time",
+    "closing_source",
+    "closing_update_status",
+    "closing_update_error",
     "settlement_source",
     "settlement_confidence",
     "settlement_note",
@@ -350,6 +361,10 @@ def _pick_to_ledger_row(pick: pd.Series) -> dict:
         "portfolio_risk_reason": pick.get("portfolio_risk_reason"),
         "portfolio_exposure_scope": pick.get("portfolio_exposure_scope"),
         "portfolio_exposure_after": pick.get("portfolio_exposure_after"),
+        "ledger_portfolio_gate_status": pick.get("ledger_portfolio_gate_status", "passed"),
+        "ledger_portfolio_gate_reason": pick.get("ledger_portfolio_gate_reason", ""),
+        "ledger_portfolio_related_bet_id": pick.get("ledger_portfolio_related_bet_id", ""),
+        "ledger_portfolio_gate_details": pick.get("ledger_portfolio_gate_details", ""),
         "market_family": pick.get("market_family"),
         "bet_executed": "no",
         "executed_at": pd.NA,
@@ -371,6 +386,12 @@ def _pick_to_ledger_row(pick: pd.Series) -> dict:
         "final_bet_status": "open",
         "final_settlement_status": "pending",
         "final_odd_fechamento": pd.NA,
+        "closing_odd": pd.NA,
+        "closing_bookmaker": pd.NA,
+        "closing_snapshot_time": pd.NA,
+        "closing_source": pd.NA,
+        "closing_update_status": pd.NA,
+        "closing_update_error": pd.NA,
         "settlement_source": pd.NA,
         "settlement_confidence": pd.NA,
         "settlement_note": pd.NA,
@@ -379,6 +400,24 @@ def _pick_to_ledger_row(pick: pd.Series) -> dict:
         "result_units_model": pd.NA,
         "result_units_real": pd.NA,
     }
+
+
+def _blocked_file_for_ledger(ledger_file: Path) -> Path:
+    return ledger_file.parent / "ledger_portfolio_blocked.csv"
+
+
+def _persist_blocked_candidates(blocked_rows: list[dict], ledger_file: Path) -> None:
+    if not blocked_rows:
+        return
+    path = _blocked_file_for_ledger(ledger_file)
+    new_df = pd.DataFrame(blocked_rows)
+    if path.exists():
+        existing = pd.read_csv(path, sep=";")
+        combined = pd.concat([existing, new_df], ignore_index=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        combined = new_df
+    combined.to_csv(path, index=False, sep=";", encoding="utf-8-sig")
 
 
 def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> tuple[Path, int, int]:
@@ -391,15 +430,57 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
     ledger_df, _ = deduplicate_ledger_rows(ledger_df)
     existing_ids = set(ledger_df["bet_id"].dropna().astype(str).tolist())
     existing_keys = {bet_identity_key(row) for _, row in ledger_df.iterrows()}
+    existing_key_to_bet_id = {bet_identity_key(row): str(row.get("bet_id") or "") for _, row in ledger_df.iterrows()}
     new_rows = []
+    blocked_rows = []
+    apply_ledger_gate = is_official_ledger_path(path)
     for _, row in picks_df.iterrows():
         bet_id = str(row["bet_id"])
         identity_key = bet_identity_key(row)
         if bet_id in existing_ids or identity_key in existing_keys:
+            if apply_ledger_gate:
+                blocked = row.to_dict()
+                blocked.update(
+                    {
+                        "candidate_stage": "ledger_portfolio_blocked_candidate",
+                        "portfolio_risk_status": "rejected",
+                        "portfolio_risk_reason": "LEDGER_DUPLICATE_OPEN_PICK",
+                        "ledger_portfolio_gate_status": "blocked",
+                        "ledger_portfolio_gate_reason": "LEDGER_DUPLICATE_OPEN_PICK",
+                        "ledger_portfolio_related_bet_id": bet_id if bet_id in existing_ids else existing_key_to_bet_id.get(identity_key, ""),
+                        "ledger_portfolio_gate_details": "duplicate bet_id or stable identity already present in official ledger",
+                    }
+                )
+                blocked_rows.append(blocked)
             continue
+        if apply_ledger_gate:
+            gate = check_against_open_ledger(row.to_dict(), ledger_df)
+            if gate["status"] == "blocked":
+                blocked = row.to_dict()
+                blocked.update(
+                    {
+                        "candidate_stage": "ledger_portfolio_blocked_candidate",
+                        "portfolio_risk_status": "rejected",
+                        "portfolio_risk_reason": gate["reason"],
+                        "selection_policy_status": "rejected_by_ledger_portfolio_gate",
+                        "selection_reject_reason": gate["reason"],
+                        "ledger_portfolio_gate_status": gate["status"],
+                        "ledger_portfolio_gate_reason": gate["reason"],
+                        "ledger_portfolio_related_bet_id": gate["related_bet_id"],
+                        "ledger_portfolio_gate_details": gate["details"],
+                    }
+                )
+                blocked_rows.append(blocked)
+                continue
+            row = row.copy()
+            row["ledger_portfolio_gate_status"] = "passed"
+            row["ledger_portfolio_gate_reason"] = ""
+            row["ledger_portfolio_related_bet_id"] = ""
+            row["ledger_portfolio_gate_details"] = ""
         new_rows.append(_pick_to_ledger_row(row))
         existing_ids.add(bet_id)
         existing_keys.add(identity_key)
+        existing_key_to_bet_id[identity_key] = bet_id
 
     if new_rows:
         if ledger_df.empty:
@@ -410,4 +491,6 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
 
     ledger_df, _removed_duplicates = deduplicate_ledger_rows(ledger_df)
     save_ledger(ledger_df, path)
+    if apply_ledger_gate:
+        _persist_blocked_candidates(blocked_rows, path)
     return path, len(new_rows), len(ledger_df)

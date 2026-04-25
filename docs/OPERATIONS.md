@@ -56,6 +56,10 @@ The service defaults to `127.0.0.1:8010`. Host and port can be overridden with `
 6. Update results and settlement when matches are complete.
 7. Inspect jobs, logs, and errors in Monitor.
 
+Normal operation should use the UI selectors for date, config, ledger, run, and replay. Manual paths remain available under `Avançado` for recovery cases, old artifacts, or data that has not been cataloged yet.
+
+Closing odds are maintenance data, not the original decision odds. The original `odd_entrada` remains immutable; automated/manual closing updates write only dedicated closing fields such as `closing_odd`, `closing_snapshot_time`, `closing_source`, and update status/error fields. The closing watcher/tick is disabled unless explicitly invoked, and `event_url` is optional but recommended for reliable collection.
+
 ## Operational Data
 
 - Daily analysis outputs are written under `data/runs/`.
@@ -63,6 +67,8 @@ The service defaults to `127.0.0.1:8010`. Host and port can be overridden with `
 - Ledger/history files live under `data/history/`.
 - Results and overrides live under `data/results/`.
 - Service jobs and logs live under `data/service/jobs/` and `data/service/logs/`.
+- Run and replay selectors read generated local catalogs at `data/runs/catalog.jsonl` and `data/replays/catalog.jsonl` when available.
+- The official ledger is protected by a ledger-level portfolio gate before new official picks are appended. Cross-run/cross-config duplicate, correlated, or contradictory open exposures are blocked into a traceable review artifact instead of entering the official ledger silently.
 
 Do not delete, move, or bulk-clean runtime data during normal development.
 

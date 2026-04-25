@@ -164,6 +164,9 @@ def _compact_pick_row(row: dict[str, str]) -> dict[str, str | float | None]:
         "portfolio_exposure_after": num("portfolio_exposure_after"),
         "market_family": pick("market_family"),
         "final_bet_status": pick("final_bet_status", "status"),
+        "closing_odd": num("closing_odd"),
+        "closing_snapshot_time": pick("closing_snapshot_time"),
+        "closing_update_status": pick("closing_update_status"),
         "result_units_model": num("result_units_model", "result_units"),
         "risk_flags": pick("risk_flags"),
     }
@@ -239,6 +242,91 @@ def _alias_file_payload(path: Path, include_blocked: bool = True, cleanup_empty:
     }
 
 
+def _project_rel(path: Path) -> str:
+    return str(path.relative_to(settings.project_root)) if str(path).startswith(str(settings.project_root)) else str(path)
+
+
+def _read_jsonl_catalog(path: Path) -> tuple[list[dict[str, object]], str]:
+    if not path.exists():
+        return [], "missing"
+    items: list[dict[str, object]] = []
+    status = "ok"
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    status = "partial"
+                    continue
+                if isinstance(item, dict):
+                    items.append(item)
+    except Exception:
+        return [], "unreadable"
+    return items, status
+
+
+def _format_date_label(value: object) -> str:
+    text = str(value or "")
+    try:
+        return datetime.fromisoformat(text[:10]).strftime("%d/%m/%Y")
+    except ValueError:
+        return text
+
+
+def _format_time_label(value: object) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    normalized = text.replace(" ", "T")
+    try:
+        return datetime.fromisoformat(normalized).strftime("%H:%M")
+    except ValueError:
+        return text[11:16] if len(text) >= 16 else text
+
+
+def _run_label(item: dict[str, object]) -> str:
+    bits = [
+        _format_date_label(item.get("target_date")),
+        _format_time_label(item.get("created_at")),
+        str(item.get("config_name") or item.get("run_mode") or "config ?"),
+        f"{item.get('picks_rows')} picks" if item.get("picks_rows") not in (None, "") else "picks ?",
+        str(item.get("status") or "status ?"),
+    ]
+    return " · ".join(bit for bit in bits if bit)
+
+
+def _replay_label(item: dict[str, object]) -> str:
+    configs = item.get("configs") or []
+    config_count = len(configs) if isinstance(configs, list) else 1
+    bits = [
+        _format_date_label(item.get("target_date")),
+        str(item.get("replay_strength") or item.get("replay_mode") or "replay"),
+        f"{config_count} configs",
+        str(item.get("status") or "status ?"),
+    ]
+    return " · ".join(bit for bit in bits if bit)
+
+
+def _active_catalog_items(items: list[dict[str, object]], path_key: str) -> list[dict[str, object]]:
+    active = []
+    for item in items:
+        path = str(item.get(path_key) or "")
+        if not path or "data/_archive/" in path or path.startswith("data/_archive/"):
+            continue
+        active.append(item)
+    return active
+
+
+def _safe_limit(value: object, default: int = 300) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(
@@ -253,6 +341,100 @@ def health() -> HealthResponse:
 @app.get("/configs", response_model=list[ConfigInfo])
 def get_configs() -> list[ConfigInfo]:
     return [ConfigInfo(**item) for item in list_available_configs()]
+
+
+@app.get("/api/entities/configs")
+def entity_configs():
+    items = []
+    for cfg in list_available_configs():
+        name = cfg.get("name") or cfg.get("id")
+        items.append({
+            "id": name,
+            "name": name,
+            "label": cfg.get("label") or name,
+            "description": cfg.get("description") or "",
+            "path": cfg.get("path"),
+            "fingerprint": cfg.get("fingerprint"),
+            "is_default": name == "legacy_v2",
+        })
+    return {"items": items, "status": "ok"}
+
+
+@app.get("/api/entities/ledgers")
+def entity_ledgers():
+    official = settings.project_root / "data" / "history" / "bets_ledger.csv"
+    items = [{
+        "id": "official",
+        "label": "Oficial",
+        "path": "data/history/bets_ledger.csv",
+        "mode": "official",
+        "exists": official.exists(),
+    }]
+    history = settings.project_root / "data" / "history"
+    if history.exists():
+        for candidate in sorted(history.glob("*ledger*.csv")):
+            rel = _project_rel(candidate)
+            if rel == "data/history/bets_ledger.csv" or "data/_archive/" in rel:
+                continue
+            items.append({
+                "id": candidate.stem,
+                "label": candidate.stem.replace("_", " ").title(),
+                "path": rel,
+                "mode": "sandbox",
+                "exists": True,
+            })
+    return {"items": items, "status": "ok"}
+
+
+@app.get("/api/entities/runs")
+def entity_runs(limit: int = Query(300)):
+    catalog = settings.project_root / "data" / "runs" / "catalog.jsonl"
+    records, status = _read_jsonl_catalog(catalog)
+    items = []
+    for item in _active_catalog_items(records, "run_dir")[:_safe_limit(limit)]:
+        normalized = {
+            "run_id": item.get("run_id") or Path(str(item.get("run_dir") or "")).name,
+            "label": _run_label(item),
+            "target_date": item.get("target_date"),
+            "created_at": item.get("created_at"),
+            "config_name": item.get("config_name"),
+            "status": item.get("status"),
+            "picks_rows": item.get("picks_rows"),
+            "run_dir": item.get("run_dir"),
+            "path": item.get("run_dir"),
+            "run_mode": item.get("run_mode"),
+        }
+        items.append(normalized)
+    message = None
+    if status == "missing":
+        message = "Catálogo não encontrado. Rode scripts/build_run_catalog.py e scripts/build_replay_catalog.py ou gere uma nova execução."
+    return {"items": items, "status": status, "catalog_file": "data/runs/catalog.jsonl", "message": message}
+
+
+@app.get("/api/entities/replays")
+def entity_replays(limit: int = Query(300)):
+    catalog = settings.project_root / "data" / "replays" / "catalog.jsonl"
+    records, status = _read_jsonl_catalog(catalog)
+    items = []
+    for item in _active_catalog_items(records, "replay_dir")[:_safe_limit(limit)]:
+        normalized = {
+            "replay_id": item.get("replay_id") or Path(str(item.get("replay_dir") or "")).name,
+            "label": _replay_label(item),
+            "target_date": item.get("target_date"),
+            "created_at": item.get("created_at"),
+            "status": item.get("status"),
+            "configs": item.get("configs") or [],
+            "replay_dir": item.get("replay_dir"),
+            "replay_mode": item.get("replay_mode"),
+            "replay_strength": item.get("replay_strength"),
+            "summary_file": item.get("summary_file"),
+            "source_run_dir": item.get("source_run_dir"),
+        }
+        items.append(normalized)
+    message = None
+    if status == "missing":
+        message = "Catálogo não encontrado. Rode scripts/build_run_catalog.py e scripts/build_replay_catalog.py ou gere uma nova execução."
+    return {"items": items, "status": status, "catalog_file": "data/replays/catalog.jsonl", "message": message}
 
 
 @app.get("/runs")

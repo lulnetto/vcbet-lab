@@ -60,10 +60,10 @@ def build_analysis_command(project_root: Path, req: AnalysisRequest) -> CommandS
 
 
 def build_closing_odds_command(project_root: Path, req: ClosingOddsRequest) -> CommandSpec:
+    script = project_root / "scripts" / "update_closing_odds.py"
     args = [
         req.python_bin,
-        "-m",
-        "vcbet.collectors.closing_odds_collector",
+        str(script),
         "--ledger-file", _resolve(project_root, req.ledger_file),
         "--window-minutes", str(req.window_minutes),
         "--allow-past-minutes", str(req.allow_past_minutes),

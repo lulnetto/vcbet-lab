@@ -14,7 +14,11 @@ function switchTab(tab) {
 function bindOperationalInputs() {
   ['analysisDate','dailyDate','analysisConfig','dailyConfig'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.onchange = renderTodayCockpit;
+    if (el) el.onchange = () => {
+      if (id.endsWith('Date')) state.selectedDate = el.value || todayIsoDate();
+      if (id.endsWith('Config')) state.selectedConfig = el.value || state.selectedConfig;
+      renderTodayCockpit();
+    };
   });
 }
 

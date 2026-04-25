@@ -89,6 +89,7 @@ class LedgerProvenanceTest(unittest.TestCase):
             self.assertEqual(row["odds_snapshot_hash"], "oddsmd5")
             self.assertEqual(row["xg_snapshot_hash"], "xgmd5")
             self.assertEqual(row["decision_timestamp"], "2026-04-24 12:00:00")
+            self.assertEqual(row["event_url"], "https://example.test/match")
             self.assertEqual(row["pick_safety_status"], "safe")
             self.assertEqual(row["candidate_stage"], "official_accepted_pick")
             self.assertTrue(pd.isna(row["safety_gate_reason"]) or row["safety_gate_reason"] == "")

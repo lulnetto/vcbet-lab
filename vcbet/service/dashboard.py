@@ -49,6 +49,7 @@ def load_ledger(ledger_file: str | Path) -> pd.DataFrame:
         "created_at",
         "executed_at",
         "closing_collected_at",
+        "closing_snapshot_time",
         "override_updated_at",
         "settled_at",
         "match_datetime",
@@ -268,9 +269,10 @@ def build_dashboard_payload(df: pd.DataFrame, entries_limit: int = 100) -> dict[
     else:
         by_flag = []
 
-    if "final_odd_fechamento" in settled.columns:
-        clv_df = settled.dropna(subset=["final_odd_fechamento"]).copy()
-        clv_df["clv_delta"] = _safe_numeric(clv_df, "odd_entrada") - _safe_numeric(clv_df, "final_odd_fechamento")
+    closing_col = "closing_odd" if "closing_odd" in settled.columns and _safe_numeric(settled, "closing_odd").notna().any() else "final_odd_fechamento"
+    if closing_col in settled.columns:
+        clv_df = settled.dropna(subset=[closing_col]).copy()
+        clv_df["clv_delta"] = _safe_numeric(clv_df, "odd_entrada") - _safe_numeric(clv_df, closing_col)
         clv_summary = {
             "count": int(len(clv_df)),
             "avg_delta": round(float(clv_df["clv_delta"].mean()), 4) if len(clv_df) else 0.0,

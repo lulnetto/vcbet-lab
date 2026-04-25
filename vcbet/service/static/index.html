@@ -37,17 +37,20 @@
         <div><label>Run ID</label><select id="dashRun"><option value="">Todos</option></select></div>
         <div><label>Liga</label><select id="dashLeague"><option value="">Todas</option></select></div>
         <div><label>Mercado</label><select id="dashMarket"><option value="">Todos</option></select></div>
-        <div><label>Data inicial</label><input id="dashDateFrom" placeholder="2026-04-22"></div>
-        <div><label>Data final</label><input id="dashDateTo" placeholder="2026-04-23"></div>
+        <div><label>Data inicial</label><input id="dashDateFrom" type="date"></div>
+        <div><label>Data final</label><input id="dashDateTo" type="date"></div>
+        <div><label>Ledger</label><select id="dashLedgerSelect"></select></div>
       </div>
       <div class="inline" style="margin-top:10px;">
         <label><input type="checkbox" id="dashExecuted"> Só executadas</label>
         <label><input type="checkbox" id="dashSettled"> Só liquidadas</label>
+        <button class="ghost small" onclick="showWalletHistory()">Ver histórico</button>
+        <button class="ghost small" onclick="resetWalletToday()">Hoje</button>
       </div>
       <details class="advanced">
         <summary>Avançado</summary>
         <div class="row" style="margin-top:10px;">
-          <div><label>Ledger file</label><input id="dashLedger" value="data/history/bets_ledger.csv"></div>
+          <div><label>Ledger file manual</label><input id="dashLedger" value="data/history/bets_ledger.csv"></div>
         </div>
       </details>
     </div>
@@ -121,14 +124,15 @@
         <h2>Gerar picks</h2>
         <p class="muted">Executa a análise do dia e produz a carteira sugerida.</p>
         <div class="row">
-          <div><label>Data</label><input id="analysisDate" placeholder="2026-04-24"></div>
+          <div><label>Data</label><input id="analysisDate" type="date"></div>
           <div><label>Config</label><select id="analysisConfig"></select></div>
+          <div><label>Ledger</label><select id="analysisLedgerSelect"></select></div>
         </div>
         <details class="advanced">
           <summary>Avançado</summary>
           <div class="row" style="margin-top:10px;">
             <div><label>Modo</label><select id="analysisMode"><option value="full">full</option><option value="legacy">legacy</option></select></div>
-            <div><label>Ledger file</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Ledger file manual</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
             <label><input type="checkbox" id="analysisDebug"> debug</label>
@@ -141,13 +145,14 @@
       <div class="card">
         <h2>Ciclo diário completo</h2>
         <div class="row">
-          <div><label>Data</label><input id="dailyDate" placeholder="2026-04-24"></div>
+          <div><label>Data</label><input id="dailyDate" type="date"></div>
           <div><label>Config</label><select id="dailyConfig"></select></div>
+          <div><label>Ledger</label><select id="dailyLedgerSelect"></select></div>
         </div>
         <details class="advanced">
           <summary>Avançado</summary>
           <div class="row" style="margin-top:10px;">
-            <div><label>Ledger file</label><input id="dailyLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Ledger file manual</label><input id="dailyLedger" value="data/history/bets_ledger.csv"></div>
             <div><label>Results file</label><input id="dailyResults" value="data/results/results_auto.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
@@ -160,21 +165,24 @@
       </div>
 
       <div class="card">
-        <h2>Atualizar closing odds</h2>
-        <div class="row">
-          <div><label>Janela minutos</label><input id="closingWindow" value="20"></div>
-          <div><label>Allow past minutos</label><input id="closingPast" value="10"></div>
-        </div>
+        <h2>Manutenção de closing odds</h2>
+        <p class="muted">Closing odds usam campos dedicados e podem ser atualizadas por watcher/manual tick com event_url.</p>
         <details class="advanced">
-          <summary>Avançado</summary>
+          <summary>Avançado / rodar tick manual</summary>
           <div class="row" style="margin-top:10px;">
-            <div><label>Ledger file</label><input id="closingLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Janela minutos</label><input id="closingWindow" value="60"></div>
+            <div><label>Allow past minutos</label><input id="closingPast" value="10"></div>
+            <div><label>Ledger</label><select id="closingLedgerSelect"></select></div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <div><label>Ledger file manual</label><input id="closingLedger" value="data/history/bets_ledger.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
             <label><input type="checkbox" id="closingAllPending"> todos pendentes</label>
           </div>
         </details>
-        <button onclick="submitClosingOdds()">Atualizar closing odds</button>
+          <button class="ghost" onclick="submitClosingOdds()">Rodar tick manual</button>
+        </details>
       </div>
 
       <div class="card">
@@ -183,11 +191,12 @@
         <div class="row">
           <div><label>Grace minutes</label><input id="resultsGrace" value="110"></div>
           <div><label>Máx. páginas</label><input id="resultsMaxPages" value="6"></div>
+          <div><label>Ledger</label><select id="resultsLedgerSelect"></select></div>
         </div>
         <details class="advanced">
           <summary>Avançado</summary>
           <div class="row" style="margin-top:10px;">
-            <div><label>Ledger file</label><input id="resultsLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Ledger file manual</label><input id="resultsLedger" value="data/history/bets_ledger.csv"></div>
             <div><label>Results file</label><input id="resultsFile" value="data/results/results_auto.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
@@ -202,10 +211,13 @@
       <div class="card">
         <h2>Liquidar ledger</h2>
         <p class="muted">Aplica resultados coletados no ledger operacional.</p>
-        <details class="advanced" open>
-          <summary>Arquivos usados</summary>
+        <div class="row">
+          <div><label>Ledger</label><select id="settlementLedgerSelect"></select></div>
+        </div>
+        <details class="advanced">
+          <summary>Avançado / arquivos usados</summary>
           <div class="row" style="margin-top:10px;">
-            <div><label>Ledger file</label><input id="settlementLedger" value="data/history/bets_ledger.csv"></div>
+            <div><label>Ledger file manual</label><input id="settlementLedger" value="data/history/bets_ledger.csv"></div>
             <div><label>Results file</label><input id="settlementResults" value="data/results/results_auto.csv"></div>
             <div><label>Overrides file</label><input id="settlementOverrides" placeholder="data/results/results_overrides.csv"></div>
           </div>
@@ -243,6 +255,10 @@
 
       <div class="card">
         <div class="section-title"><h3>Histórico de replays</h3><button class="ghost" onclick="loadReplaySummaries()">Atualizar</button></div>
+        <div class="row" style="margin-bottom:10px;">
+          <div><label>Replay</label><select id="replaySummarySelect"></select></div>
+          <div style="align-self:end;"><button class="ghost" onclick="openSelectedReplaySummary()">Abrir replay</button></div>
+        </div>
         <div class="table-wrap"><table id="tableReplaySummaries"></table></div>
       </div>
     </div>
@@ -299,6 +315,11 @@
     <div class="jobs-grid">
       <div class="card">
         <div class="section-title"><h2>Monitor</h2><div class="inline"><span class="muted">auto 5s</span><button class="ghost" onclick="loadJobs()">Atualizar</button></div></div>
+        <div class="inline pager">
+          <button class="ghost small" onclick="previousJobsPage()">Anterior</button>
+          <span class="muted" id="jobsPageInfo">Página 1</span>
+          <button class="ghost small" onclick="nextJobsPage()">Próxima</button>
+        </div>
         <div id="jobsList"></div>
       </div>
       <div class="card">

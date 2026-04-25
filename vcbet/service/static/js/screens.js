@@ -10,11 +10,11 @@ function renderNextAction() {
 }
 
 function selectedConfigName() {
-  return document.getElementById('analysisConfig')?.value || document.getElementById('dailyConfig')?.value || '';
+  return document.getElementById('analysisConfig')?.value || document.getElementById('dailyConfig')?.value || state.selectedConfig || '';
 }
 
 function operationalDate() {
-  return document.getElementById('analysisDate')?.value || document.getElementById('dailyDate')?.value || new Date().toISOString().slice(0, 10);
+  return document.getElementById('analysisDate')?.value || document.getElementById('dailyDate')?.value || state.selectedDate || todayIsoDate();
 }
 
 function aliasPendingCount() {
@@ -23,7 +23,7 @@ function aliasPendingCount() {
 
 function hasRunForOperationalDate() {
   const date = operationalDate();
-  return state.replayRuns.some(item => item.target_date === date || String(item.run_id || '').includes(date.replaceAll('-', '')));
+  return (state.entities.runs || state.replayRuns).some(item => item.target_date === date || String(item.run_id || '').includes(date.replaceAll('-', '')));
 }
 
 function dashboardSummary() {
@@ -69,7 +69,7 @@ function renderTodayCockpit() {
   if (incompleteReplay) warningItems.push('Há replay com qualidade ou contrato temporal fraco/incompleto.');
   if (!total && !state.loadErrors.dashboard) warningItems.push('Nenhuma pick disponível no filtro atual.');
 
-  document.getElementById('todayDate').textContent = operationalDate() || 'não selecionada';
+  document.getElementById('todayDate').textContent = formatPtDate(operationalDate()) || 'não selecionada';
   document.getElementById('todayConfig').textContent = selectedConfigName() || 'não verificada';
   document.getElementById('todayStatus').innerHTML = todayStatus();
   document.getElementById('todayRefresh').textContent = state.lastRefreshAt ? formatLocalDateTime(state.lastRefreshAt) : 'não carregado';
@@ -77,7 +77,7 @@ function renderTodayCockpit() {
 
   document.getElementById('todayPipeline').innerHTML = [
     pipelineStep('Análise do dia', running ? 'rodando' : (total || hasRunForOperationalDate() ? 'ok' : 'pendente'), total ? `${total} pick(s) no filtro atual da carteira.` : 'Sem picks verificadas no contexto atual.', 'Rodar análise', "document.getElementById('analysisDate')?.focus()"),
-    pipelineStep('Closing odds', running ? 'rodando' : (clvCount ? 'ok' : (total ? 'atenção' : 'indisponível')), clvCount ? `${clvCount} entrada(s) com closing odds.` : (total ? 'Closing odds não verificada para as entradas carregadas.' : 'Depende de picks/ledger carregados.'), 'Atualizar', "document.getElementById('closingWindow')?.focus()"),
+    pipelineStep('Closing odds', running ? 'rodando' : (clvCount ? 'ok' : (total ? 'atenção' : 'indisponível')), clvCount ? `${clvCount} entrada(s) com closing odds.` : (total ? 'Watcher/tick manual via Manutenção quando houver event_url.' : 'Depende de picks/ledger carregados.'), '', ''),
     pipelineStep('Resultados', running ? 'rodando' : (open ? 'atenção' : (settled ? 'ok' : 'pendente')), open ? `${open} pick(s) abertas podem precisar de resultado.` : (settled ? 'Entradas liquidadas encontradas.' : 'Sem resultado verificado.'), 'Atualizar resultados', "document.getElementById('resultsGrace')?.focus()"),
     pipelineStep('Settlement', running ? 'rodando' : (open ? 'atenção' : (settled ? 'ok' : 'pendente')), open ? 'Há entradas abertas no filtro atual.' : (settled ? `${settled} entrada(s) liquidadas.` : 'Settlement não verificado.'), 'Liquidar ledger', "document.getElementById('settlementLedger')?.focus()"),
     pipelineStep('Revisão', aliases || failedJobs ? 'atenção' : (total ? 'ok' : 'pendente'), aliases || failedJobs ? 'Existem pendências antes da revisão final.' : (total ? 'Carteira pronta para revisão operacional.' : 'Aguardando análise do dia.'), 'Carteira', "switchTab('dashboard')")
@@ -110,21 +110,72 @@ function renderTodayCockpit() {
 }
 
 function fillConfigSelect(id, preferred = 'legacy_v2') {
-  const el = document.getElementById(id);
-  el.innerHTML = '';
-  state.configs.forEach(cfg => {
-    const opt = document.createElement('option');
-    opt.value = cfg.name;
-    opt.textContent = `${cfg.label} (${cfg.name})`;
-    if (cfg.name === preferred) opt.selected = true;
-    el.appendChild(opt);
-  });
+  renderConfigSelect(id, preferred);
 }
 
 async function loadConfigs() {
-  state.configs = await api('/configs');
-  ['analysisConfig','dailyConfig'].forEach(id => fillConfigSelect(id));
+  await loadEntities();
+}
+
+async function loadEntities() {
+  const [configs, ledgers, runs, replays] = await Promise.all([
+    fetchConfigs(),
+    fetchLedgers(),
+    fetchRuns(),
+    fetchReplays(),
+  ]);
+  state.entities.configs = configs.items || [];
+  state.entities.ledgers = ledgers.items || [];
+  state.entities.runs = runs.items || [];
+  state.entities.replays = replays.items || [];
+  state.entities.catalogMessages = {
+    runs: runs.message || '',
+    replays: replays.message || '',
+  };
+  state.configs = state.entities.configs.map(cfg => ({...cfg, name: cfg.name || cfg.id}));
+  if (!state.selectedConfig) {
+    const defaultConfig = state.configs.find(cfg => cfg.is_default) || state.configs[0];
+    state.selectedConfig = defaultConfig?.name || defaultConfig?.id || 'legacy_v2';
+  }
+  setupEntitySelectors();
   renderReplayConfigRows(['legacy_v2']);
+}
+
+function setupEntitySelectors() {
+  ['analysisDate','dailyDate'].forEach(id => renderDatePicker(id));
+  ['dashDateFrom','dashDateTo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.type = 'date';
+  });
+  resetWalletToday(false);
+  ['analysisConfig','dailyConfig'].forEach(id => fillConfigSelect(id, state.selectedConfig));
+  [
+    ['dashLedgerSelect', 'dashLedger'],
+    ['analysisLedgerSelect', 'analysisLedger'],
+    ['dailyLedgerSelect', 'dailyLedger'],
+    ['closingLedgerSelect', 'closingLedger'],
+    ['resultsLedgerSelect', 'resultsLedger'],
+    ['settlementLedgerSelect', 'settlementLedger'],
+  ].forEach(([selectId, inputId]) => renderLedgerSelect(selectId, inputId));
+  renderRunSelect('replaySourceRunSelect', 'replaySourceRun');
+  renderReplaySelect('replaySummarySelect');
+}
+
+function resetWalletToday(reload = true, force = true) {
+  const date = state.selectedDate || todayIsoDate();
+  const from = document.getElementById('dashDateFrom');
+  const to = document.getElementById('dashDateTo');
+  if (from && (force || !from.value)) from.value = date;
+  if (to && (force || !to.value)) to.value = date;
+  if (reload) loadDashboard();
+}
+
+function showWalletHistory() {
+  const from = document.getElementById('dashDateFrom');
+  const to = document.getElementById('dashDateTo');
+  if (from) from.value = '';
+  if (to) to.value = '';
+  loadDashboard();
 }
 
 function dashboardParams() {
@@ -294,14 +345,12 @@ function addReplayConfigField(selected = '') {
 
 async function loadReplayRuns() {
   try {
-    const payload = await api('/runs?limit=300');
-    state.replayRuns = payload.items || [];
+    const payload = await fetchRuns();
+    state.entities.runs = payload.items || [];
+    state.entities.catalogMessages.runs = payload.message || '';
+    state.replayRuns = state.entities.runs;
     delete state.loadErrors.runs;
-    const select = document.getElementById('replaySourceRunSelect');
-    select.innerHTML = '<option value="">Selecione uma run</option>' + state.replayRuns.map(item =>
-      `<option value="${escapeHtml(item.path)}">${escapeHtml(item.target_date)} | ${escapeHtml(item.run_id)} | picks=${escapeHtml(item.picks_rows ?? '-')}</option>`
-    ).join('');
-    select.onchange = () => { document.getElementById('replaySourceRun').value = select.value; };
+    renderRunSelect('replaySourceRunSelect', 'replaySourceRun');
   } catch (err) {
     state.loadErrors.runs = err.message;
   }
@@ -310,6 +359,10 @@ async function loadReplayRuns() {
 
 async function loadReplaySummaries() {
   try {
+    const entities = await fetchReplays();
+    state.entities.replays = entities.items || [];
+    state.entities.catalogMessages.replays = entities.message || '';
+    renderReplaySelect('replaySummarySelect');
     const payload = await api('/replays/summaries?limit=80');
     state.replaySummaries = payload.items || [];
     delete state.loadErrors.replay;
@@ -322,7 +375,7 @@ async function loadReplaySummaries() {
       action: `<button class="ghost small" onclick="loadReplaySummaryDetail(${idx})">abrir</button>`
     })), [
       {key:'target_date', label:'Data'}, {key:'source_run_id', label:'Run'}, {key:'quality_html', label:'Qualidade', html:true}, {key:'temporal_html', label:'Temporal', html:true}, {key:'configs_text', label:'Configs'}, {key:'results_count', label:'Picks'}, {key:'action', label:'', html:true}
-    ], 'Ainda não há dados de replay. Rode um replay a partir de uma run histórica para comparar configs.');
+    ], state.entities.catalogMessages.replays || 'Ainda não há dados de replay. Rode um replay a partir de uma run histórica para comparar configs.');
   } catch (err) {
     state.loadErrors.replay = err.message;
     renderTable('tableReplaySummaries', [], [
@@ -330,6 +383,23 @@ async function loadReplaySummaries() {
     ], 'Replay não verificado nesta carga.');
   }
   renderTodayCockpit();
+}
+
+async function openSelectedReplaySummary() {
+  const selected = document.getElementById('replaySummarySelect')?.value;
+  if (!selected) return;
+  const index = state.replaySummaries.findIndex(item => item.summary_file === selected);
+  if (index >= 0) {
+    await loadReplaySummaryDetail(index);
+    return;
+  }
+  const item = state.entities.replays.find(replay => replay.summary_file === selected);
+  if (!item?.summary_file) return;
+  const payload = await api(`/replays/summary?${qs({summary_file: item.summary_file})}`);
+  state.replaySummaryPayload = payload;
+  const synthetic = {summary_file: item.summary_file};
+  state.replaySummaries.unshift(synthetic);
+  await loadReplaySummaryDetail(0);
 }
 
 async function loadReplaySummaryDetail(index) {
@@ -543,12 +613,40 @@ function formatJob(job) {
     </div></div>`;
 }
 
+function renderJobsPage() {
+  const root = document.getElementById('jobsList');
+  if (!root) return;
+  const total = state.jobs.length;
+  const totalPages = Math.max(1, Math.ceil(total / state.jobsPageSize));
+  state.jobsPage = Math.min(Math.max(1, state.jobsPage), totalPages);
+  const start = (state.jobsPage - 1) * state.jobsPageSize;
+  const visible = state.jobs.slice(start, start + state.jobsPageSize);
+  const info = document.getElementById('jobsPageInfo');
+  if (info) info.textContent = `Página ${state.jobsPage}/${totalPages} · ${total} job(s)`;
+  root.innerHTML = visible.map(formatJob).join('') || '<div class="state-box"><strong>Nenhum job recente.</strong>Quando você rodar uma análise, daily run, replay ou coleta, o andamento aparecerá aqui com acesso aos logs.</div>';
+}
+
+function nextJobsPage() {
+  const totalPages = Math.max(1, Math.ceil(state.jobs.length / state.jobsPageSize));
+  if (state.jobsPage < totalPages) {
+    state.jobsPage += 1;
+    renderJobsPage();
+  }
+}
+
+function previousJobsPage() {
+  if (state.jobsPage > 1) {
+    state.jobsPage -= 1;
+    renderJobsPage();
+  }
+}
+
 async function loadJobs() {
   try {
-    const payload = await api('/jobs?limit=40');
+    const payload = await api('/jobs?limit=100');
     state.jobs = payload.items || [];
     delete state.loadErrors.jobs;
-    document.getElementById('jobsList').innerHTML = state.jobs.map(formatJob).join('') || '<div class="state-box"><strong>Nenhum job recente.</strong>Quando você rodar uma análise, daily run, replay ou coleta, o andamento aparecerá aqui com acesso aos logs.</div>';
+    renderJobsPage();
   } catch (err) {
     state.jobs = [];
     state.loadErrors.jobs = err.message;
