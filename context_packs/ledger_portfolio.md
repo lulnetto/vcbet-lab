@@ -16,7 +16,9 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 ## Include Only If Needed
 
 - `vcbet/core/line_selector.py` when market family or correlation affects ledger exposure.
-- `vcbet/core/pipeline_ev.py` when pipeline appends to the ledger.
+- `vcbet/core/pipeline/output_writer.py` when the daily pipeline appends to the ledger.
+- `vcbet/core/pipeline/quality_report.py` when pipeline quality or provenance reports include ledger/portfolio outcomes.
+- `vcbet/core/pipeline_ev.py` only as the compatibility entrypoint when orchestration behavior is part of the task.
 - `vcbet/settlement/settlement_engine.py` when final status or result units affect ledger rows.
 - `vcbet/service/dashboard.py` when ledger data is surfaced in summaries.
 - `tests/test_temporal_contract.py` when provenance or snapshot fields are involved.

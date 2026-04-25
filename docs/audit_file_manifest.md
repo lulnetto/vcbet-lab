@@ -6,13 +6,13 @@ This file defines the minimal source/context set for an upcoming VCBet architect
 
 ## Audit Scope Summary
 
-- Total git-tracked files: 121 (120 currently present; 1 tracked path(s) deleted in the working tree).
-- Total untracked relevant files, if any: 3 (`.codexignore`, `docs/audit_file_manifest.md`, `docs/context.md`).
-- Total included audit files: 113.
+- Total git-tracked files: 161 (161 currently present; 0 tracked path(s) deleted in the working tree).
+- Total untracked relevant files, if any: 0.
+- Total included audit files: 119.
 - Total excluded files/directories: 1041 files across 326 directories/groups.
-- Approximate size of included scope: 782.7 KB.
+- Approximate size of included scope: 701.4 KB.
 - Approximate size of excluded scope: 49.2 MB.
-- Deleted tracked paths currently observed: `configs/team_registry/betano_footystats_aliases copy.csv`.
+- Deleted tracked paths currently observed: none.
 
 The sections below are audit inputs, not architecture conclusions. Responsibility notes are inferred from names, imports, routes, and function/class signatures only.
 
@@ -621,23 +621,128 @@ __all__ = [
 
 ### `vcbet/core/pipeline_ev.py`
 
-- Size: 32.3 KB
-- Domain/responsibility: Likely support / package structure; functions: carregar_snapshot_odds, carregar_snapshot_xg, to_sorted_dict, processar_pipeline.
+- Size: 9.4 KB
+- Domain/responsibility: Daily pipeline compatibility entrypoint and thin orchestrator after the mechanical stage split.
 - Classes: none detected
-- Functions: carregar_snapshot_odds, carregar_snapshot_xg, to_sorted_dict, processar_pipeline
-- Local imports: vcbet.core.config_ligas, vcbet.core.decision_policy, vcbet.core.ledger_manager, vcbet.core.line_selector, vcbet.core.market_normalizer, vcbet.core.pick_features, vcbet.core.pricing_engine, vcbet.core.run_utils, vcbet.core.strategy_config, vcbet.core.team_matcher, vcbet.core.temporal_contract
+- Functions: processar_pipeline
+- Local imports: vcbet.core.ledger_manager, vcbet.core.pipeline.filtering_stage, vcbet.core.pipeline.input_loader, vcbet.core.pipeline.output_writer, vcbet.core.pipeline.pricing_stage, vcbet.core.pipeline.quality_report, vcbet.core.pipeline.team_resolution, vcbet.core.run_utils, vcbet.core.strategy_config, vcbet.core.temporal_contract
+- Compatibility note: `processar_pipeline` remains the stable public entrypoint. Stage modules under `vcbet/core/pipeline/` are daily-pipeline implementation details, and the split was intended to preserve behavior.
 - Tiny sample:
 ```python
 from __future__ import annotations
 import argparse
-from collections import Counter
+import pandas as pd
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE
+from vcbet.core.pipeline.filtering_stage import build_normalization_filter, select_and_annotate_final_picks
+from vcbet.core.pipeline.input_loader import carregar_snapshot_odds, carregar_snapshot_xg, load_pipeline_inputs
+from vcbet.core.pipeline.output_writer import candidate_artifact_paths, write_candidate_artifacts, write_pipeline_outputs
+from vcbet.core.pipeline.pricing_stage import build_priced_candidates
+```
+
+### `vcbet/core/pipeline/input_loader.py`
+
+- Size: 4.2 KB
+- Domain/responsibility: Daily pipeline input loading, odds normalization, run directory setup, snapshot provenance, and runtime config snapshot persistence.
+- Classes: none detected
+- Functions: carregar_snapshot_odds, carregar_snapshot_xg, load_pipeline_inputs
+- Local imports: vcbet.core.market_normalizer, vcbet.core.run_utils, vcbet.core.strategy_config, vcbet.core.temporal_contract
+- Pipeline note: implementation detail of the daily pipeline; behavior was intended to remain unchanged by the split.
+- Tiny sample:
+```python
+from __future__ import annotations
 from pathlib import Path
 import pandas as pd
-from vcbet.core.config_ligas import obter_nomes_ligas_ativas
-from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
-from vcbet.core.line_selector import select_top_picks
 from vcbet.core.market_normalizer import normalize_odds_dataframe
+from vcbet.core.run_utils import ensure_run_dir
+from vcbet.core.strategy_config import save_runtime_snapshot
+```
+
+### `vcbet/core/pipeline/team_resolution.py`
+
+- Size: 4.4 KB
+- Domain/responsibility: Daily pipeline team alias cache preparation, per-row team resolution, pending-alias collection, and alias review artifact reporting.
+- Classes: none detected
+- Functions: prepare_team_resolution_state, resolve_row_teams, write_and_report_alias_review
+- Local imports: vcbet.core.team_matcher
+- Pipeline note: implementation detail of the daily pipeline; team identity domain behavior still lives in `vcbet/core/team_matcher.py` and `vcbet/core/team_registry.py`.
+- Tiny sample:
+```python
+from __future__ import annotations
+from collections import Counter
+import pandas as pd
+from vcbet.core.team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
+def prepare_team_resolution_state(alias_file: str, df_xg: pd.DataFrame) -> dict[str, object]:
+```
+
+### `vcbet/core/pipeline/pricing_stage.py`
+
+- Size: 5.4 KB
+- Domain/responsibility: Daily pipeline pricing loop, priced candidate creation, EV policy evaluation, and pricing-stage discard counters.
+- Classes: none detected
+- Functions: build_priced_candidates
+- Local imports: vcbet.core.decision_policy, vcbet.core.pick_features, vcbet.core.pricing_engine, vcbet.core.pipeline.team_resolution
+- Pipeline note: implementation detail of the daily pipeline; pricing formulas remain in `vcbet/core/pricing_engine.py`.
+- Tiny sample:
+```python
+from __future__ import annotations
+from collections import Counter
+import pandas as pd
+from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
 from vcbet.core.pick_features import build_candidate_row
+from vcbet.core.pricing_engine import calculate_lambdas, price_market_selection
+```
+
+### `vcbet/core/pipeline/filtering_stage.py`
+
+- Size: 5.0 KB
+- Domain/responsibility: Daily pipeline normalization filter metrics, eligible-row filtering, final-pick selection, and portfolio/safety annotations.
+- Classes: none detected
+- Functions: build_normalization_filter, select_and_annotate_final_picks
+- Local imports: vcbet.core.config_ligas, vcbet.core.line_selector, vcbet.core.temporal_contract
+- Pipeline note: implementation detail of the daily pipeline; selection policy behavior remains in the policy modules it calls.
+- Tiny sample:
+```python
+from __future__ import annotations
+from collections import Counter
+import pandas as pd
+from vcbet.core.config_ligas import obter_nomes_ligas_ativas
+from vcbet.core.line_selector import select_top_picks
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
+```
+
+### `vcbet/core/pipeline/output_writer.py`
+
+- Size: 7.1 KB
+- Domain/responsibility: Daily pipeline CSV artifact paths, candidate artifact writes, manifest fields, picks output, and official ledger append handoff.
+- Classes: none detected
+- Functions: candidate_artifact_paths, write_candidate_artifacts, manifest_common_fields, write_pipeline_outputs
+- Local imports: vcbet.core.ledger_manager, vcbet.core.run_utils, vcbet.core.temporal_contract
+- Pipeline note: implementation detail of the daily pipeline; ledger append semantics should remain anchored in `vcbet/core/ledger_manager.py`.
+- Tiny sample:
+```python
+from __future__ import annotations
+import pandas as pd
+from vcbet.core.ledger_manager import append_new_picks_to_ledger
+from vcbet.core.run_utils import update_manifest
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
+```
+
+### `vcbet/core/pipeline/quality_report.py`
+
+- Size: 10.5 KB
+- Domain/responsibility: Daily pipeline console summaries, scan report counters, structured quality report construction, and quality report persistence.
+- Classes: none detected
+- Functions: to_sorted_dict, print_pricing_summary, print_scan_report, build_quality_report, save_run_quality_report
+- Local imports: vcbet.core.run_utils, vcbet.core.temporal_contract
+- Pipeline note: implementation detail of the daily pipeline; report field semantics were intended to remain unchanged by the split.
+- Tiny sample:
+```python
+from __future__ import annotations
+from collections import Counter
+import pandas as pd
+from vcbet.core.run_utils import save_quality_report
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
+def to_sorted_dict(counter_like) -> dict:
 ```
 
 ### `vcbet/core/pricing_engine.py`
@@ -2173,6 +2278,12 @@ Send these files as the architecture audit source set. Send `docs/audit_file_man
 - `vcbet/core/pick_features.py`
 - `vcbet/core/pick_filter.py`
 - `vcbet/core/pipeline_ev.py`
+- `vcbet/core/pipeline/input_loader.py`
+- `vcbet/core/pipeline/team_resolution.py`
+- `vcbet/core/pipeline/pricing_stage.py`
+- `vcbet/core/pipeline/filtering_stage.py`
+- `vcbet/core/pipeline/output_writer.py`
+- `vcbet/core/pipeline/quality_report.py`
 - `vcbet/core/pricing_engine.py`
 - `vcbet/core/risk_policy.py`
 - `vcbet/core/run_utils.py`

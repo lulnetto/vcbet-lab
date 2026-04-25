@@ -22,7 +22,9 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 - `vcbet/core/pricing_engine.py` when EV/probability drives eligibility.
 - `vcbet/core/pick_features.py` when candidate row fields are changing.
 - `vcbet/core/ledger_portfolio_gate.py` when official ledger exposure differs from in-run exposure.
-- `vcbet/core/pipeline_ev.py` for orchestration call sites.
+- `vcbet/core/pipeline/filtering_stage.py` for daily pipeline filtering and final-pick selection call sites.
+- `vcbet/core/pipeline/output_writer.py` when selected picks are written or ledger appends are involved.
+- `vcbet/core/pipeline_ev.py` only as the compatibility entrypoint when orchestration behavior is part of the task.
 - `vcbet/service/dashboard.py` when rejection or flag summaries are displayed.
 - `configs/legacy_v2.json`, `configs/champion_strict.json`, or `configs/intermediate_balanced.json` for config-specific behavior.
 
@@ -52,7 +54,7 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 
 - `vcbet/core/line_selector.py` is over 500 LOC and mixes selection, exposure tracking, correlation, and rejection shaping.
 - `vcbet/core/decision_policy.py` is near the 300 LOC target and concentrates identity, confidence, and acceptance policy.
-- `vcbet/core/pipeline_ev.py` is a large call-site hotspot for this domain.
+- `vcbet/core/pipeline/filtering_stage.py` and `vcbet/core/pipeline/output_writer.py` are the daily pipeline call sites for this domain; `vcbet/core/pipeline_ev.py` should stay a thin compatibility orchestrator.
 
 ## Refactor Direction
 

@@ -14,7 +14,8 @@ Work on translating raw bookmaker market text and selections into normalized mar
 
 - `vcbet/collectors/odds_collector.py` when the task touches collected odds rows.
 - `vcbet/collectors/closing_odds_collector.py` when closing odds matching depends on normalized markets.
-- `vcbet/core/pipeline_ev.py` when normalized odds flow into candidate generation.
+- `vcbet/core/pipeline/input_loader.py` and `vcbet/core/pipeline/filtering_stage.py` when normalized odds flow into candidate generation.
+- `vcbet/core/pipeline_ev.py` only as the compatibility entrypoint when daily-run orchestration is involved.
 - `vcbet/core/team_matcher.py` when team-total target matching is involved.
 - `configs/legacy_v2.json`, `configs/champion_strict.json`, or `configs/intermediate_balanced.json` when allowed markets or thresholds are relevant.
 
@@ -43,7 +44,7 @@ Work on translating raw bookmaker market text and selections into normalized mar
 ## Known Hotspots
 
 - `vcbet/core/market_normalizer.py` is just over the 300 LOC target.
-- `vcbet/collectors/odds_collector.py` and `vcbet/core/pipeline_ev.py` are risky call sites because collection, normalization, and orchestration are tightly coupled.
+- `vcbet/collectors/odds_collector.py`, `vcbet/core/pipeline/input_loader.py`, and `vcbet/core/pipeline/filtering_stage.py` are risky call sites because collection, normalization, and orchestration remain tightly coupled.
 
 ## Refactor Direction
 

@@ -7,7 +7,8 @@ This document turns the audit diagnosis into development contracts for future VC
 - VCBet is still closer to organized scripts than modular architecture.
 - CSV currently acts as DB, DTO, log, API contract, and operational state.
 - pandas leaks across boundaries.
-- `vcbet/service/api.py`, `vcbet/core/pipeline_ev.py`, `vcbet/replay/replay_pipeline.py`, and `vcbet/service/static/js/screens.js` are current cognitive hotspots.
+- `vcbet/service/api.py`, `vcbet/core/pipeline_ev.py`, `vcbet/replay/replay_pipeline.py`, and `vcbet/service/static/js/screens.js` were identified as cognitive hotspots.
+- `vcbet/core/pipeline_ev.py` now remains the daily pipeline compatibility entrypoint, while stage implementation details live under `vcbet/core/pipeline/`; that split was intended to preserve behavior.
 
 ## Target Dependency Direction
 
@@ -69,7 +70,7 @@ Establish LLM context rules, domain context packs, dependency direction, and fil
 
 ### Phase 2: Application Boundaries
 
-Extract use cases out of hotspots such as `pipeline_ev.py`, `replay_pipeline.py`, `service/api.py`, and `screens.js`. Introduce repository/output-writer seams around CSV reads and writes while preserving current file formats and operator workflows.
+Continue extracting use cases out of hotspots such as `replay_pipeline.py`, `service/api.py`, `screens.js`, and the implementation stages under `vcbet/core/pipeline/`. Keep `pipeline_ev.py` as compatibility orchestration, and introduce repository/output-writer boundaries around CSV reads and writes while preserving current file formats and operator workflows.
 
 ### Phase 3: Domain Purity and Storage Evolution
 

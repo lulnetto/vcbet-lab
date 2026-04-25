@@ -13,7 +13,8 @@ Work on probability, fair odds, EV, lambda calculation, and the pricing fields e
 
 ## Include Only If Needed
 
-- `vcbet/core/pipeline_ev.py` for pricing call sites in the daily pipeline.
+- `vcbet/core/pipeline/pricing_stage.py` for pricing call sites in the daily pipeline.
+- `vcbet/core/pipeline_ev.py` only as the compatibility entrypoint when orchestration behavior is part of the task.
 - `vcbet/core/decision_policy.py` when EV or confidence thresholds affect eligibility.
 - `vcbet/service/dashboard.py` when dashboard pricing payload fields are involved.
 - `configs/legacy_v2.json`, `configs/champion_strict.json`, or `configs/intermediate_balanced.json` when config thresholds affect pricing interpretation.
@@ -44,7 +45,7 @@ Work on probability, fair odds, EV, lambda calculation, and the pricing fields e
 ## Known Hotspots
 
 - `vcbet/core/pricing_engine.py` is currently below the 300 LOC target but contains dense probability logic.
-- `vcbet/core/pipeline_ev.py` is a large orchestrator and should be treated as a call-site hotspot, not the pricing home.
+- `vcbet/core/pipeline/pricing_stage.py` contains the daily pipeline pricing stage; `vcbet/core/pipeline_ev.py` should stay a thin compatibility orchestrator, not the pricing home.
 
 ## Refactor Direction
 

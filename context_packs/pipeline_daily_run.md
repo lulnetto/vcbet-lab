@@ -6,7 +6,13 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 
 ## Include by Default
 
-- `vcbet/core/pipeline_ev.py`
+- `vcbet/core/pipeline_ev.py` as the compatibility entrypoint for `processar_pipeline`
+- `vcbet/core/pipeline/input_loader.py`
+- `vcbet/core/pipeline/team_resolution.py`
+- `vcbet/core/pipeline/pricing_stage.py`
+- `vcbet/core/pipeline/filtering_stage.py`
+- `vcbet/core/pipeline/output_writer.py`
+- `vcbet/core/pipeline/quality_report.py`
 - `run_project.sh`
 - `vcbet/core/run_utils.py`
 - `vcbet/core/strategy_config.py`
@@ -49,6 +55,8 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 - The daily run must preserve target date, run ID, config name, config fingerprint, snapshot provenance, and temporal contract fields.
 - Odds and xG snapshots must be resolved explicitly and recorded in manifests.
 - Accepted picks must pass pricing, risk, selection, and ledger append gates in the expected order.
+- `vcbet/core/pipeline_ev.py` remains the stable public entrypoint; `vcbet/core/pipeline/*.py` stage modules are implementation details from the mechanical split.
+- The pipeline stage split was intended to leave pricing, filtering, EV, ledger append, quality report, and output semantics unchanged.
 - Orchestration should remain thin; domain behavior belongs in domain modules and application use cases.
 
 ## Validation Commands
@@ -58,7 +66,8 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 
 ## Known Hotspots
 
-- `vcbet/core/pipeline_ev.py` is roughly 658 LOC and mixes loading, matching, pricing, decision policy, manifests, reports, and ledger appends.
+- `vcbet/core/pipeline_ev.py` was mechanically reduced to a thin orchestrator/compatibility layer for the daily run.
+- `vcbet/core/pipeline/*.py` stage modules now hold loading, team resolution, pricing, filtering, output writing, and quality-report implementation details.
 - `run_project.sh` and `scripts/run_project.sh` are orchestration entrypoints that should stay thin.
 
 ## Refactor Direction

@@ -13,7 +13,8 @@ Work on deterministic replay runs, source run resolution, config comparisons, re
 
 ## Include Only If Needed
 
-- `vcbet/core/pipeline_ev.py` when replay invokes or mirrors the daily pipeline.
+- `vcbet/core/pipeline_ev.py` when replay invokes the daily pipeline compatibility entrypoint.
+- `vcbet/core/pipeline/input_loader.py`, `vcbet/core/pipeline/output_writer.py`, and `vcbet/core/pipeline/quality_report.py` when replay mirrors daily pipeline implementation details.
 - `vcbet/core/ledger_manager.py` when replay ledger summaries are involved.
 - `vcbet/settlement/settlement_engine.py` when replay settlement changes.
 - `vcbet/service/api.py` when replay routes or summary loading change.

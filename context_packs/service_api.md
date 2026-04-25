@@ -23,7 +23,8 @@ Work on FastAPI routes, schemas, service commands, job orchestration, dashboard 
 - `vcbet/service/static/js/api.js` and `vcbet/service/static/js/screens.js` when route response shape changes.
 - `vcbet/core/ledger_manager.py` when ledger rows or dashboard filters change.
 - `vcbet/replay/replay_pipeline.py` when replay summary routes change.
-- `vcbet/core/pipeline_ev.py` only for daily-run command effects.
+- `vcbet/core/pipeline_ev.py` only for daily-run command effects through the compatibility entrypoint.
+- `vcbet/core/pipeline/input_loader.py`, `vcbet/core/pipeline/pricing_stage.py`, `vcbet/core/pipeline/filtering_stage.py`, `vcbet/core/pipeline/output_writer.py`, and `vcbet/core/pipeline/quality_report.py` only when service behavior depends on daily pipeline stage internals.
 - `scripts/build_run_catalog.py` or `scripts/build_replay_catalog.py` when catalog refresh behavior changes.
 - One job JSON or log excerpt only under the service job/log exception in `docs/LLM_CONTEXT_RULES.md`.
 

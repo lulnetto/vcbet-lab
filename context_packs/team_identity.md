@@ -19,7 +19,8 @@ Work on team normalization, Betano-to-FootyStats alias matching, registry parsin
 
 - `scripts/approve_alias_review.py` when legacy alias approval flow is involved.
 - `vcbet/core/risk_policy.py` when alias confidence affects safety gates.
-- `vcbet/core/pipeline_ev.py` when team matching affects daily candidate generation.
+- `vcbet/core/pipeline/team_resolution.py` when team matching affects daily candidate generation.
+- `vcbet/core/pipeline_ev.py` only as the compatibility entrypoint when daily-run orchestration is involved.
 - `vcbet/collectors/odds_collector.py` or `vcbet/collectors/footystats_xg_collector.py` when raw team sources change.
 - `vcbet/service/static/js/screens.js` when team registry UI behavior changes.
 - Tiny runtime review queue excerpts only under the aliases/team registry exception in `docs/LLM_CONTEXT_RULES.md`.
