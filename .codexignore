@@ -1,0 +1,46 @@
+# Git / local metadata
+.git/**
+.codex
+.codex/**
+
+# Runtime/generated data. Include specific data samples manually only when needed.
+data/**
+dev_asset/**
+
+# Data-like historical snapshots
+legacy/history_snapshots/**
+
+# Python/runtime noise
+**/__pycache__/**
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/**
+.mypy_cache/**
+.ruff_cache/**
+.coverage
+htmlcov/**
+
+# Environments
+.venv/**
+venv/**
+env/**
+ENV/**
+
+# Logs/temp/backups
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+
+# Large/generated catalogs and debug artifacts
+data/runs/catalog.jsonl
+data/replays/catalog.jsonl
+data/artifact_inventory_report.md
+data/team_registry/debug/**
+data/results/_debug/**
+
+# Known duplicate artifact
+configs/team_registry/betano_footystats_aliases copy.csv
