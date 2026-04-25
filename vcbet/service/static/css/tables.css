@@ -1,0 +1,7 @@
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th, td { padding:10px 8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--panel); }
+.table-wrap { overflow:auto; max-height:420px; }
+.table-wrap.tall { max-height:72vh; }
+details.table-detail > summary { cursor:pointer; color:var(--muted); font-size:12px; }
+details.table-detail pre { max-width:560px; max-height:260px; overflow:auto; margin:8px 0 0; font-size:12px; }

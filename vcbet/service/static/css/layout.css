@@ -1,0 +1,32 @@
+.wrap { padding:20px; display:grid; gap:20px; }
+.hero { display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap; }
+.hero p { margin:.35rem 0 0; color:var(--muted); }
+.tabs { display:flex; gap:8px; flex-wrap:wrap; }
+.tab { display:none; }
+.tab.active { display:block; }
+.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+.jobs-grid { display:grid; gap:16px; grid-template-columns:minmax(320px,0.9fr) minmax(520px,1.6fr); }
+.card + .card, .kpis + .grid, .grid + .card, .cockpit + .grid { margin-top:16px; }
+.kpis { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
+.row { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+.inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.section-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.config-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+.cockpit { display:grid; gap:16px; }
+.cockpit-hero { display:grid; gap:16px; grid-template-columns:minmax(360px,1.2fr) minmax(280px,.8fr); }
+.meta-grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); margin-top:14px; }
+.meta-item { border-top:1px solid var(--border); padding-top:10px; }
+.meta-item .label { color:var(--muted); font-size:12px; }
+.meta-item .value { font-weight:700; margin-top:4px; }
+.pipeline { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.summary-list { display:grid; gap:10px; }
+.summary-row { display:flex; justify-content:space-between; gap:12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.summary-row:last-child { border-bottom:0; padding-bottom:0; }
+.summary-row span:first-child { color:var(--muted); }
+.compact-jobs { display:grid; gap:10px; }
+.compact-job { border-top:1px solid var(--border); padding-top:10px; }
+details.advanced { margin-top:12px; border-top:1px solid var(--border); padding-top:12px; }
+details.advanced + button { margin-top:12px; }
+details.advanced > summary { cursor:pointer; color:var(--muted); font-size:13px; }
+
+@media (max-width: 900px) { .jobs-grid, .cockpit-hero { grid-template-columns:1fr; } #jobLogs { max-height:68vh; } }
