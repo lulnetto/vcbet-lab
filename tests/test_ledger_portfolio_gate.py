@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import multiprocessing
+import queue
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,6 +48,32 @@ def official_pick(**overrides) -> dict:
     return payload
 
 
+def append_unique_pick_worker(ledger_file: str, worker_index: int, barrier, result_queue) -> None:
+    try:
+        barrier.wait(timeout=10)
+        append_new_picks_to_ledger(
+            pd.DataFrame(
+                [
+                    official_pick(
+                        bet_id=f"concurrent_{worker_index}",
+                        run_id=f"run_concurrent_{worker_index}",
+                        match_datetime=f"2026-04-24 15:{worker_index:02d}",
+                        home_team=f"Casa FC {worker_index}",
+                        away_team=f"Fora FC {worker_index}",
+                        match_name=f"Casa FC {worker_index} - Fora FC {worker_index}",
+                        event_url=f"https://example.test/match/{worker_index}",
+                        selection_raw=f"Mais de {2.5 + worker_index}",
+                        line=2.5 + worker_index,
+                    )
+                ]
+            ),
+            Path(ledger_file),
+        )
+        result_queue.put(("ok", worker_index))
+    except BaseException as exc:
+        result_queue.put(("error", worker_index, repr(exc)))
+
+
 class LedgerPortfolioGateTest(unittest.TestCase):
     def test_direct_gate_blocks_cross_config_duplicate_open_pick(self) -> None:
         existing = pd.DataFrame([official_pick(bet_id="existing", run_id="run_a", config_name="legacy_v2")])
@@ -84,6 +112,48 @@ class LedgerPortfolioGateTest(unittest.TestCase):
             self.assertEqual(len(blocked), 1)
             self.assertEqual(blocked.loc[0, "ledger_portfolio_gate_reason"], "LEDGER_DUPLICATE_OPEN_PICK")
             self.assertEqual(blocked.loc[0, "ledger_portfolio_related_bet_id"], "existing")
+
+    def test_concurrent_appends_are_serialized_without_losing_rows(self) -> None:
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("fork multiprocessing is required for this ledger lock test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            ctx = multiprocessing.get_context("fork")
+            worker_count = 6
+            barrier = ctx.Barrier(worker_count)
+            result_queue = ctx.Queue()
+            processes = [
+                ctx.Process(target=append_unique_pick_worker, args=(str(ledger_file), index, barrier, result_queue))
+                for index in range(worker_count)
+            ]
+
+            for process in processes:
+                process.start()
+            for process in processes:
+                process.join(timeout=20)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
+                    self.fail("concurrent ledger append worker did not finish")
+
+            results = []
+            for _ in range(worker_count):
+                try:
+                    results.append(result_queue.get(timeout=5))
+                except queue.Empty:
+                    self.fail("missing result from concurrent ledger append worker")
+
+            errors = [result for result in results if result[0] != "ok"]
+            self.assertEqual(errors, [])
+            self.assertEqual([process.exitcode for process in processes], [0] * worker_count)
+
+            ledger = load_ledger(ledger_file)
+            self.assertEqual(len(ledger), worker_count)
+            self.assertEqual(
+                sorted(ledger["bet_id"].astype(str).tolist()),
+                [f"concurrent_{index}" for index in range(worker_count)],
+            )
 
 
 if __name__ == "__main__":

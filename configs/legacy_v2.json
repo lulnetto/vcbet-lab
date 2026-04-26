@@ -4,6 +4,9 @@
     "label": "Legacy v2",
     "description": "Preset baseado no intermediate_balanced, mas com preferência por asian_total e ladder de linhas para aproximar a carteira lucrativa de 22/04."
   },
+  "data_quality": {
+    "max_snapshot_age_hours": 36
+  },
   "market_priority": {
     "asian_total": 1,
     "total_goals": 2,

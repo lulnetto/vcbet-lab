@@ -69,7 +69,7 @@ def _same_or_near_line(candidate: dict[str, Any], existing: dict[str, Any], tole
 def _is_open_entry(row: dict[str, Any]) -> bool:
     bet_status = _clean(row.get("final_bet_status"))
     settlement_status = _clean(row.get("final_settlement_status"))
-    if bet_status in {"settled", "voided", "cancelled", "postponed"}:
+    if bet_status in {"settled", "voided", "cancelled", "postponed", "unmatched"}:
         return False
     if settlement_status in {"win", "loss", "half_win", "half_loss", "push", "void"}:
         return False

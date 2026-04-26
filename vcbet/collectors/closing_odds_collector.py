@@ -126,7 +126,7 @@ def should_consider_row(
 
     final_status = str(row.get("final_bet_status", "")).strip().lower()
     settlement_status = str(row.get("final_settlement_status", "")).strip().lower()
-    if final_status in {"voided", "cancelled", "settled", "postponed"}:
+    if final_status in {"voided", "cancelled", "settled", "postponed", "unmatched"}:
         return False
     if settlement_status in {"win", "loss", "half_win", "half_loss", "push", "void"}:
         return False

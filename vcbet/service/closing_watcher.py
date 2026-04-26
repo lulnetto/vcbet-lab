@@ -36,7 +36,7 @@ def _has_value(value: Any) -> bool:
 def _is_unsettled(row: pd.Series) -> bool:
     bet_status = str(row.get("final_bet_status", "")).strip().lower()
     settlement_status = str(row.get("final_settlement_status", "")).strip().lower()
-    if bet_status in {"settled", "voided", "cancelled", "postponed"}:
+    if bet_status in {"settled", "voided", "cancelled", "postponed", "unmatched"}:
         return False
     return settlement_status not in {"win", "loss", "half_win", "half_loss", "push", "void"}
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from vcbet.collectors.results_collector import build_targets, load_ledger as load_results_ledger
-from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger
+from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger, save_ledger
 from vcbet.replay.replay_pipeline import _summarize_replay_ledger
 from vcbet.service.dashboard import build_dashboard_payload
 from vcbet.settlement.report_ledger import _read_ledger as read_report_ledger
@@ -133,6 +133,136 @@ class LedgerProvenanceTest(unittest.TestCase):
             settled_path, settled_count = settle_ledger(ledger_file=ledger_file, overrides_file=None)
             self.assertEqual(settled_path, ledger_file)
             self.assertEqual(settled_count, 0)
+
+    def test_legacy_settlement_note_derives_structured_sofascore_event_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "old_ledger.csv"
+            legacy = pd.DataFrame(
+                [
+                    {
+                        "bet_id": "legacy_event_id",
+                        "run_id": "old_run",
+                        "league": "Liga Teste",
+                        "match_datetime": "2026-04-24 15:00",
+                        "home_team": "Casa FC",
+                        "away_team": "Fora FC",
+                        "match_name": "Casa FC - Fora FC",
+                        "market_type": "total_goals",
+                        "market_scope": "full_time",
+                        "target_team_role": "geral",
+                        "target_team_name": "geral",
+                        "side": "over",
+                        "line": 2.5,
+                        "selection_raw": "Mais de 2.5",
+                        "odd_entrada": 2.0,
+                        "stake_units": 0.5,
+                        "settlement_note": "placar final | matched_via=team_score=180 | source_event_id=14083330.0",
+                        "final_bet_status": "open",
+                        "final_settlement_status": "pending",
+                    }
+                ]
+            )
+            legacy.to_csv(ledger_file, index=False, sep=";", encoding="utf-8-sig")
+
+            loaded = load_ledger(ledger_file)
+            self.assertIn("sofascore_event_id", loaded.columns)
+            self.assertEqual(str(loaded.loc[0, "sofascore_event_id"]), "14083330")
+
+            save_ledger(loaded, ledger_file)
+            reloaded = load_ledger(ledger_file)
+            self.assertEqual(str(reloaded.loc[0, "sofascore_event_id"]), "14083330")
+
+    def test_settlement_prefers_structured_sofascore_event_id_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            results_file = Path(tmp) / "results.csv"
+            ledger = pd.DataFrame(
+                [
+                    official_pick(
+                        bet_id="event_id_settlement",
+                        sofascore_event_id="14317598.0",
+                        final_bet_status="open",
+                        final_settlement_status="pending",
+                    )
+                ]
+            )
+            ledger.to_csv(ledger_file, index=False, sep=";", encoding="utf-8-sig")
+            pd.DataFrame(
+                [
+                    {
+                        "league": "Outra Liga",
+                        "match_name": "Nome Divergente - Ainda Divergente",
+                        "home_team": "Nome Divergente",
+                        "away_team": "Ainda Divergente",
+                        "home_goals": 2,
+                        "away_goals": 1,
+                        "bet_status": "settled",
+                        "settlement_source": "sofascore_browser",
+                        "settlement_confidence": "high",
+                        "settlement_note": "placar final coletado automaticamente via Sofascore",
+                        "source_event_id": "14317598",
+                        "matched_via": "event_id",
+                        "status_raw": "finished|Ended",
+                        "match_datetime": "2026-04-24 15:00:00",
+                    }
+                ]
+            ).to_csv(results_file, index=False, sep=";", encoding="utf-8-sig")
+
+            settle_ledger(ledger_file=ledger_file, results_file=results_file, overrides_file=None)
+            settled = load_ledger(ledger_file)
+
+            self.assertEqual(settled.loc[0, "sofascore_event_id"], "14317598")
+            self.assertEqual(settled.loc[0, "final_bet_status"], "settled")
+            self.assertEqual(settled.loc[0, "final_settlement_status"], "win")
+            self.assertEqual(settled.loc[0, "final_home_goals"], 2)
+            self.assertEqual(settled.loc[0, "final_away_goals"], 1)
+
+    def test_unmatched_result_status_is_distinct_from_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            results_file = Path(tmp) / "results.csv"
+            pd.DataFrame([official_pick(bet_id="unmatched_bet")]).to_csv(
+                ledger_file,
+                index=False,
+                sep=";",
+                encoding="utf-8-sig",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "league": "Liga Teste",
+                        "match_name": "Casa FC - Fora FC",
+                        "home_team": "Casa FC",
+                        "away_team": "Fora FC",
+                        "home_goals": pd.NA,
+                        "away_goals": pd.NA,
+                        "bet_status": "unmatched",
+                        "settlement_source": "sofascore_browser",
+                        "settlement_confidence": "low",
+                        "settlement_note": "jogo não localizado nos eventos recentes da liga no Sofascore",
+                        "matched_via": "",
+                        "status_raw": "",
+                        "source_event_id": "",
+                        "match_datetime": "2026-04-24 15:00:00",
+                    }
+                ]
+            ).to_csv(results_file, index=False, sep=";", encoding="utf-8-sig")
+
+            _, settled_count = settle_ledger(ledger_file=ledger_file, results_file=results_file, overrides_file=None)
+            loaded = load_ledger(ledger_file)
+
+            self.assertEqual(settled_count, 0)
+            self.assertEqual(loaded.loc[0, "final_bet_status"], "unmatched")
+            self.assertEqual(loaded.loc[0, "final_settlement_status"], "unmatched")
+            self.assertTrue(pd.isna(loaded.loc[0, "result_units_model"]))
+
+    def test_future_open_bets_are_not_ready_for_result_lookup(self) -> None:
+        future_kickoff = (pd.Timestamp.now() + pd.Timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+        ledger = pd.DataFrame([official_pick(match_datetime=future_kickoff, final_bet_status="open")])
+
+        targets = build_targets(ledger, only_ready=True, grace_minutes=0)
+
+        self.assertEqual(targets, [])
 
     def test_legacy_pick_export_without_new_fields_still_appends(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

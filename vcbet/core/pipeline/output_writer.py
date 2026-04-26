@@ -71,6 +71,7 @@ def manifest_common_fields(
     odds_snapshot_time: str | None,
     xg_asof: str | None,
     temporal_status: str,
+    snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
 ) -> dict[str, object]:
@@ -96,6 +97,8 @@ def manifest_common_fields(
         "xg_asof": xg_asof,
         "temporal_contract_version": TEMPORAL_CONTRACT_VERSION,
         "temporal_contract_status": temporal_status,
+        "max_snapshot_age_hours": snapshot_validation.get("max_snapshot_age_hours"),
+        "snapshot_validation_status": snapshot_validation.get("status"),
         "signal_version": signal_version,
         "pipeline_version": pipeline_version,
     }
@@ -123,6 +126,7 @@ def write_pipeline_outputs(
     odds_snapshot_time: str | None,
     xg_asof: str | None,
     temporal_status: str,
+    snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
 ) -> None:
@@ -143,6 +147,7 @@ def write_pipeline_outputs(
         odds_snapshot_time=odds_snapshot_time,
         xg_asof=xg_asof,
         temporal_status=temporal_status,
+        snapshot_validation=snapshot_validation,
         signal_version=signal_version,
         pipeline_version=pipeline_version,
     )

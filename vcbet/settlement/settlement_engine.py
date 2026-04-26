@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, normalize_sofascore_event_id, save_ledger
 from vcbet.core.run_utils import now_str
 from vcbet.paths import DEFAULT_OVERRIDES_FILE
 RESULTS_REQUIRED_COLUMNS = {"match_name", "home_goals", "away_goals"}
@@ -17,6 +17,7 @@ TEXT_COLUMNS = [
     "settlement_source",
     "settlement_confidence",
     "settlement_note",
+    "sofascore_event_id",
     "settled_at",
     "override_reason",
     "override_updated_at",
@@ -178,7 +179,7 @@ def settle_bet(market_type: str, side: str, line: float | None, target_team_role
 
 
 def compute_result_units(settlement_status: str, odd: float | None, stake_units: float | None) -> float | None:
-    if settlement_status == "pending":
+    if settlement_status in {"pending", "unmatched"}:
         return None
     odd = _safe_float(odd)
     stake = _safe_float(stake_units)
@@ -226,6 +227,16 @@ def _parse_match_datetime(value):
 
 
 def _result_row_score(ledger_row: pd.Series, result_row: pd.Series) -> int:
+    ledger_event_id = normalize_sofascore_event_id(ledger_row.get("sofascore_event_id"))
+    result_event_id = normalize_sofascore_event_id(
+        _first_present(result_row.get("sofascore_event_id"), result_row.get("source_event_id"))
+    )
+    if ledger_event_id:
+        if result_event_id == ledger_event_id:
+            return 10**9
+        if result_event_id:
+            return -10**9
+
     score = 0
 
     ledger_league = _slug_text(ledger_row.get("league"))
@@ -275,6 +286,8 @@ def _infer_auto_settlement_status(bet_status: str, explicit_status) -> str:
     if not _is_missing(explicit_status):
         return str(explicit_status)
     normalized = str(bet_status or "").strip().lower()
+    if normalized == "unmatched":
+        return "unmatched"
     if normalized in {"cancelled", "voided"}:
         return "void"
     return "pending"
@@ -318,9 +331,10 @@ def apply_results_file(ledger_df: pd.DataFrame, results_file: str | Path) -> pd.
         matched_via = result_row.get("matched_via", pd.NA)
         if not _is_missing(matched_via):
             note_parts.append(f"matched_via={matched_via}")
-        source_event_id = result_row.get("source_event_id", pd.NA)
+        source_event_id = _first_present(result_row.get("sofascore_event_id"), result_row.get("source_event_id"), default=pd.NA)
         if not _is_missing(source_event_id):
             note_parts.append(f"source_event_id={source_event_id}")
+            updated.at[idx, "sofascore_event_id"] = normalize_sofascore_event_id(source_event_id)
         updated.at[idx, "settlement_note"] = " | ".join(note_parts) if note_parts else pd.NA
     return updated
 
@@ -394,7 +408,9 @@ def resolve_final_fields(ledger_df: pd.DataFrame) -> pd.DataFrame:
             final_settlement_status = "void"
         elif final_bet_status == "postponed":
             final_settlement_status = "pending"
-        elif home_goals is not None and away_goals is not None and str(final_bet_status) not in {"open", "error", "postponed"}:
+        elif final_bet_status == "unmatched":
+            final_settlement_status = "unmatched"
+        elif home_goals is not None and away_goals is not None and str(final_bet_status) not in {"open", "error", "postponed", "unmatched"}:
             final_settlement_status = settle_bet(
                 market_type=str(row["market_type"]),
                 side=str(row["side"]),

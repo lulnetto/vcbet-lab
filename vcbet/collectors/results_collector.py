@@ -323,7 +323,7 @@ def infer_open_mask(df: pd.DataFrame) -> pd.Series:
             continue
         series = df[col].astype(str).str.strip().str.lower()
         if col in {"bet_status", "final_bet_status"}:
-            return series.isin({"open", "pending", "postponed", "nan", "", "none"})
+            return series.isin({"open", "pending", "postponed", "unmatched", "nan", "", "none"})
         return series.isin({"pending", "nan", "", "none"})
     return pd.Series([True] * len(df), index=df.index)
 
@@ -590,7 +590,7 @@ def _collect_results_generic(
                         away_team=target.away_team,
                         home_goals=None,
                         away_goals=None,
-                        bet_status="open",
+                        bet_status="unmatched",
                         settlement_source="config_missing",
                         settlement_confidence="low",
                         settlement_note="liga sem sofascore_unique_tournament_id no ligas.json",
@@ -668,7 +668,7 @@ def _collect_results_generic(
                         away_team=target.away_team,
                         home_goals=None,
                         away_goals=None,
-                        bet_status="open",
+                        bet_status="unmatched",
                         settlement_source=settlement_source,
                         settlement_confidence="low",
                         settlement_note="jogo não localizado nos eventos recentes da liga no Sofascore",
@@ -823,10 +823,12 @@ def summarize(results: List[MatchResult]) -> str:
     settled = sum(1 for r in results if r.bet_status == "settled")
     postponed = sum(1 for r in results if r.bet_status == "postponed")
     voided = sum(1 for r in results if r.bet_status == "voided")
+    unmatched = sum(1 for r in results if r.bet_status == "unmatched")
     open_rows = sum(1 for r in results if r.bet_status == "open")
     return (
         f"Resultados coletados: {total} | "
-        f"settled={settled} | postponed={postponed} | voided={voided} | open={open_rows}"
+        f"settled={settled} | postponed={postponed} | voided={voided} | "
+        f"unmatched={unmatched} | open={open_rows}"
     )
 
 

@@ -14,6 +14,86 @@ from vcbet.replay.replay_pipeline import _resolve_source_run
 from vcbet.service.dashboard import build_dashboard_payload
 
 
+def write_strategy_config(path: Path, *, max_snapshot_age_hours: float) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "name": "test_temporal_config",
+                    "label": "Test Temporal Config",
+                },
+                "data_quality": {
+                    "max_snapshot_age_hours": max_snapshot_age_hours,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_pipeline_snapshots(root: Path, *, odds_collected_at: str | None, xg_collected_at: str | None) -> tuple[Path, Path]:
+    source_dir = root / "2026-04-24" / "source_run"
+    source_dir.mkdir(parents=True)
+    odds_file = source_dir / "odds_snapshot.csv"
+    xg_file = source_dir / "xg_snapshot.csv"
+
+    odds_row = {
+        "run_id": "source_run",
+        "league": "Liga Teste",
+        "match_datetime": "2026-04-24 15:00",
+        "home_team": "Casa FC",
+        "away_team": "Fora FC",
+        "match_name": "Casa FC - Fora FC",
+        "market_raw": "Total de Gols Mais/Menos",
+        "selection_raw": "Mais de 2.5",
+        "odd": 1.8,
+        "event_url": "https://example.test/match",
+        "market_type": "total_goals",
+        "market_scope": "full_time",
+        "side": "over",
+        "line": 2.5,
+        "target_team_role": "geral",
+        "target_team_name": "geral",
+        "normalized_status": "ok",
+    }
+    if odds_collected_at is not None:
+        odds_row["collected_at"] = odds_collected_at
+    pd.DataFrame([odds_row]).to_csv(odds_file, index=False, sep=";", encoding="utf-8-sig")
+
+    xg_rows = [
+        {
+            "run_id": "source_run",
+            "source": "footystats",
+            "league": "Liga Teste",
+            "team_name": "Casa FC",
+            "xg": 1.5,
+            "xga": 1.1,
+            "xg_home": 1.5,
+            "xg_away": 1.5,
+            "xga_home": 1.1,
+            "xga_away": 1.1,
+        },
+        {
+            "run_id": "source_run",
+            "source": "footystats",
+            "league": "Liga Teste",
+            "team_name": "Fora FC",
+            "xg": 1.0,
+            "xga": 1.4,
+            "xg_home": 1.0,
+            "xg_away": 1.0,
+            "xga_home": 1.4,
+            "xga_away": 1.4,
+        },
+    ]
+    if xg_collected_at is not None:
+        for row in xg_rows:
+            row["collected_at"] = xg_collected_at
+    pd.DataFrame(xg_rows).to_csv(xg_file, index=False, sep=";", encoding="utf-8-sig")
+    return odds_file, xg_file
+
+
 class TemporalContractTest(unittest.TestCase):
     def test_snapshot_time_uses_latest_collected_at(self) -> None:
         df = pd.DataFrame(
@@ -37,6 +117,7 @@ class TemporalContractTest(unittest.TestCase):
             output_dir = root / "runs"
             alias_file = root / "aliases.json"
             alias_file.write_text("{}", encoding="utf-8")
+            config_file = write_strategy_config(root / "strategy.json", max_snapshot_age_hours=100000)
 
             pd.DataFrame(
                 [
@@ -102,6 +183,7 @@ class TemporalContractTest(unittest.TestCase):
                 alias_file=str(alias_file),
                 ledger_file=str(root / "ledger.csv"),
                 modo_debug=True,
+                config_file=str(config_file),
             )
 
             run_dir = output_dir / "2026-04-24" / "temporal_run"
@@ -111,8 +193,81 @@ class TemporalContractTest(unittest.TestCase):
             self.assertEqual(report["provenance"]["odds_snapshot_time"], "2026-04-24 09:30:00")
             self.assertEqual(report["provenance"]["xg_asof"], "2026-04-24 08:45:00")
             self.assertEqual(report["provenance"]["temporal_contract_status"], "complete")
+            self.assertEqual(report["data_quality"]["snapshot_validation"]["status"], "valid")
             self.assertEqual(manifest["odds_snapshot_time"], "2026-04-24 09:30:00")
             self.assertEqual(manifest["xg_asof"], "2026-04-24 08:45:00")
+            self.assertEqual(manifest["snapshot_validation_status"], "valid")
+
+    def test_pipeline_rejects_stale_snapshots_before_pricing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            odds_file, xg_file = write_pipeline_snapshots(
+                root,
+                odds_collected_at="2026-04-20 09:30:00",
+                xg_collected_at="2026-04-20 08:45:00",
+            )
+            output_dir = root / "runs"
+            alias_file = root / "aliases.json"
+            alias_file.write_text("{}", encoding="utf-8")
+            config_file = write_strategy_config(root / "strategy.json", max_snapshot_age_hours=1)
+
+            with self.assertRaisesRegex(ValueError, "SnapshotValidator rejected snapshots"):
+                processar_pipeline(
+                    odds_file=str(odds_file),
+                    xg_file=str(xg_file),
+                    run_id="stale_snapshot_run",
+                    output_dir=str(output_dir),
+                    alias_file=str(alias_file),
+                    ledger_file=str(root / "ledger.csv"),
+                    config_file=str(config_file),
+                )
+
+            run_dir = output_dir / "2026-04-24" / "stale_snapshot_run"
+            report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+            manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+            error_codes = {item["code"] for item in report["data_quality"]["snapshot_validation"]["errors"]}
+
+            self.assertEqual(report["quality_status"], "rejected")
+            self.assertIn("odds_snapshot_stale", error_codes)
+            self.assertIn("xg_snapshot_stale", error_codes)
+            self.assertEqual(report["outputs"]["final_picks_total"], 0)
+            self.assertEqual(manifest["status"], "pipeline_rejected_snapshot")
+            self.assertFalse((run_dir / "raw_candidates.csv").exists())
+            self.assertFalse((root / "ledger.csv").exists())
+
+    def test_pipeline_rejects_missing_snapshot_metadata_before_pricing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fresh_time = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+            odds_file, xg_file = write_pipeline_snapshots(
+                root,
+                odds_collected_at=None,
+                xg_collected_at=fresh_time,
+            )
+            output_dir = root / "runs"
+            alias_file = root / "aliases.json"
+            alias_file.write_text("{}", encoding="utf-8")
+            config_file = write_strategy_config(root / "strategy.json", max_snapshot_age_hours=100000)
+
+            with self.assertRaisesRegex(ValueError, "SnapshotValidator rejected snapshots"):
+                processar_pipeline(
+                    odds_file=str(odds_file),
+                    xg_file=str(xg_file),
+                    run_id="missing_snapshot_run",
+                    output_dir=str(output_dir),
+                    alias_file=str(alias_file),
+                    ledger_file=str(root / "ledger.csv"),
+                    config_file=str(config_file),
+                )
+
+            run_dir = output_dir / "2026-04-24" / "missing_snapshot_run"
+            report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+            error_codes = {item["code"] for item in report["data_quality"]["snapshot_validation"]["errors"]}
+
+            self.assertEqual(report["quality_status"], "rejected")
+            self.assertIn("odds_snapshot_time_missing", error_codes)
+            self.assertEqual(report["outputs"]["final_picks_total"], 0)
+            self.assertFalse((run_dir / "raw_candidates.csv").exists())
 
     def test_replay_prefers_frozen_local_snapshots_over_manifest_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

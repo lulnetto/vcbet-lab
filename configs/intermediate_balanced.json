@@ -4,6 +4,9 @@
     "label": "Intermediate Balanced",
     "description": "Meio-termo entre o champion strict e um baseline mais permissivo."
   },
+  "data_quality": {
+    "max_snapshot_age_hours": 36
+  },
   "markets": {
     "total_goals": {
       "odd_min": 1.62,

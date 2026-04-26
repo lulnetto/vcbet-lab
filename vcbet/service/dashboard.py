@@ -248,6 +248,7 @@ def _recent_entries(df: pd.DataFrame, limit: int = 100) -> list[dict[str, Any]]:
 def build_dashboard_payload(df: pd.DataFrame, entries_limit: int = 100) -> dict[str, Any]:
     total = len(df)
     open_df = df[df.get("final_bet_status", pd.Series(index=df.index)).astype(str) == "open"].copy()
+    unmatched_df = df[df.get("final_bet_status", pd.Series(index=df.index)).astype(str) == "unmatched"].copy()
     settled = df[df.get("final_bet_status", pd.Series(index=df.index)).astype(str).isin(SETTLED_BET_STATUSES)].copy()
     executed = df[df.get("bet_executed", pd.Series(index=df.index)).astype(str).str.lower() == "yes"].copy()
     executed_settled = executed[executed.get("final_bet_status", pd.Series(index=executed.index)).astype(str).isin(SETTLED_BET_STATUSES)].copy()
@@ -309,6 +310,7 @@ def build_dashboard_payload(df: pd.DataFrame, entries_limit: int = 100) -> dict[
         "summary": {
             "total_entries": int(total),
             "open_entries": int(len(open_df)),
+            "unmatched_entries": int(len(unmatched_df)),
             "settled_entries": int(len(settled)),
             "executed_entries": int(len(executed)),
             "executed_settled_entries": int(len(executed_settled)),

@@ -10,6 +10,7 @@ from vcbet.core.pipeline.input_loader import carregar_snapshot_odds, carregar_sn
 from vcbet.core.pipeline.output_writer import candidate_artifact_paths, write_candidate_artifacts, write_pipeline_outputs
 from vcbet.core.pipeline.pricing_stage import build_priced_candidates
 from vcbet.core.pipeline.quality_report import (
+    build_snapshot_rejection_report,
     build_quality_report,
     print_pricing_summary,
     print_scan_report,
@@ -17,9 +18,9 @@ from vcbet.core.pipeline.quality_report import (
     to_sorted_dict,
 )
 from vcbet.core.pipeline.team_resolution import prepare_team_resolution_state
-from vcbet.core.run_utils import now_str
+from vcbet.core.run_utils import now_str, update_manifest
 from vcbet.core.strategy_config import configure_runtime
-from vcbet.core.temporal_contract import temporal_contract_status
+from vcbet.core.temporal_contract import SnapshotValidator, temporal_contract_status
 
 
 HIGH_MATCH_THRESHOLD = 90
@@ -56,14 +57,74 @@ def processar_pipeline(
     )
     df_betano = loaded["df_betano"]
     df_xg = loaded["df_xg"]
-    normalization = build_normalization_filter(df_betano, df_xg, SUPPORTED_MARKETS)
-    resolution_state = prepare_team_resolution_state(alias_file, df_xg)
     generated_at = now_str()
     temporal_status = temporal_contract_status(
         decision_timestamp=generated_at,
         odds_snapshot_time=loaded["odds_snapshot_time"],
         xg_asof=loaded["xg_asof"],
     )
+    snapshot_validation_result = SnapshotValidator(
+        max_snapshot_age_hours=runtime_config.max_snapshot_age_hours,
+    ).validate(
+        decision_timestamp=generated_at,
+        odds_snapshot_time=loaded["odds_snapshot_time"],
+        xg_asof=loaded["xg_asof"],
+    )
+    snapshot_validation = snapshot_validation_result.to_dict()
+    if not snapshot_validation_result.is_valid:
+        quality_report = build_snapshot_rejection_report(
+            run_id=loaded["run_id"],
+            target_date=loaded["target_date"],
+            runtime_config=runtime_config,
+            config_snapshot_file=loaded["config_snapshot_file"],
+            generated_at=generated_at,
+            odds_path=loaded["odds_path"],
+            xg_path=loaded["xg_path"],
+            odds_run_id=loaded["odds_run_id"],
+            xg_run_id=loaded["xg_run_id"],
+            odds_snapshot_hash=loaded["odds_snapshot_hash"],
+            xg_snapshot_hash=loaded["xg_snapshot_hash"],
+            odds_snapshot_time=loaded["odds_snapshot_time"],
+            xg_asof=loaded["xg_asof"],
+            temporal_status=temporal_status,
+            snapshot_validation=snapshot_validation,
+            signal_version=SIGNAL_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+            alias_file=alias_file,
+            ledger_file=ledger_file,
+        )
+        quality_report_file = save_run_quality_report(loaded["run_dir"], quality_report)
+        update_manifest(
+            loaded["run_dir"],
+            status="pipeline_rejected_snapshot",
+            picks_rows=0,
+            quality_report_file=str(quality_report_file),
+            run_safety_status="rejected_snapshot",
+            safety_gate_blocked_total=0,
+            strategy_config_name=runtime_config.name,
+            strategy_config_fingerprint=runtime_config.fingerprint,
+            strategy_config_file=str(loaded["config_snapshot_file"]),
+            config_name=runtime_config.name,
+            config_fingerprint=runtime_config.fingerprint,
+            config_source_path=runtime_config.source_path,
+            config_snapshot_file=str(loaded["config_snapshot_file"]),
+            source_run_id=loaded["run_id"],
+            source_snapshot_ref=f"odds:{loaded['odds_path']}|xg:{loaded['xg_path']}",
+            odds_snapshot_hash=loaded["odds_snapshot_hash"],
+            xg_snapshot_hash=loaded["xg_snapshot_hash"],
+            odds_snapshot_time=loaded["odds_snapshot_time"],
+            xg_asof=loaded["xg_asof"],
+            temporal_contract_status=temporal_status,
+            max_snapshot_age_hours=snapshot_validation["max_snapshot_age_hours"],
+            snapshot_validation_status=snapshot_validation["status"],
+            signal_version=SIGNAL_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+        )
+        error_codes = ", ".join(str(item.get("code")) for item in snapshot_validation["errors"])
+        raise ValueError(f"SnapshotValidator rejected snapshots: {error_codes}")
+
+    normalization = build_normalization_filter(df_betano, df_xg, SUPPORTED_MARKETS)
+    resolution_state = prepare_team_resolution_state(alias_file, df_xg)
     pricing = build_priced_candidates(
         df_alvo=normalization["df_alvo"],
         resolution_state=resolution_state,
@@ -128,6 +189,7 @@ def processar_pipeline(
         odds_snapshot_time=loaded["odds_snapshot_time"],
         xg_asof=loaded["xg_asof"],
         temporal_status=temporal_status,
+        snapshot_validation=snapshot_validation,
         signal_version=SIGNAL_VERSION,
         pipeline_version=PIPELINE_VERSION,
         alias_file=alias_file,
@@ -187,6 +249,7 @@ def processar_pipeline(
         odds_snapshot_time=loaded["odds_snapshot_time"],
         xg_asof=loaded["xg_asof"],
         temporal_status=temporal_status,
+        snapshot_validation=snapshot_validation,
         signal_version=SIGNAL_VERSION,
         pipeline_version=PIPELINE_VERSION,
     )

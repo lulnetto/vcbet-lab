@@ -3,5 +3,8 @@
     "name": "champion_strict",
     "label": "Champion Strict",
     "description": "Configuração atual, mais restritiva e focada em controle de risco."
+  },
+  "data_quality": {
+    "max_snapshot_age_hours": 36
   }
 }

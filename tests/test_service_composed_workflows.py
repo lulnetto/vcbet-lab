@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 import unittest
+from unittest.mock import patch
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 
 from vcbet.service.dashboard import apply_filters
 from vcbet.service.commands import build_daily_commands, build_results_settlement_commands
+from vcbet.service.job_store import JobStore
 from vcbet.service.schemas import DailyRunRequest, ResultsSettlementRequest
+from vcbet.service.schemas import JobRecord
 
 
 class ServiceComposedWorkflowTest(unittest.TestCase):
@@ -49,6 +54,29 @@ class ServiceComposedWorkflowTest(unittest.TestCase):
         filtered = apply_filters(df, date_from="2026-04-25", date_to="2026-04-25")
 
         self.assertEqual(set(filtered["bet_id"]), {"today", "missing-date"})
+
+    def test_job_store_save_is_atomic_and_preserves_existing_json_on_replace_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp))
+            queued = JobRecord(
+                id="job_atomic",
+                job_type="analysis",
+                status="queued",
+                title="Atomic save",
+                created_at=datetime(2026, 4, 24, 12, 0, 0),
+            )
+            running = queued.model_copy(update={"status": "running"}) if hasattr(queued, "model_copy") else queued.copy(update={"status": "running"})
+
+            store.save(queued)
+            with patch("vcbet.service.job_store.os.replace", side_effect=RuntimeError("replace failed")):
+                with self.assertRaisesRegex(RuntimeError, "replace failed"):
+                    store.save(running)
+
+            loaded = store.load("job_atomic")
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded.status, "queued")
+            self.assertEqual([path.name for path in Path(tmp).glob("*.tmp")], [])
 
 
 if __name__ == "__main__":

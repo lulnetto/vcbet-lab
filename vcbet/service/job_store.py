@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -15,9 +17,46 @@ class JobStore:
     def _path_for(self, job_id: str) -> Path:
         return self.jobs_dir / f"{job_id}.json"
 
+    def _fsync_jobs_dir(self) -> None:
+        try:
+            dir_fd = os.open(self.jobs_dir, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        except OSError:
+            pass
+        finally:
+            os.close(dir_fd)
+
+    def _write_text_atomic(self, path: Path, payload: str) -> None:
+        tmp_name = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                delete=False,
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                encoding="utf-8",
+            ) as tmp:
+                tmp_name = tmp.name
+                tmp.write(payload)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            os.replace(tmp_name, path)
+            self._fsync_jobs_dir()
+        finally:
+            if tmp_name:
+                try:
+                    Path(tmp_name).unlink()
+                except FileNotFoundError:
+                    pass
+
     def save(self, record: JobRecord) -> None:
         path = self._path_for(record.id)
-        path.write_text(record.model_dump_json(indent=2) if hasattr(record, "model_dump_json") else record.json(indent=2), encoding="utf-8")
+        payload = record.model_dump_json(indent=2) if hasattr(record, "model_dump_json") else record.json(indent=2)
+        self._write_text_atomic(path, payload)
 
     def load(self, job_id: str) -> JobRecord | None:
         path = self._path_for(job_id)

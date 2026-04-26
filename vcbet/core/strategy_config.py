@@ -101,6 +101,9 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
         "DADO_INCOMPLETO_LIGA": 3,
         "ODD_ALTA_VARIANCIA": 2,
     },
+    "data_quality": {
+        "max_snapshot_age_hours": 36,
+    },
     "rules": {
         "very_strong_edge": 0.14,
         "bonuses": {
@@ -173,6 +176,7 @@ class RuntimeConfig:
     critical_flags: set[str]
     confidence_caps: dict[str, int]
     confidence_penalties: dict[str, int]
+    data_quality: dict[str, Any]
     rules: dict[str, Any]
     source_path: str | None
     fingerprint: str
@@ -196,6 +200,19 @@ class RuntimeConfig:
     @property
     def primary_markets(self) -> set[str]:
         return {name for name, cfg in self.markets.items() if cfg.is_primary_market}
+
+    @property
+    def max_snapshot_age_hours(self) -> float:
+        value = self.data_quality.get("max_snapshot_age_hours")
+        if value is None:
+            raise ValueError("max_snapshot_age_hours is mandatory")
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("max_snapshot_age_hours must be numeric") from exc
+        if normalized <= 0:
+            raise ValueError("max_snapshot_age_hours must be positive")
+        return normalized
 
 
 _RUNTIME_CONFIG: RuntimeConfig | None = None
@@ -238,6 +255,7 @@ def _build_runtime_config(payload: dict[str, Any], source_path: str | None = Non
         critical_flags=set(normalized.get("critical_flags", [])),
         confidence_caps={k: int(v) for k, v in normalized.get("confidence_caps", {}).items()},
         confidence_penalties={k: int(v) for k, v in normalized.get("confidence_penalties", {}).items()},
+        data_quality=dict(normalized.get("data_quality", {})),
         rules=normalized.get("rules", {}),
         source_path=source_path,
         fingerprint=fingerprint,

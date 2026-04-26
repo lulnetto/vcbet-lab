@@ -4,6 +4,9 @@
     "label": "Legacy Recovered",
     "description": "Baseline permissiva reconstruída a partir dos snapshots de 22/04, priorizando recuperar o comportamento antigo."
   },
+  "data_quality": {
+    "max_snapshot_age_hours": 36
+  },
   "markets": {
     "total_goals": {
       "odd_min": 1.55,
