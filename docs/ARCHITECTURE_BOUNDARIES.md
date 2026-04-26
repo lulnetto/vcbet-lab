@@ -6,12 +6,13 @@ This document turns the audit diagnosis into development contracts for future VC
 
 - Phase 0 stabilization is complete after hardening ledger writes, snapshot freshness, settlement statuses, job-store durability, and replay status/freshness regressions.
 - Phase 1 mechanical splits are complete for ledger, replay, and team identity while preserving public compatibility entrypoints.
+- Phase 2 contracts and domain cleanup are complete. Typed dataclasses now live in `vcbet/domain/contracts.py`, pricing internals are scalar/pandas-free, and selection core logic under `vcbet/core/selection/` operates on plain candidate dictionaries/lists.
 - `vcbet/core/ledger_manager.py`, `vcbet/replay/replay_pipeline.py`, and `vcbet/core/team_registry.py` are compatibility entrypoints. Implementation now lives under `vcbet/ledger/`, `vcbet/replay/`, and `vcbet/team_identity/`.
 - `vcbet/core/pipeline_ev.py` remains the daily pipeline compatibility entrypoint, while stage implementation details live under `vcbet/core/pipeline/`.
 - CSV currently remains the operational storage backend for ledger, results, runtime artifacts, and read models.
-- `vcbet/ledger/repository.py` owns atomic CSV replacement and transactional ledger read-modify-write updates through `update_ledger(path, mutator)`.
-- Typed domain contracts have not been introduced yet. Phase 2 has not started.
-- pandas still leaks across domain-adjacent areas and should be reduced one boundary at a time in Phase 2.
+- `vcbet/ledger/repository.py` owns atomic CSV replacement, transactional ledger read-modify-write updates through `update_ledger(path, mutator)`, and the domain-facing `LedgerRepository.read() -> list[BetRecord]` / `append() -> LedgerAppendResult` boundary.
+- pandas remains intentionally at adapters, wrappers, and repository internals for CSV compatibility. Pipeline stages still use pandas; `vcbet/core/line_selector.py` remains a compatibility wrapper around pandas-free selection core logic.
+- Model calibration reporting exists as a deterministic, read-only report under `vcbet/reports/model_calibration.py` and `scripts/report_model_calibration.py`. It compares `prob_model` with realized frequencies and is separate from ROI/profitability analysis.
 
 ## Target Dependency Direction
 
@@ -81,8 +82,10 @@ Complete. Remaining hotspots were split mechanically where planned, keeping comp
 
 ### Phase 2: Contracts and Domain Cleanup
 
-Next. Introduce typed contracts gradually at critical boundaries and move pandas toward adapters/borders. Do not redesign ledger storage as part of Phase 2 unless explicitly scoped.
+Complete. `vcbet/domain/contracts.py` defines pandas-free dataclasses for `OddsSnapshot`, `XGSnapshot`, `NormalizedMarket`, `PricingResult`, `LedgerAppendResult`, and `BetRecord`. `pricing_engine.py` is scalar/pandas-free, selection core modules are pandas-free, `LedgerRepository` is the domain-facing ledger boundary, explicit quarter-line tests cover 0.75 and 1.25 behavior, and the first read-only calibration report is available.
+
+Not all application code is converted to contracts yet. pandas remains by design in pipeline adapters, service/reporting read models, compatibility wrappers, and ledger CSV internals.
 
 ### Later Phases
 
-Phase 3 service robustness and automation, and Phase 4 UI improvements, remain future work. Scheduler implementations must not bypass ledger transactional update helpers.
+Phase 3 service robustness and automation is the next phase and has not started. Phase 4 UI improvements remain future work. Scheduler implementations must not bypass ledger transactional update helpers.

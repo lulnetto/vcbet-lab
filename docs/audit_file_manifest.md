@@ -14,18 +14,49 @@ This file defines the minimal source/context set for an upcoming VCBet architect
 - Approximate size of excluded scope: 49.2 MB.
 - Deleted tracked paths currently observed: none.
 
-The sections below are audit inputs, not architecture conclusions. Responsibility notes are inferred from names, imports, routes, and function/class signatures only. The Phase 0/1 addendum reflects the stabilization and mechanical split work completed after the original generated manifest.
+The sections below are audit inputs, not architecture conclusions. Responsibility notes are inferred from names, imports, routes, and function/class signatures only. The Phase 0/1 addendum reflects the stabilization and mechanical split work completed after the original generated manifest. The Phase 2 addendum reflects the contracts/domain cleanup work completed afterward; older generated file-size/count summaries may be approximate until the manifest is regenerated.
 
 ## Phase 0/1 Stabilization Addendum
 
-Phase 0 is complete after ledger write hardening, snapshot freshness enforcement, settlement status fixes, event-id persistence, replay status/freshness fixes, and atomic service job-store writes. Phase 1 is complete after mechanical splits for ledger, replay, and team identity. Phase 2 has not started: typed domain contracts/dataclasses have not been introduced, pandas still appears in domain-adjacent code, and CSV remains the operational storage backend.
+Phase 0 is complete after ledger write hardening, snapshot freshness enforcement, settlement status fixes, event-id persistence, replay status/freshness fixes, and atomic service job-store writes. Phase 1 is complete after mechanical splits for ledger, replay, and team identity. Phase 2 is complete after introducing typed domain contracts, moving pricing and selection core logic away from pandas, exposing a domain-facing ledger repository boundary, adding explicit quarter-line regression tests, and adding a first read-only calibration report. CSV remains the operational storage backend.
+
+## Phase 2 Contracts and Domain Cleanup Addendum
+
+Phase 2 is complete. Phase 3 service robustness and automation has not started.
+
+### Domain Contracts
+
+- `vcbet/domain/contracts.py`: pandas-free dataclasses for `OddsSnapshot`, `XGSnapshot`, `NormalizedMarket`, `PricingResult`, `LedgerAppendResult`, and `BetRecord`.
+- `vcbet/domain/__init__.py`: public domain contract exports.
+- The contracts are intentionally independent of pandas, FastAPI, filesystem access, and subprocess execution.
+- Not all application code has been converted to these contracts yet; adapters continue to translate existing pandas/CSV shapes at boundaries.
+
+### Pricing and Selection Cleanup
+
+- `vcbet/core/pricing_engine.py`: pricing internals are scalar and pandas-free. Existing dict-returning APIs remain compatible, and additive helpers can return `PricingResult`.
+- `vcbet/core/selection/*`: selection core now operates on plain candidate dictionaries/lists.
+- `vcbet/core/line_selector.py`: compatibility wrapper preserving pandas DataFrame input/output behavior for existing callers.
+- Betting thresholds, EV formulas, stake behavior, correlation behavior, and selected-pick behavior were preserved.
+
+### Ledger Repository Boundary
+
+- `vcbet/ledger/repository.py`: `LedgerRepository.read() -> list[BetRecord]` and `append() -> LedgerAppendResult` are now the domain-facing ledger boundary.
+- The repository still uses pandas internally for canonical CSV compatibility.
+- The old `append_new_picks_to_ledger()` tuple API remains compatible.
+- Canonical ledger CSV schema, bet-id generation, dedupe behavior, and transactional `update_ledger(path, mutator)` flows remain preserved.
+
+### Quarter Lines and Calibration
+
+- Explicit tests now cover quarter-line pricing and settlement behavior for 0.75 and 1.25, including half-win, half-loss, push, and stake-unit calculations.
+- `vcbet/reports/model_calibration.py` and `scripts/report_model_calibration.py`: deterministic read-only model calibration report comparing `prob_model` with realized frequencies.
+- Calibration is not ROI/profitability reporting and must not claim profitability.
 
 ### Split Ledger Modules
 
 - `vcbet/ledger/schema.py`: canonical ledger column list, compatibility normalization, structured `sofascore_event_id` normalization/derivation, and old-ledger tolerance.
 - `vcbet/ledger/identity.py`: stable bet identity and dedupe helpers.
-- `vcbet/ledger/repository.py`: canonical CSV repository, file locks, atomic CSV replacement, and `update_ledger(path, mutator)` for transactional read-modify-write flows.
-- `vcbet/ledger/append_use_case.py`: official append use case, blocked candidate artifact writing, portfolio gate integration, schema normalization, and dedupe-preserving append behavior.
+- `vcbet/ledger/repository.py`: canonical CSV repository, file locks, atomic CSV replacement, `update_ledger(path, mutator)` for transactional read-modify-write flows, and Phase 2 `LedgerRepository` domain-facing read/append methods.
+- `vcbet/ledger/append_use_case.py`: official append use case, blocked candidate artifact writing, portfolio gate integration, schema normalization, dedupe-preserving append behavior, and additive `LedgerAppendResult` reporting.
 - Compatibility remains through `vcbet/core/ledger_manager.py`.
 
 ### Split Replay Modules
@@ -50,9 +81,13 @@ Phase 0 is complete after ledger write hardening, snapshot freshness enforcement
 
 ### Regression Test Coverage Added or Updated
 
+- `tests/test_domain_contracts.py`: basic contract construction, serialization shape, pandas-free domain module, and old ledger row representation.
+- `tests/test_pricing_engine.py`: scalar `PricingResult` equivalence and explicit 0.75/1.25 quarter-line pricing coverage.
+- `tests/test_settlement_quarter_lines.py`: explicit 0.75/1.25 settlement and result-unit coverage.
+- `tests/test_model_calibration.py`: calibration bucket logic, insufficient sample reporting, and read-only command behavior.
 - `tests/test_ledger_portfolio_gate.py`: concurrent append serialization plus settlement-vs-append and closing-vs-append read-modify-write coverage.
 - `tests/test_temporal_contract.py`: stale rejection, missing metadata rejection, timezone-aware timestamp handling, future timestamp rejection, historical replay freshness against source decision time, and explicit missing replay provenance failure.
-- `tests/test_ledger_provenance.py`: old-ledger compatibility, structured `sofascore_event_id` derivation/persistence, pipeline export to canonical ledger, `UNMATCHED`, and replay status counting for postponed.
+- `tests/test_ledger_provenance.py`: old-ledger compatibility, structured `sofascore_event_id` derivation/persistence, pipeline export to canonical ledger, `UNMATCHED`, replay status counting for postponed, and Phase 2 `LedgerRepository` domain-facing read/append compatibility.
 - `tests/test_replay_comparison_scorecard.py`: public compatibility import smoke for ledger manager, team registry, and replay pipeline entrypoints.
 
 ## Priority 0: Entry Points and Runtime Orchestration
@@ -2423,11 +2458,15 @@ Send these files as the architecture audit source set. Send `docs/audit_file_man
 - `vcbet/core/team_matcher.py`
 - `vcbet/core/team_registry.py`
 - `vcbet/core/temporal_contract.py`
+- `vcbet/domain/__init__.py`
+- `vcbet/domain/contracts.py`
 - `vcbet/ledger/schema.py`
 - `vcbet/ledger/identity.py`
 - `vcbet/ledger/repository.py`
 - `vcbet/ledger/append_use_case.py`
 - `vcbet/paths.py`
+- `vcbet/reports/__init__.py`
+- `vcbet/reports/model_calibration.py`
 - `vcbet/replay/__init__.py`
 - `vcbet/replay/replay_pipeline.py`
 - `vcbet/replay/source_resolver.py`
@@ -2476,6 +2515,7 @@ Send these files as the architecture audit source set. Send `docs/audit_file_man
 - `scripts/run_service.py`
 - `scripts/run_service.sh`
 - `scripts/smoke_ui.sh`
+- `scripts/report_model_calibration.py`
 - `scripts/sync_team_aliases.py`
 - `scripts/update_closing_odds.py`
 - `scripts/validate_release.sh`
@@ -2500,15 +2540,18 @@ Send these files as the architecture audit source set. Send `docs/audit_file_man
 - `tests/test_closing_watcher.py`
 - `tests/test_daily_config_selection.py`
 - `tests/test_decision_architecture.py`
+- `tests/test_domain_contracts.py`
 - `tests/test_ledger_portfolio_gate.py`
 - `tests/test_ledger_provenance.py`
 - `tests/test_market_normalizer.py`
+- `tests/test_model_calibration.py`
 - `tests/test_pick_safety_gates.py`
 - `tests/test_portfolio_risk.py`
 - `tests/test_pricing_engine.py`
 - `tests/test_pricing_outputs.py`
 - `tests/test_replay_comparison_scorecard.py`
 - `tests/test_service_composed_workflows.py`
+- `tests/test_settlement_quarter_lines.py`
 - `tests/test_team_registry.py`
 - `tests/test_team_registry_api.py`
 - `tests/test_temporal_contract.py`

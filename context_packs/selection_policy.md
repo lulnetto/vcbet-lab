@@ -7,6 +7,12 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 ## Include by Default
 
 - `vcbet/core/line_selector.py`
+- `vcbet/core/selection/__init__.py`
+- `vcbet/core/selection/asian_ladder.py`
+- `vcbet/core/selection/correlation.py`
+- `vcbet/core/selection/dedupe.py`
+- `vcbet/core/selection/exposure.py`
+- `vcbet/core/selection/line_selection.py`
 - `vcbet/core/decision_policy.py`
 - `vcbet/core/risk_policy.py`
 - `vcbet/core/pick_filter.py`
@@ -44,6 +50,9 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 - Accepted picks must have stable bet identity, selection status, confidence, stake, and risk flag semantics.
 - Duplicate, near-duplicate, contradictory, and correlated picks must be handled deterministically.
 - Config presets must continue to control thresholds without hard-coding policy into orchestration.
+- Phase 2 made `vcbet/core/selection/*` operate on plain candidate dictionaries/lists without pandas. Keep pandas at adapter boundaries.
+- `vcbet/core/line_selector.py` remains the compatibility wrapper for existing DataFrame callers and old import locations.
+- Do not change thresholds, stake behavior, correlation behavior, or selected picks while continuing cleanup.
 
 ## Validation Commands
 
@@ -52,7 +61,7 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 
 ## Known Hotspots
 
-- `vcbet/core/line_selector.py` is over 500 LOC and mixes selection, exposure tracking, correlation, and rejection shaping.
+- `vcbet/core/line_selector.py` is now a compatibility wrapper after the Phase 1/2 split. Core selection behavior lives under `vcbet/core/selection/`.
 - `vcbet/core/decision_policy.py` is near the 300 LOC target and concentrates identity, confidence, and acceptance policy.
 - `vcbet/core/pipeline/filtering_stage.py` and `vcbet/core/pipeline/output_writer.py` are the daily pipeline call sites for this domain; `vcbet/core/pipeline_ev.py` should stay a thin compatibility orchestrator.
 
@@ -65,4 +74,4 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 
 ## Refactor Direction
 
-Separate pure policy decisions from dataframe grouping and output shaping. Target small strategy/policy functions with explicit candidate and rejection contracts.
+Separate pure policy decisions from dataframe grouping and output shaping. Phase 2 completed the first selection cleanup: core selection functions use plain candidate dicts/lists, while wrappers/adapters preserve DataFrame compatibility. Phase 3 has not started.

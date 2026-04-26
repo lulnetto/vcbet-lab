@@ -12,6 +12,7 @@ Work on result collection, result matching, automatic settlement, manual overrid
 - `vcbet/ledger/schema.py`
 - `vcbet/core/ledger_manager.py`
 - `tests/test_ledger_provenance.py`
+- `tests/test_settlement_quarter_lines.py`
 - `tests/test_service_composed_workflows.py`
 
 ## Include Only If Needed
@@ -54,6 +55,7 @@ Work on result collection, result matching, automatic settlement, manual overrid
 - `OPEN` means the match is not ready to settle yet or remains legitimately pending.
 - `UNMATCHED` means expected result lookup failed and the bet needs manual review or later reprocessing.
 - Settled states must preserve existing win/loss/push/half-result semantics.
+- Quarter-line settlement for 0.75 and 1.25 is explicitly covered by tests and must preserve stake split behavior, half wins, half losses, push behavior, and full win/loss outcomes.
 - `VOIDED` and postponed behavior must remain distinct where already supported.
 - `POSTPONED` and `VOIDED` must not be counted as open in replay or operator summaries.
 - Future bets must not be marked `UNMATCHED` prematurely; kickoff time and expected result availability matter.
@@ -86,4 +88,4 @@ Work on result collection, result matching, automatic settlement, manual overrid
 
 ## Refactor Direction
 
-Separate result collection adapters, result matching, settlement status transitions, override resolution, and ledger persistence. Settlement rules should be testable from normalized ledger rows and normalized result rows without mutating runtime data.
+Separate result collection adapters, result matching, settlement status transitions, override resolution, and ledger persistence. Settlement rules should be testable from normalized ledger rows and normalized result rows without mutating runtime data. Phase 2 added quarter-line regression coverage; Phase 3 has not started.

@@ -6,6 +6,7 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 
 ## Include by Default
 
+- `vcbet/domain/contracts.py`
 - `vcbet/core/ledger_manager.py`
 - `vcbet/ledger/schema.py`
 - `vcbet/ledger/identity.py`
@@ -43,10 +44,13 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 - Writes must preserve schema order for known columns and retain unknown historical columns after the known schema.
 - Adding a column is a compatibility event and needs idempotent derivation or safe blank defaults.
 - Public compatibility imports remain available through `vcbet/core/ledger_manager.py`; new work should prefer the split `vcbet/ledger/*` modules only when changing ledger internals.
+- Phase 2 added `BetRecord` and `LedgerAppendResult` in `vcbet/domain/contracts.py`.
 
 ## Repository Concerns
 
 - `vcbet/ledger/repository.py` owns CSV load/save, canonical file creation, file locking, and atomic replace behavior.
+- `LedgerRepository.read() -> list[BetRecord]` and `append() -> LedgerAppendResult` are now the domain-facing ledger boundary.
+- The repository still uses pandas internally for CSV compatibility; that is intentional adapter/repository behavior, not domain leakage.
 - All canonical ledger writes must use the repository lock path.
 - `update_ledger(path, mutator)` is the required API for read-modify-write flows. It holds the ledger lock through the full `ensure -> read -> mutate -> atomic write` cycle.
 - File locks should cover the full read-gate-append-write sequence when the caller is deciding whether to append.
@@ -57,6 +61,7 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 
 - `vcbet/ledger/append_use_case.py` owns conversion from selected picks to ledger rows, blocked candidate artifact writing, dedupe, and append result reporting.
 - Official appends must pass through `append_new_picks_to_ledger`.
+- The old tuple-returning append API remains compatible; detailed append reporting is available through `LedgerAppendResult`.
 - Scheduler, service, CLI, and replay-triggered writes must not bypass the append use case.
 - Append behavior must not change stake, EV, market, or selection thresholds.
 - Pipeline exports must preserve structured event identifiers, including `sofascore_event_id` and `source_event_id`, so the canonical ledger can use them directly during settlement.
@@ -84,4 +89,4 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 
 ## Refactor Direction
 
-Keep ledger schema, identity, repository IO, and append orchestration separate. Domain logic should consume ledger records or append results, not write CSV directly.
+Keep ledger schema, identity, repository IO, and append orchestration separate. Domain/application logic should consume `BetRecord` and `LedgerAppendResult` through `LedgerRepository`, not write CSV directly. Phase 3 has not started; automation must continue to use transactional ledger helpers.

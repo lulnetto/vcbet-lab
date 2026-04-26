@@ -6,6 +6,7 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 
 ## Include by Default
 
+- `vcbet/domain/contracts.py`
 - `vcbet/core/ledger_manager.py`
 - `vcbet/ledger/schema.py`
 - `vcbet/ledger/identity.py`
@@ -42,9 +43,12 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 - The canonical official ledger is `data/history/bets_ledger.csv`.
 - Official appends must pass through `append_new_picks_to_ledger`.
 - Read-modify-write ledger flows must use `update_ledger(path, mutator)` so the ledger lock covers read, decision, mutation, and atomic write.
+- `LedgerRepository.read() -> list[BetRecord]` and `append() -> LedgerAppendResult` are the Phase 2 domain-facing ledger boundary.
+- The old tuple-returning append API remains compatible for existing callers.
 - Ledger schema normalization must preserve existing columns and fill missing expected columns safely.
 - Open-ledger duplicate, correlated, and contradictory picks must be blocked or recorded for review, not appended silently.
 - Dedupe must use stable bet identity, not incidental row order.
+- pandas remains inside repository internals for CSV compatibility.
 
 ## Validation Commands
 
@@ -56,7 +60,8 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 - `vcbet/core/ledger_manager.py` is now a compatibility entrypoint after the Phase 1 ledger split.
 - Ledger implementation is split across `vcbet/ledger/schema.py`, `identity.py`, `repository.py`, and `append_use_case.py`.
 - CSV currently acts as database, DTO, log, API contract, and operational state for ledger flows.
+- Phase 2 added typed ledger contracts, but not all application code is converted.
 
 ## Refactor Direction
 
-Split ledger schema/identity rules from CSV repository writes. Keep an explicit append use case that receives selected picks and returns append, blocked, and provenance outcomes.
+Split ledger schema/identity rules from CSV repository writes. Keep an explicit append use case and domain-facing repository that return append, blocked, duplicate, and provenance outcomes without changing canonical CSV schema. Phase 3 service automation has not started.

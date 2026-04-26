@@ -21,6 +21,7 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 - `vcbet/core/market_normalizer.py`
 - `vcbet/core/team_matcher.py`
 - `vcbet/core/pick_features.py`
+- `vcbet/domain/contracts.py`
 - `vcbet/core/decision_policy.py`
 - `vcbet/core/line_selector.py`
 - `vcbet/core/ledger_manager.py`
@@ -61,6 +62,9 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 - `vcbet/core/pipeline_ev.py` remains the stable public entrypoint; `vcbet/core/pipeline/*.py` stage modules are implementation details from the mechanical split.
 - The pipeline stage split was intended to leave pricing, filtering, EV, ledger append, quality report, and output semantics unchanged.
 - Orchestration should remain thin; domain behavior belongs in domain modules and application use cases.
+- Phase 2 domain contracts exist, but the daily pipeline has not been fully converted to them.
+- pandas remains intentionally in pipeline adapters/stages. `pricing_engine.py` and selection core are pandas-free; `line_selector.py` preserves DataFrame compatibility.
+- Ledger writes should prefer the domain-facing `LedgerRepository` boundary or existing append use case wrappers, while preserving old compatibility paths.
 
 ## Snapshot Freshness Policy
 
@@ -81,4 +85,4 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 
 ## Refactor Direction
 
-Move the daily run into an application use case with explicit input snapshots and output writers. Keep collectors as adapters, domain modules pure, and ledger writes behind a repository contract.
+Move the daily run into an application use case with explicit input snapshots and output writers. Keep collectors and pipeline stages as adapters, domain modules pure, and ledger writes behind the repository/append contract. Phase 3 service robustness and automation is next but has not started.
