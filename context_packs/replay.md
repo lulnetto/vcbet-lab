@@ -7,6 +7,10 @@ Work on deterministic replay runs, source run resolution, config comparisons, re
 ## Include by Default
 
 - `vcbet/replay/replay_pipeline.py`
+- `vcbet/replay/source_resolver.py`
+- `vcbet/replay/execution.py`
+- `vcbet/replay/scoring.py`
+- `vcbet/replay/summary_builder.py`
 - `scripts/build_replay_catalog.py`
 - `tests/test_replay_comparison_scorecard.py`
 - `tests/test_temporal_contract.py`
@@ -36,7 +40,10 @@ Work on deterministic replay runs, source run resolution, config comparisons, re
 ## Key Invariants
 
 - Replay must resolve source odds and xG snapshots from manifest/provenance without guessing when evidence is incomplete.
+- Replay freshness is historical freshness, not wall-clock freshness. Validate snapshots against the source run's decision/generated timestamp.
+- Missing freshness provenance must fail explicitly with `replay_freshness_reference_missing`; do not bypass snapshot validation for replay.
 - Replay summaries must distinguish baseline, candidate config, recommendation context, and replay input contract.
+- Replay summaries must report `open`, `unmatched`, `postponed`, and `voided` separately. Postponed or voided rows must not inflate open counts.
 - Comparisons must preserve pick identity, market family, scorecard metrics, and temporal contract status.
 - Replay artifacts are generated output and should not become default LLM context.
 
@@ -47,7 +54,9 @@ Work on deterministic replay runs, source run resolution, config comparisons, re
 
 ## Known Hotspots
 
-- `vcbet/replay/replay_pipeline.py` is roughly 782 LOC and mixes source resolution, subprocess orchestration, scoring, settlement, and summary shaping.
+- `vcbet/replay/replay_pipeline.py` is now a compatibility entrypoint after the Phase 1 split.
+- `vcbet/replay/source_resolver.py`, `execution.py`, `scoring.py`, and `summary_builder.py` hold the implementation slices.
+- Replay execution currently invokes `vcbet.core.pipeline_ev` through the configured Python subprocess. A direct call can be considered later only if it preserves CLI compatibility and artifact outputs.
 - Service and frontend replay screens depend on replay summary payload shape.
 
 ## Refactor Direction

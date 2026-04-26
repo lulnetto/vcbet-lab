@@ -4,11 +4,14 @@ This document turns the audit diagnosis into development contracts for future VC
 
 ## Current Diagnosis
 
-- VCBet is still closer to organized scripts than modular architecture.
-- CSV currently acts as DB, DTO, log, API contract, and operational state.
-- pandas leaks across boundaries.
-- `vcbet/service/api.py`, `vcbet/core/pipeline_ev.py`, `vcbet/replay/replay_pipeline.py`, and `vcbet/service/static/js/screens.js` were identified as cognitive hotspots.
-- `vcbet/core/pipeline_ev.py` now remains the daily pipeline compatibility entrypoint, while stage implementation details live under `vcbet/core/pipeline/`; that split was intended to preserve behavior.
+- Phase 0 stabilization is complete after hardening ledger writes, snapshot freshness, settlement statuses, job-store durability, and replay status/freshness regressions.
+- Phase 1 mechanical splits are complete for ledger, replay, and team identity while preserving public compatibility entrypoints.
+- `vcbet/core/ledger_manager.py`, `vcbet/replay/replay_pipeline.py`, and `vcbet/core/team_registry.py` are compatibility entrypoints. Implementation now lives under `vcbet/ledger/`, `vcbet/replay/`, and `vcbet/team_identity/`.
+- `vcbet/core/pipeline_ev.py` remains the daily pipeline compatibility entrypoint, while stage implementation details live under `vcbet/core/pipeline/`.
+- CSV currently remains the operational storage backend for ledger, results, runtime artifacts, and read models.
+- `vcbet/ledger/repository.py` owns atomic CSV replacement and transactional ledger read-modify-write updates through `update_ledger(path, mutator)`.
+- Typed domain contracts have not been introduced yet. Phase 2 has not started.
+- pandas still leaks across domain-adjacent areas and should be reduced one boundary at a time in Phase 2.
 
 ## Target Dependency Direction
 
@@ -64,14 +67,22 @@ Large files are not automatically wrong, but they are refactor candidates when a
 
 ## Phase Summary
 
-### Phase 1: Context and Contracts
+### Phase 0: Critical Stabilization
 
-Establish LLM context rules, domain context packs, dependency direction, and file-size expectations. Keep production behavior unchanged. Use narrow tests and briefing docs to target one domain at a time.
+Complete. Canonical ledger writes use locking and atomic replacement; read-modify-write flows use transactional ledger updates; snapshot freshness is mandatory through `max_snapshot_age_hours`; stale snapshots are rejected before EV calculation; settlement distinguishes `OPEN`, `UNMATCHED`, postponed, voided, and settled states; `sofascore_event_id` survives pipeline export and ledger compatibility; job store JSON writes are atomic.
 
-### Phase 2: Application Boundaries
+### Phase 1: Mechanical Boundaries
 
-Continue extracting use cases out of hotspots such as `replay_pipeline.py`, `service/api.py`, `screens.js`, and the implementation stages under `vcbet/core/pipeline/`. Keep `pipeline_ev.py` as compatibility orchestration, and introduce repository/output-writer boundaries around CSV reads and writes while preserving current file formats and operator workflows.
+Complete. Remaining hotspots were split mechanically where planned, keeping compatibility imports stable:
 
-### Phase 3: Domain Purity and Storage Evolution
+- ledger implementation under `vcbet/ledger/`
+- replay implementation under `vcbet/replay/`
+- team identity implementation under `vcbet/team_identity/`
 
-Move pandas, filesystem, subprocess, FastAPI, and browser concerns out of domain logic. Replace CSV-as-everything with explicit contracts for persistence, DTOs, logs, API payloads, and operational state, after tests cover the current behavior.
+### Phase 2: Contracts and Domain Cleanup
+
+Next. Introduce typed contracts gradually at critical boundaries and move pandas toward adapters/borders. Do not redesign ledger storage as part of Phase 2 unless explicitly scoped.
+
+### Later Phases
+
+Phase 3 service robustness and automation, and Phase 4 UI improvements, remain future work. Scheduler implementations must not bypass ledger transactional update helpers.

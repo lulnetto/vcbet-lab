@@ -47,6 +47,7 @@ Work on result collection, result matching, automatic settlement, manual overrid
 - Missing identifiers must not destroy compatibility with older ledger rows.
 - Matching confidence and notes should remain visible to operators and downstream reports.
 - If matching behavior changes, add a narrow regression test before expanding the change.
+- Settlement must preserve `sofascore_event_id` when it is already present, and may derive it idempotently from result/source metadata or legacy settlement notes when available.
 
 ## Status Transitions
 
@@ -54,12 +55,14 @@ Work on result collection, result matching, automatic settlement, manual overrid
 - `UNMATCHED` means expected result lookup failed and the bet needs manual review or later reprocessing.
 - Settled states must preserve existing win/loss/push/half-result semantics.
 - `VOIDED` and postponed behavior must remain distinct where already supported.
+- `POSTPONED` and `VOIDED` must not be counted as open in replay or operator summaries.
 - Future bets must not be marked `UNMATCHED` prematurely; kickoff time and expected result availability matter.
 
 ## Override Concerns
 
 - Manual overrides take precedence where the current settlement engine already allows them.
 - Override fields must preserve auditability: operator-provided status/result fields should not erase automatic provenance silently.
+- Manual override flows must not blindly overwrite source provenance, structured event IDs, or automatic result notes.
 - UI or API changes should show the automatic result before accepting a manual override.
 
 ## Void, Postponed, and Unmatched Concerns
@@ -68,6 +71,12 @@ Work on result collection, result matching, automatic settlement, manual overrid
 - Unmatched rows should be excluded from open exposure calculations unless a specific policy says otherwise.
 - Closing odds and watcher flows should not keep retrying rows that are no longer genuinely open.
 - Reprocessing should be able to revisit unmatched rows when new results become available.
+
+## Ledger Write Concerns
+
+- Settlement writes must use the transactional ledger helper from `vcbet/ledger/repository.py`.
+- A settlement flow must not load the ledger, mutate a DataFrame, and save after a concurrent append can occur.
+- Closing odds updates that change ledger rows follow the same read-modify-write locking rule.
 
 ## Validation Commands
 

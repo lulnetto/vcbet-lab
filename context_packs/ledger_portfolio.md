@@ -7,6 +7,10 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 ## Include by Default
 
 - `vcbet/core/ledger_manager.py`
+- `vcbet/ledger/schema.py`
+- `vcbet/ledger/identity.py`
+- `vcbet/ledger/repository.py`
+- `vcbet/ledger/append_use_case.py`
 - `vcbet/core/ledger_portfolio_gate.py`
 - `vcbet/settlement/report_ledger.py`
 - `scripts/dedupe_ledger.py`
@@ -37,6 +41,7 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 
 - The canonical official ledger is `data/history/bets_ledger.csv`.
 - Official appends must pass through `append_new_picks_to_ledger`.
+- Read-modify-write ledger flows must use `update_ledger(path, mutator)` so the ledger lock covers read, decision, mutation, and atomic write.
 - Ledger schema normalization must preserve existing columns and fill missing expected columns safely.
 - Open-ledger duplicate, correlated, and contradictory picks must be blocked or recorded for review, not appended silently.
 - Dedupe must use stable bet identity, not incidental row order.
@@ -48,7 +53,8 @@ Work on canonical ledger schema, bet identity, dedupe, appends, blocked candidat
 
 ## Known Hotspots
 
-- `vcbet/core/ledger_manager.py` is over 300 LOC and mixes schema, identity, IO, blocked artifacts, and append behavior.
+- `vcbet/core/ledger_manager.py` is now a compatibility entrypoint after the Phase 1 ledger split.
+- Ledger implementation is split across `vcbet/ledger/schema.py`, `identity.py`, `repository.py`, and `append_use_case.py`.
 - CSV currently acts as database, DTO, log, API contract, and operational state for ledger flows.
 
 ## Refactor Direction

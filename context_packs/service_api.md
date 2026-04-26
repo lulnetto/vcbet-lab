@@ -7,6 +7,7 @@ Work on FastAPI routes, schemas, service commands, job orchestration, dashboard 
 ## Include by Default
 
 - `vcbet/service/api.py`
+- `vcbet/service/routes/*.py`
 - `vcbet/service/commands.py`
 - `vcbet/service/job_runner.py`
 - `vcbet/service/job_store.py`
@@ -43,8 +44,11 @@ Work on FastAPI routes, schemas, service commands, job orchestration, dashboard 
 
 - API response shapes consumed by the frontend must remain backward compatible unless the frontend changes in the same task.
 - Job commands must remain explicit, auditable, and cancellable through `JobManager`.
+- `JobStore` writes job JSON atomically with a temp file, fsync where feasible, and replace. Preserve the existing job payload shape unless a migration is intentional.
 - Service code should not expand direct script coupling; current script calls should be treated as refactor debt.
+- Service jobs that touch the canonical ledger must respect `vcbet/ledger/repository.py` transactional ledger helpers. Scheduler or route-triggered work must not bypass ledger locking.
 - Dashboard payloads must preserve filter semantics, settled/open counts, recent entries, CLV fields, and breakdown shapes.
+- Active job persistence exists. Broader service robustness and APScheduler lifecycle work are Phase 3 items and are not implemented yet.
 
 ## Validation Commands
 
@@ -53,7 +57,8 @@ Work on FastAPI routes, schemas, service commands, job orchestration, dashboard 
 
 ## Known Hotspots
 
-- `vcbet/service/api.py` is roughly 1038 LOC and mixes routing, catalog loading, CSV helpers, alias review, dashboard, jobs, and static serving.
+- `vcbet/service/api.py` is now composed with route modules under `vcbet/service/routes/`.
+- Route modules should stay thin over command builders, dashboard/read-model helpers, and job orchestration.
 - `vcbet/service/team_registry_api.py` is over 300 LOC and currently bridges service and script-level alias sync.
 - `vcbet/service/dashboard.py` is over 300 LOC and exposes pandas-shaped ledger logic to service payloads.
 

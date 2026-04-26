@@ -15,6 +15,7 @@ Work on result ingestion, score matching, manual overrides, bet settlement, fina
 ## Include Only If Needed
 
 - `vcbet/core/ledger_manager.py` when reading or writing ledger rows.
+- `vcbet/ledger/repository.py` when settlement write locking or transactional updates are involved.
 - `vcbet/collectors/closing_odds_collector.py` when closing odds fields affect final records.
 - `scripts/update_closing_odds.py` when the closing odds command path is involved.
 - `vcbet/service/commands.py` when service-triggered results or settlement jobs change.
@@ -37,9 +38,12 @@ Work on result ingestion, score matching, manual overrides, bet settlement, fina
 ## Key Invariants
 
 - Manual overrides must take precedence over automatic result fields where designed.
-- Settlement must handle total-like markets, asian handicap, voided, postponed, open, and pending states consistently.
+- Settlement must handle total-like markets, asian handicap, voided, postponed, open, unmatched, and pending states consistently.
+- `OPEN` and `UNMATCHED` are distinct: unmatched means result lookup or matching failed and needs review/reprocessing.
+- Postponed and voided rows must not be counted as open.
 - Result-unit calculations must use executed odds and executed stake when present.
-- Settlement must preserve provenance, confidence, source, and note fields.
+- Settlement must preserve provenance, confidence, source, note fields, and structured `sofascore_event_id` when available.
+- Settlement and closing updates that write ledger rows must use transactional ledger helpers, not load-mutate-save outside one lock.
 
 ## Validation Commands
 
@@ -49,7 +53,7 @@ Work on result ingestion, score matching, manual overrides, bet settlement, fina
 
 ## Known Hotspots
 
-- `vcbet/settlement/settlement_engine.py` is over 300 LOC and mixes parsing, matching, settlement rules, overrides, and IO.
+- `vcbet/settlement/settlement_engine.py` is over 300 LOC and mixes parsing, matching, settlement rules, overrides, and transactional ledger persistence.
 - `vcbet/collectors/results_collector.py` is large and combines external result collection with matching logic.
 
 ## Refactor Direction

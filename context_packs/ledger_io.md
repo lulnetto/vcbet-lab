@@ -37,17 +37,21 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 ## Schema Concerns
 
 - The canonical ledger is `data/history/bets_ledger.csv`.
+- CSV remains the canonical operational storage backend for now; SQLite/Postgres is future work and has not been implemented.
 - `vcbet/ledger/schema.py` owns expected columns, schema metadata, compatibility normalization, and structured field derivation such as `sofascore_event_id`.
 - Reads must tolerate old CSVs that are missing newer columns.
 - Writes must preserve schema order for known columns and retain unknown historical columns after the known schema.
 - Adding a column is a compatibility event and needs idempotent derivation or safe blank defaults.
+- Public compatibility imports remain available through `vcbet/core/ledger_manager.py`; new work should prefer the split `vcbet/ledger/*` modules only when changing ledger internals.
 
 ## Repository Concerns
 
 - `vcbet/ledger/repository.py` owns CSV load/save, canonical file creation, file locking, and atomic replace behavior.
 - All canonical ledger writes must use the repository lock path.
+- `update_ledger(path, mutator)` is the required API for read-modify-write flows. It holds the ledger lock through the full `ensure -> read -> mutate -> atomic write` cycle.
 - File locks should cover the full read-gate-append-write sequence when the caller is deciding whether to append.
 - Atomic writes should avoid partial CSVs after crashes or interrupted service jobs.
+- `save_ledger()` or final-write-only locking is not enough when the caller has loaded a DataFrame, made decisions, and then writes it back.
 
 ## Append Concerns
 
@@ -55,10 +59,13 @@ Work on canonical ledger schema, bet identity, CSV repository IO, append use cas
 - Official appends must pass through `append_new_picks_to_ledger`.
 - Scheduler, service, CLI, and replay-triggered writes must not bypass the append use case.
 - Append behavior must not change stake, EV, market, or selection thresholds.
+- Pipeline exports must preserve structured event identifiers, including `sofascore_event_id` and `source_event_id`, so the canonical ledger can use them directly during settlement.
 
 ## Locking Concerns
 
 - The lock must protect every canonical ledger write path.
+- Settlement, closing odds collection, closing watcher jobs, service-triggered jobs, and scheduler-triggered jobs must use transactional ledger helpers for any read-modify-write update.
+- Do not load the ledger, mutate a stale DataFrame, and then call `save_ledger()` outside the same lock; a concurrent append between load and save can be lost.
 - File locking alone does not replace portfolio gate serialization when two runs can read the same open exposure before appending.
 - Lock files are coordination artifacts and should not be treated as ledger data.
 

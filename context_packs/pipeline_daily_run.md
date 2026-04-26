@@ -54,10 +54,19 @@ Work on the daily run path that collects snapshots, normalizes odds, matches tea
 
 - The daily run must preserve target date, run ID, config name, config fingerprint, snapshot provenance, and temporal contract fields.
 - Odds and xG snapshots must be resolved explicitly and recorded in manifests.
+- `max_snapshot_age_hours` is mandatory. Daily pipeline validation uses the current decision time and must reject stale snapshots before any EV calculation.
+- Snapshot freshness failures must be explicit in the quality report and manifest; the pipeline must not silently continue with stale odds or xG.
 - Accepted picks must pass pricing, risk, selection, and ledger append gates in the expected order.
+- Pipeline exports must preserve `sofascore_event_id` and `source_event_id` so structured settlement matching can reach the canonical ledger.
 - `vcbet/core/pipeline_ev.py` remains the stable public entrypoint; `vcbet/core/pipeline/*.py` stage modules are implementation details from the mechanical split.
 - The pipeline stage split was intended to leave pricing, filtering, EV, ledger append, quality report, and output semantics unchanged.
 - Orchestration should remain thin; domain behavior belongs in domain modules and application use cases.
+
+## Snapshot Freshness Policy
+
+- Normal daily runs validate odds/xG freshness against the run decision timestamp produced at execution time.
+- Historical replay runs are different: replay validation must use the source run's decision/generated timestamp, not wall-clock now.
+- If a replay source lacks enough timestamp provenance to validate freshness, the replay must fail explicitly rather than disabling validation.
 
 ## Validation Commands
 

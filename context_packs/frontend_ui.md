@@ -15,6 +15,7 @@ Work on the static operator UI: screens, state, API calls, tables, styling, and 
 - `vcbet/service/static/js/app.js`
 - `vcbet/service/static/js/components.js`
 - `vcbet/service/static/js/screens.js`
+- `vcbet/service/static/js/screens/*.js`
 - `vcbet/service/static/js/state.js`
 
 ## Include Only If Needed
@@ -50,7 +51,8 @@ Work on the static operator UI: screens, state, API calls, tables, styling, and 
 
 ## Known Hotspots
 
-- `vcbet/service/static/js/screens.js` is roughly 967 LOC and mixes all screen renderers, workflow actions, and state updates.
+- `vcbet/service/static/js/screens.js` is now a compatibility/aggregation entrypoint after the screen split.
+- Screen implementations live under `vcbet/service/static/js/screens/*.js`.
 - `vcbet/service/static/js/components.js` is also large enough to review carefully when table or display helpers change.
 
 ## Refactor Direction

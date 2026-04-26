@@ -6,15 +6,54 @@ This file defines the minimal source/context set for an upcoming VCBet architect
 
 ## Audit Scope Summary
 
-- Total git-tracked files: 161 (161 currently present; 0 tracked path(s) deleted in the working tree).
+- Total git-tracked files after Phase 0/1 stabilization: 181 (181 currently present; 0 tracked path(s) deleted in the working tree).
 - Total untracked relevant files, if any: 0.
-- Total included audit files: 119.
+- Total included audit files: original audit set plus Phase 0/1 split-module addendum below.
 - Total excluded files/directories: 1041 files across 326 directories/groups.
 - Approximate size of included scope: 701.4 KB.
 - Approximate size of excluded scope: 49.2 MB.
 - Deleted tracked paths currently observed: none.
 
-The sections below are audit inputs, not architecture conclusions. Responsibility notes are inferred from names, imports, routes, and function/class signatures only.
+The sections below are audit inputs, not architecture conclusions. Responsibility notes are inferred from names, imports, routes, and function/class signatures only. The Phase 0/1 addendum reflects the stabilization and mechanical split work completed after the original generated manifest.
+
+## Phase 0/1 Stabilization Addendum
+
+Phase 0 is complete after ledger write hardening, snapshot freshness enforcement, settlement status fixes, event-id persistence, replay status/freshness fixes, and atomic service job-store writes. Phase 1 is complete after mechanical splits for ledger, replay, and team identity. Phase 2 has not started: typed domain contracts/dataclasses have not been introduced, pandas still appears in domain-adjacent code, and CSV remains the operational storage backend.
+
+### Split Ledger Modules
+
+- `vcbet/ledger/schema.py`: canonical ledger column list, compatibility normalization, structured `sofascore_event_id` normalization/derivation, and old-ledger tolerance.
+- `vcbet/ledger/identity.py`: stable bet identity and dedupe helpers.
+- `vcbet/ledger/repository.py`: canonical CSV repository, file locks, atomic CSV replacement, and `update_ledger(path, mutator)` for transactional read-modify-write flows.
+- `vcbet/ledger/append_use_case.py`: official append use case, blocked candidate artifact writing, portfolio gate integration, schema normalization, and dedupe-preserving append behavior.
+- Compatibility remains through `vcbet/core/ledger_manager.py`.
+
+### Split Replay Modules
+
+- `vcbet/replay/source_resolver.py`: source run manifest/provenance resolution and replay input contract assembly.
+- `vcbet/replay/execution.py`: replay subprocess execution, replay ledger summary, settlement hook, and result payload writing.
+- `vcbet/replay/scoring.py`: pick-set comparison, scorecards, config role policy, and replay comparison context.
+- `vcbet/replay/summary_builder.py`: multi-config replay orchestration and summary artifact building.
+- Compatibility remains through `vcbet/replay/replay_pipeline.py`.
+
+### Split Team Identity Modules
+
+- `vcbet/team_identity/scoring.py`: Betano team parsing, normalization, candidate scoring, ambiguity logic, and registry match construction.
+- `vcbet/team_identity/registry_repository.py`: approved registry CSV read/write and lookup helpers.
+- `vcbet/team_identity/review_writer.py`: manual review queue CSV writing.
+- Compatibility remains through `vcbet/core/team_registry.py`.
+
+### Stabilization-Specific Modules
+
+- `vcbet/core/temporal_contract.py`: `SnapshotValidator` enforces mandatory `max_snapshot_age_hours`, parses `Z`/offset timestamps in UTC, rejects future snapshots, and returns structured quality-report-safe failures.
+- `vcbet/service/job_store.py`: job JSON persistence uses temp-file write, fsync where feasible, and atomic replace while preserving the existing job payload format.
+
+### Regression Test Coverage Added or Updated
+
+- `tests/test_ledger_portfolio_gate.py`: concurrent append serialization plus settlement-vs-append and closing-vs-append read-modify-write coverage.
+- `tests/test_temporal_contract.py`: stale rejection, missing metadata rejection, timezone-aware timestamp handling, future timestamp rejection, historical replay freshness against source decision time, and explicit missing replay provenance failure.
+- `tests/test_ledger_provenance.py`: old-ledger compatibility, structured `sofascore_event_id` derivation/persistence, pipeline export to canonical ledger, `UNMATCHED`, and replay status counting for postponed.
+- `tests/test_replay_comparison_scorecard.py`: public compatibility import smoke for ledger manager, team registry, and replay pipeline entrypoints.
 
 ## Priority 0: Entry Points and Runtime Orchestration
 
@@ -474,24 +513,52 @@ from vcbet.core.market_thresholds import (
 
 ### `vcbet/core/ledger_manager.py`
 
-- Size: 19.1 KB
-- Domain/responsibility: Likely ledger and portfolio state; functions: _empty_value, normalize_ledger_schema, _norm_identity, _norm_line.
+- Size: compatibility shim after Phase 1 split
+- Domain/responsibility: public ledger compatibility entrypoint re-exporting schema, identity, repository, and append use case APIs.
 - Classes: none detected
-- Functions: _empty_value, normalize_ledger_schema, _norm_identity, _norm_line, bet_identity_key, deduplicate_ledger_rows, ensure_ledger, load_ledger, save_ledger, _pick_value, _pick_to_ledger_row, _blocked_file_for_ledger, _persist_blocked_candidates, append_new_picks_to_ledger
-- Local imports: vcbet.core.ledger_portfolio_gate, vcbet.paths
+- Functions: re-exported `append_new_picks_to_ledger`, `bet_identity_key`, `deduplicate_ledger_rows`, `ensure_ledger`, `load_ledger`, `save_ledger`, `update_ledger`, `normalize_ledger_schema`, `normalize_sofascore_event_id`
+- Local imports: vcbet.ledger.append_use_case, vcbet.ledger.identity, vcbet.ledger.repository, vcbet.ledger.schema
 - Tiny sample:
 ```python
 from __future__ import annotations
-from pathlib import Path
-from typing import Iterable
-import pandas as pd
-from vcbet.core.ledger_portfolio_gate import check_against_open_ledger, is_official_ledger_path
-from vcbet.paths import DEFAULT_LEDGER_FILE
-LEDGER_SCHEMA_VERSION = "phase11_csv_v1"
-LEDGER_COLUMNS = [
-    "bet_id",
-    "ledger_schema_version",
+from vcbet.ledger.append_use_case import append_new_picks_to_ledger
+from vcbet.ledger.identity import bet_identity_key, deduplicate_ledger_rows
+from vcbet.ledger.repository import ensure_ledger, load_ledger, save_ledger, update_ledger
+from vcbet.ledger.schema import LEDGER_COLUMNS, normalize_ledger_schema
 ```
+
+### `vcbet/ledger/schema.py`
+
+- Size: 7.2 KB
+- Domain/responsibility: canonical ledger schema, compatibility normalization, schema metadata, and structured `sofascore_event_id` normalization/derivation.
+- Classes: none detected
+- Functions: _empty_value, normalize_sofascore_event_id, extract_sofascore_event_id_from_note, normalize_ledger_schema
+- Local imports: none detected
+
+### `vcbet/ledger/identity.py`
+
+- Size: 2.6 KB
+- Domain/responsibility: stable ledger bet identity and dedupe helpers.
+- Classes: none detected
+- Functions: _norm_identity, _norm_line, bet_identity_key, deduplicate_ledger_rows
+- Local imports: none detected
+
+### `vcbet/ledger/repository.py`
+
+- Size: 3.9 KB
+- Domain/responsibility: canonical CSV repository, ledger lock coordination, atomic CSV replacement, and transactional read-modify-write updates.
+- Classes: none detected
+- Functions: _ledger_lock_path, ledger_file_lock, _fsync_directory, write_ledger_csv_unlocked, ensure_ledger_unlocked, load_ledger_unlocked, save_ledger_unlocked, ensure_ledger, load_ledger, save_ledger, update_ledger
+- Local imports: vcbet.ledger.schema, vcbet.paths
+- Phase 0 note: `update_ledger(path, mutator)` is required for settlement/closing read-modify-write flows.
+
+### `vcbet/ledger/append_use_case.py`
+
+- Size: 10.8 KB
+- Domain/responsibility: selected-pick conversion to ledger rows, official append orchestration, blocked candidate persistence, portfolio gate integration, and dedupe-preserving append behavior.
+- Classes: none detected
+- Functions: _pick_value, _pick_to_ledger_row, _blocked_file_for_ledger, _persist_blocked_candidates, append_new_picks_to_ledger
+- Local imports: vcbet.core.ledger_portfolio_gate, vcbet.ledger.identity, vcbet.ledger.repository, vcbet.ledger.schema, vcbet.paths
 
 ### `vcbet/core/ledger_portfolio_gate.py`
 
@@ -852,44 +919,67 @@ from vcbet.core.team_registry import DEFAULT_REGISTRY_FILE, registry_lookup
 
 ### `vcbet/core/team_registry.py`
 
-- Size: 21.2 KB
-- Domain/responsibility: Likely team identity / alias registry; classes: BetanoTeam, RegistryAlias, ReviewAlias; functions: _looks_like_team_name, extract_betano_team_id, _is_betano_team_href, is_valid_betano_team_identity.
-- Classes: BetanoTeam, RegistryAlias, ReviewAlias, MatchCandidate, BetanoParseResult, BetanoPhaseResult, BetanoStandingsParser
-- Functions: _looks_like_team_name, extract_betano_team_id, _is_betano_team_href, is_valid_betano_team_identity, dedupe_betano_teams, duplicate_betano_entries, strip_accents, normalize_team_name, important_tokens, score_team_match, rank_candidates, ambiguity_reason, build_registry_matches, parse_betano_standings_html, parse_betano_standings_html_with_diagnostics, parse_betano_phase_standings_json, read_registry, registry_lookup, registry_alias_key, write_registry_aliases, write_review_aliases
-- Local imports: none detected
+- Size: compatibility shim after Phase 1 split
+- Domain/responsibility: public team identity compatibility entrypoint that re-exports scoring, registry repository, and review writer APIs.
+- Classes: re-exported from `vcbet/team_identity/scoring.py`
+- Functions: re-exported from `vcbet/team_identity/scoring.py`, `registry_repository.py`, and `review_writer.py`
+- Local imports: vcbet.team_identity.registry_repository, vcbet.team_identity.review_writer, vcbet.team_identity.scoring
 - Tiny sample:
 ```python
 from __future__ import annotations
-import csv
-import html.parser
-import re
-import unicodedata
-from dataclasses import asdict, dataclass
-from datetime import datetime
-from difflib import SequenceMatcher
-from pathlib import Path
-from typing import Iterable
+from vcbet.team_identity.registry_repository import (
+    APPROVED_COLUMNS,
+    DEFAULT_REGISTRY_FILE,
+    DEFAULT_SNAPSHOT_FILE,
+    read_registry,
+)
 ```
+
+### `vcbet/team_identity/scoring.py`
+
+- Size: 15.4 KB
+- Domain/responsibility: Betano standings parsing, team-name normalization, match scoring, ambiguity checks, and registry match construction.
+- Classes: BetanoTeam, RegistryAlias, ReviewAlias, MatchCandidate, BetanoParseResult, BetanoPhaseResult, BetanoStandingsParser
+- Functions: _looks_like_team_name, extract_betano_team_id, _is_betano_team_href, is_valid_betano_team_identity, dedupe_betano_teams, duplicate_betano_entries, strip_accents, normalize_team_name, important_tokens, score_team_match, rank_candidates, ambiguity_reason, build_registry_matches, parse_betano_standings_html, parse_betano_standings_html_with_diagnostics, parse_betano_phase_standings_json
+- Local imports: none detected
+
+### `vcbet/team_identity/registry_repository.py`
+
+- Size: 3.7 KB
+- Domain/responsibility: approved team registry CSV repository and lookup helpers.
+- Classes: none detected
+- Functions: read_registry, registry_lookup, registry_alias_key, write_registry_aliases
+- Local imports: vcbet.team_identity.scoring
+
+### `vcbet/team_identity/review_writer.py`
+
+- Size: 2.7 KB
+- Domain/responsibility: manual alias review queue CSV writing.
+- Classes: none detected
+- Functions: write_review_aliases
+- Local imports: vcbet.team_identity.scoring
 
 ### `vcbet/core/temporal_contract.py`
 
-- Size: 1.6 KB
-- Domain/responsibility: Likely support / package structure; functions: file_md5, _is_missing, latest_timestamp_from_column, snapshot_time_from_dataframe.
-- Classes: none detected
-- Functions: file_md5, _is_missing, latest_timestamp_from_column, snapshot_time_from_dataframe, temporal_contract_status
+- Size: 6.7 KB
+- Domain/responsibility: snapshot provenance, hashing, temporal contract status, and mandatory snapshot freshness validation.
+- Classes: SnapshotValidationResult, SnapshotValidator
+- Functions: file_md5, _is_missing, _parse_timestamp_utc, _format_timestamp_utc, latest_timestamp_from_column, snapshot_time_from_dataframe, temporal_contract_status
 - Local imports: none detected
 - Tiny sample:
 ```python
 from __future__ import annotations
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import pandas as pd
 TEMPORAL_CONTRACT_VERSION = "temporal_contract_v1"
-def file_md5(path: str | Path) -> str:
-    digest = hashlib.md5()
-    with Path(path).open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+@dataclass(frozen=True)
+class SnapshotValidationResult:
+    status: str
+class SnapshotValidator:
+    def __init__(self, *, max_snapshot_age_hours: float, clock_skew_tolerance_minutes: float = 5.0):
 ```
 
 ### `vcbet/paths.py`
@@ -923,24 +1013,55 @@ REPLAYS_DIR = DATA_DIR / "replays"
 
 ### `vcbet/replay/replay_pipeline.py`
 
-- Size: 35.2 KB
-- Domain/responsibility: Likely replay and comparison; functions: _load_json, _sorted_counter_dict, _normalize_signature, _normalize_family_signature.
+- Size: compatibility shim after Phase 1 split
+- Domain/responsibility: public replay CLI and import compatibility entrypoint; implementation is split under `vcbet/replay/`.
 - Classes: none detected
-- Functions: _load_json, _sorted_counter_dict, _normalize_signature, _normalize_family_signature, _asian_total_line_drift, _compare_pick_sets, _resolve_source_run, _load_picks_csv, _load_csv_semicolon, _load_ledger_csv, _summarize_replay_ledger, _config_role, _model_result_summary, _build_config_scorecard, _build_comparison_context, _run_replay_settlement, _compact_picks_for_summary, _run_single_replay, replay_configs_for_run, main
-- Local imports: vcbet.core.ledger_manager, vcbet.core.strategy_config, vcbet.core.temporal_contract, vcbet.paths
+- Functions: main and re-exported replay helpers from source_resolver, execution, scoring, and summary_builder
+- Local imports: vcbet.core.strategy_config, vcbet.paths, vcbet.replay.execution, vcbet.replay.scoring, vcbet.replay.source_resolver, vcbet.replay.summary_builder
 - Tiny sample:
 ```python
 from __future__ import annotations
 import argparse
-import json
-import subprocess
-from collections import Counter
 from pathlib import Path
-from typing import Any
-import pandas as pd
-from vcbet.core.ledger_manager import normalize_ledger_schema
-from vcbet.core.strategy_config import CONFIGS_DIR, ConfigResolutionError, list_available_configs, resolve_config_file
+from vcbet.core.strategy_config import ConfigResolutionError
+from vcbet.paths import REPLAYS_DIR
+from vcbet.replay.execution import _run_single_replay
+from vcbet.replay.summary_builder import replay_configs_for_run
 ```
+
+### `vcbet/replay/source_resolver.py`
+
+- Size: 9.0 KB
+- Domain/responsibility: source run manifest/provenance resolution, frozen snapshot selection, and replay input contract construction.
+- Classes: none detected
+- Functions: _load_json, _resolve_source_run
+- Local imports: vcbet.core.temporal_contract
+- Phase 0 note: exposes source decision/generated timestamp for historical snapshot freshness validation.
+
+### `vcbet/replay/execution.py`
+
+- Size: 11.9 KB
+- Domain/responsibility: replay subprocess execution, replay ledger loading/summarization, replay settlement hook, compact pick previews, and replay result JSON writing.
+- Classes: none detected
+- Functions: _load_picks_csv, _load_csv_semicolon, _load_ledger_csv, _summarize_replay_ledger, _run_replay_settlement, _compact_picks_for_summary, _run_single_replay
+- Local imports: vcbet.core.ledger_manager, vcbet.core.strategy_config, vcbet.replay.scoring, vcbet.replay.source_resolver
+- Phase 0 note: missing freshness provenance returns `replay_freshness_reference_missing`; summary counts open/unmatched/postponed/voided separately.
+
+### `vcbet/replay/scoring.py`
+
+- Size: 10.1 KB
+- Domain/responsibility: pick signature comparison, market-family drift, config roles, scorecards, and comparison context.
+- Classes: none detected
+- Functions: _sorted_counter_dict, _normalize_signature, _normalize_family_signature, _asian_total_line_drift, _compare_pick_sets, _config_role, _model_result_summary, _build_config_scorecard, _build_comparison_context
+- Local imports: none detected
+
+### `vcbet/replay/summary_builder.py`
+
+- Size: 5.3 KB
+- Domain/responsibility: multi-config replay orchestration and summary artifact construction.
+- Classes: none detected
+- Functions: replay_configs_for_run
+- Local imports: vcbet.core.strategy_config, vcbet.replay.execution, vcbet.replay.scoring, vcbet.replay.source_resolver
 
 ### `vcbet/settlement/__init__.py`
 
@@ -978,6 +1099,7 @@ def _read_ledger(path: str | Path) -> pd.DataFrame:
 - Classes: none detected
 - Functions: _prepare_ledger_dtypes, _is_missing, _safe_float, _safe_int, _first_present, settle_total_like, settle_asian_handicap, settle_bet, compute_result_units, _slug_text, _parse_match_datetime, _result_row_score, _infer_auto_settlement_status, apply_results_file, apply_overrides_file, resolve_final_fields, settle_ledger
 - Local imports: vcbet.core.ledger_manager, vcbet.core.run_utils, vcbet.paths
+- Phase 0 note: settlement writes use transactional `update_ledger()` so result/override application, final field resolution, and atomic write occur under one ledger lock. `UNMATCHED` is distinct from `OPEN`, and structured `sofascore_event_id` is preferred/preserved.
 - Tiny sample:
 ```python
 from __future__ import annotations
@@ -986,7 +1108,7 @@ import re
 import unicodedata
 from pathlib import Path
 import pandas as pd
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, normalize_sofascore_event_id, update_ledger
 from vcbet.core.run_utils import now_str
 from vcbet.paths import DEFAULT_OVERRIDES_FILE
 RESULTS_REQUIRED_COLUMNS = {"match_name", "home_goals", "away_goals"}
@@ -1037,6 +1159,7 @@ import pandas as pd
 - Classes: none detected
 - Functions: minutes_before_from_env, _has_value, _is_unsettled, eligible_rows, update_closing_odds_once
 - Local imports: vcbet.collectors.closing_odds_collector, vcbet.core.ledger_manager
+- Phase 0 note: non-dry-run closing watcher updates use transactional `update_ledger()` to avoid dropping concurrent appends.
 - Tiny sample:
 ```python
 from __future__ import annotations
@@ -1046,7 +1169,7 @@ from pathlib import Path
 from typing import Any
 import pandas as pd
 from vcbet.collectors.closing_odds_collector import BetanoClosingOddsCollector, market_row_matches, parse_match_datetime
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, update_ledger
 CLOSING_FIELDS = [
     "closing_odd",
 ```
@@ -1116,15 +1239,18 @@ from typing import Callable
 
 ### `vcbet/service/job_store.py`
 
-- Size: 2.0 KB
-- Domain/responsibility: Likely support / package structure; classes: JobStore.
+- Size: 3.1 KB
+- Domain/responsibility: service job JSON persistence with atomic writes and restart-safe active job recovery.
 - Classes: JobStore
 - Functions: none detected
 - Local imports: .schemas
+- Phase 0 note: writes go through temp file, flush/fsync, `os.replace`, and directory fsync where feasible. Job payload format remains unchanged.
 - Tiny sample:
 ```python
 from __future__ import annotations
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Iterable
 from .schemas import JobRecord
@@ -1988,11 +2114,13 @@ def base_candidate(**overrides):
 - Size: 3.5 KB
 - Domain/responsibility: Likely ledger and portfolio state; classes: LedgerPortfolioGateTest; functions: official_pick.
 - Classes: LedgerPortfolioGateTest
-- Functions: official_pick
+- Functions: official_pick, append_unique_pick_worker, append_single_pick_worker, slow_settlement_worker, slow_closing_watcher_worker
 - Local imports: vcbet.core.ledger_manager, vcbet.core.ledger_portfolio_gate
+- Phase 0 note: includes process-level regression coverage for concurrent appends and for settlement/closing read-modify-write flows not dropping concurrent appends.
 - Tiny sample:
 ```python
 from __future__ import annotations
+import multiprocessing
 import tempfile
 import unittest
 from pathlib import Path
@@ -2010,7 +2138,8 @@ def official_pick(**overrides) -> dict:
 - Domain/responsibility: Likely ledger and portfolio state; classes: LedgerProvenanceTest; functions: official_pick.
 - Classes: LedgerProvenanceTest
 - Functions: official_pick
-- Local imports: vcbet.collectors.results_collector, vcbet.core.ledger_manager, vcbet.replay.replay_pipeline, vcbet.service.dashboard, vcbet.settlement.report_ledger, vcbet.settlement.settlement_engine
+- Local imports: vcbet.collectors.results_collector, vcbet.core.ledger_manager, vcbet.core.pipeline.output_writer, vcbet.core.strategy_config, vcbet.replay.replay_pipeline, vcbet.service.dashboard, vcbet.settlement.report_ledger, vcbet.settlement.settlement_engine
+- Phase 0 note: covers structured `sofascore_event_id` compatibility/persistence, `UNMATCHED`, old-ledger reads, pipeline export to canonical ledger, and replay postponed status counts.
 - Tiny sample:
 ```python
 from __future__ import annotations
@@ -2137,6 +2266,7 @@ class PricingOutputTest(unittest.TestCase):
 - Classes: ReplayComparisonScorecardTest
 - Functions: none detected
 - Local imports: vcbet.replay.replay_pipeline
+- Phase 1 note: includes compatibility import smoke for `vcbet.core.ledger_manager`, `vcbet.core.team_registry`, and `vcbet.replay.replay_pipeline`.
 - Tiny sample:
 ```python
 from __future__ import annotations
@@ -2221,18 +2351,20 @@ from vcbet.service.team_registry_api import (
 - Classes: TemporalContractTest
 - Functions: none detected
 - Local imports: vcbet.core.ledger_manager, vcbet.core.pipeline_ev, vcbet.core.temporal_contract, vcbet.replay.replay_pipeline, vcbet.service.dashboard
+- Phase 0 note: covers mandatory snapshot freshness rejection, timezone-aware `SnapshotValidator` behavior, future timestamp rejection, historical replay freshness against source decision time, and explicit missing replay provenance failure.
 - Tiny sample:
 ```python
 from __future__ import annotations
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 import pandas as pd
 from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger
 from vcbet.core.pipeline_ev import processar_pipeline
-from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, snapshot_time_from_dataframe
-from vcbet.replay.replay_pipeline import _resolve_source_run
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, SnapshotValidator, snapshot_time_from_dataframe
+from vcbet.replay.replay_pipeline import _resolve_source_run, _run_single_replay
 ```
 
 ## Suggested Audit Upload Set
@@ -2291,12 +2423,23 @@ Send these files as the architecture audit source set. Send `docs/audit_file_man
 - `vcbet/core/team_matcher.py`
 - `vcbet/core/team_registry.py`
 - `vcbet/core/temporal_contract.py`
+- `vcbet/ledger/schema.py`
+- `vcbet/ledger/identity.py`
+- `vcbet/ledger/repository.py`
+- `vcbet/ledger/append_use_case.py`
 - `vcbet/paths.py`
 - `vcbet/replay/__init__.py`
 - `vcbet/replay/replay_pipeline.py`
+- `vcbet/replay/source_resolver.py`
+- `vcbet/replay/execution.py`
+- `vcbet/replay/scoring.py`
+- `vcbet/replay/summary_builder.py`
 - `vcbet/settlement/__init__.py`
 - `vcbet/settlement/report_ledger.py`
 - `vcbet/settlement/settlement_engine.py`
+- `vcbet/team_identity/scoring.py`
+- `vcbet/team_identity/registry_repository.py`
+- `vcbet/team_identity/review_writer.py`
 
 ### P2: Service / API / Frontend Surface
 - `vcbet/service/__init__.py`

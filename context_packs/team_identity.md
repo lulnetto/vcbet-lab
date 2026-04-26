@@ -8,6 +8,9 @@ Work on team normalization, Betano-to-FootyStats alias matching, registry parsin
 
 - `vcbet/core/team_matcher.py`
 - `vcbet/core/team_registry.py`
+- `vcbet/team_identity/scoring.py`
+- `vcbet/team_identity/registry_repository.py`
+- `vcbet/team_identity/review_writer.py`
 - `vcbet/service/team_registry_api.py`
 - `scripts/sync_team_aliases.py`
 - `configs/team_registry/betano_footystats_aliases.csv`
@@ -50,7 +53,8 @@ Work on team normalization, Betano-to-FootyStats alias matching, registry parsin
 
 ## Known Hotspots
 
-- `vcbet/core/team_registry.py` is roughly 653 LOC and combines parsing, scoring, matching, registry IO, and review writing.
+- `vcbet/core/team_registry.py` is now a compatibility entrypoint after the Phase 1 split.
+- Team identity implementation is split across `vcbet/team_identity/scoring.py`, `registry_repository.py`, and `review_writer.py`.
 - `vcbet/service/team_registry_api.py` is over 300 LOC and currently connects service operations to script-level sync.
 - `scripts/sync_team_aliases.py` handles network/browser-style sync behavior and should be isolated from pure identity logic.
 
