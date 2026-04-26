@@ -43,6 +43,8 @@ def _summarize_replay_ledger(ledger_file: Path) -> dict[str, Any]:
             "settled": 0,
             "open": 0,
             "unmatched": 0,
+            "postponed": 0,
+            "voided": 0,
             "wins": 0,
             "losses": 0,
             "pushes": 0,
@@ -54,8 +56,10 @@ def _summarize_replay_ledger(ledger_file: Path) -> dict[str, Any]:
     settlement_status = df.get("final_settlement_status", pd.Series(["pending"] * len(df))).fillna("pending").astype(str).str.lower()
     result_units = pd.to_numeric(df.get("result_units_model", pd.Series([0] * len(df))), errors="coerce").fillna(0.0)
     stake = pd.to_numeric(df.get("stake_units", pd.Series([0] * len(df))), errors="coerce").fillna(0.0)
-    settled_mask = bet_status.isin({"settled", "voided", "cancelled"}) | settlement_status.isin({"win", "loss", "half_win", "half_loss", "push", "void"})
+    settled_mask = bet_status.eq("settled") | settlement_status.isin({"win", "loss", "half_win", "half_loss", "push"})
     unmatched_mask = bet_status.eq("unmatched") | settlement_status.eq("unmatched")
+    postponed_mask = bet_status.eq("postponed")
+    voided_mask = bet_status.isin({"voided", "cancelled"}) | settlement_status.eq("void")
 
     settled_stake = float(stake[settled_mask].sum())
     model_units = float(result_units[settled_mask].sum())
@@ -64,15 +68,15 @@ def _summarize_replay_ledger(ledger_file: Path) -> dict[str, Any]:
     return {
         "total": int(len(df)),
         "settled": int(settled_mask.sum()),
-        "open": int((~settled_mask & ~unmatched_mask).sum()),
+        "open": int((~settled_mask & ~unmatched_mask & ~postponed_mask & ~voided_mask).sum()),
         "unmatched": int(unmatched_mask.sum()),
         "wins": int(settlement_status.eq("win").sum()),
         "losses": int(settlement_status.eq("loss").sum()),
         "half_wins": int(settlement_status.eq("half_win").sum()),
         "half_losses": int(settlement_status.eq("half_loss").sum()),
         "pushes": int(settlement_status.eq("push").sum()),
-        "voided": int(settlement_status.eq("void").sum()),
-        "postponed": int(bet_status.eq("postponed").sum()),
+        "voided": int(voided_mask.sum()),
+        "postponed": int(postponed_mask.sum()),
         "model_units": round(model_units, 3),
         "model_roi_percent": round(roi, 2),
     }
@@ -182,6 +186,41 @@ def _run_single_replay(
     replay_dir = output_root / replay_target_date / replay_run_id
     replay_dir.mkdir(parents=True, exist_ok=True)
     ledger_file = replay_dir / "replay_ledger.csv"
+    snapshot_reference_timestamp = source_info.get("snapshot_reference_timestamp") or source_info.get("decision_timestamp")
+
+    if not snapshot_reference_timestamp:
+        candidate_df = pd.DataFrame()
+        reference_df = _load_picks_csv(Path(source_info["picks_path"]))
+        comparison = _compare_pick_sets(reference_df, candidate_df)
+        payload = {
+            "config_name": config_name,
+            "config_path": str(config_path) if config_path else config_ref,
+            "run_id": replay_run_id,
+            "return_code": 2,
+            "stdout_tail": [],
+            "stderr_tail": ["replay_freshness_reference_missing: source run has no decision/generated timestamp for snapshot validation"],
+            "error": {
+                "code": "replay_freshness_reference_missing",
+                "message": "Replay source run lacks decision/generated timestamp required for snapshot freshness validation.",
+            },
+            "picks_total": 0,
+            "picks_by_market": {},
+            "picks_by_league": {},
+            "picks_preview": [],
+            "picks_file": None,
+            "ledger_file": None,
+            "comparison": comparison,
+            "asian_total_line_drift": _asian_total_line_drift(reference_df, candidate_df),
+            "quality_report_file": None,
+            "quality_processing": {},
+            "quality_outputs": {},
+            "replay_dir": str(replay_dir),
+            "replay_input_contract": source_info.get("replay_input_contract", {}),
+            "settlement": None,
+        }
+        payload["scorecard"] = _build_config_scorecard(payload)
+        (replay_dir / "replay_result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
 
     cmd = [
         python_bin,
@@ -193,6 +232,7 @@ def _run_single_replay(
         "--alias-file", alias_file,
         "--ledger-file", str(ledger_file),
         "--output-dir", str(output_root),
+        "--snapshot-reference-timestamp", str(snapshot_reference_timestamp),
     ]
     if config_path:
         cmd += ["--config-file", str(config_path)]
@@ -250,4 +290,3 @@ def _run_single_replay(
     payload["scorecard"] = _build_config_scorecard(payload)
     (replay_dir / "replay_result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
-

@@ -173,7 +173,11 @@ def _resolve_source_run(source_run_dir: Path) -> dict[str, Any]:
         "picks_path": Path(picks_path),
         "target_date": str(target_date),
         "run_id": str(run_id),
+        "decision_timestamp": decision_timestamp,
+        "snapshot_reference_timestamp": decision_timestamp,
         "replay_input_contract": {
+            "decision_timestamp": decision_timestamp,
+            "snapshot_reference_timestamp": decision_timestamp,
             "odds_source_mode": odds_source_mode,
             "xg_source_mode": xg_source_mode,
             "picks_source_mode": picks_source_mode,
@@ -202,4 +206,3 @@ def _resolve_source_run(source_run_dir: Path) -> dict[str, Any]:
             "replay_limitations": replay_limitations,
         },
     }
-

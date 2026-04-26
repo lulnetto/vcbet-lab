@@ -11,7 +11,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, update_ledger
 from vcbet.core.market_normalizer import normalize_market_entry, compare_team_name
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -192,64 +192,66 @@ def collect_closing_odds(
     bet_ids: list[str] | None = None,
 ) -> tuple[Path, int, int, int]:
     ledger_path = Path(ledger_file)
-    df = load_ledger(ledger_path)
     collector = BetanoClosingOddsCollector()
-    now = datetime.now()
 
-    target_mask = df.apply(
-        lambda row: should_consider_row(
-            row,
-            now=now,
-            window_minutes=window_minutes,
-            allow_past_minutes=allow_past_minutes,
-            all_pending=all_pending,
-        ),
-        axis=1,
-    )
-    target_df = df[target_mask].copy()
+    def mutate(df: pd.DataFrame) -> tuple[pd.DataFrame, tuple[int, int, int]]:
+        now = datetime.now()
+        target_mask = df.apply(
+            lambda row: should_consider_row(
+                row,
+                now=now,
+                window_minutes=window_minutes,
+                allow_past_minutes=allow_past_minutes,
+                all_pending=all_pending,
+            ),
+            axis=1,
+        )
+        target_df = df[target_mask].copy()
 
-    if bet_ids:
-        bet_id_set = {str(b).strip() for b in bet_ids if str(b).strip()}
-        target_df = target_df[target_df["bet_id"].astype(str).isin(bet_id_set)].copy()
+        if bet_ids:
+            bet_id_set = {str(b).strip() for b in bet_ids if str(b).strip()}
+            target_df = target_df[target_df["bet_id"].astype(str).isin(bet_id_set)].copy()
 
-    if target_df.empty:
-        save_ledger(df, ledger_path)
-        return ledger_path, 0, 0, 0
+        if target_df.empty:
+            return df, (0, 0, 0)
 
-    by_url: dict[str, list[dict[str, Any]]] = {}
-    matched = 0
-    fetched_urls = 0
-    failed_urls = 0
+        by_url: dict[str, list[dict[str, Any]]] = {}
+        matched = 0
+        fetched_urls = 0
+        failed_urls = 0
 
-    for idx, row in target_df.iterrows():
-        event_url = str(row["event_url"]).strip()
-        if event_url not in by_url:
-            try:
-                by_url[event_url] = collector.fetch_market_rows(event_url)
-                fetched_urls += 1
-            except Exception as exc:
-                logging.warning("Falha ao coletar closing odds em %s: %s", event_url, exc)
-                by_url[event_url] = []
-                failed_urls += 1
+        for idx, row in target_df.iterrows():
+            event_url = str(row["event_url"]).strip()
+            if event_url not in by_url:
+                try:
+                    by_url[event_url] = collector.fetch_market_rows(event_url)
+                    fetched_urls += 1
+                except Exception as exc:
+                    logging.warning("Falha ao coletar closing odds em %s: %s", event_url, exc)
+                    by_url[event_url] = []
+                    failed_urls += 1
 
-        market_rows = by_url[event_url]
-        if not market_rows:
-            continue
+            market_rows = by_url[event_url]
+            if not market_rows:
+                continue
 
-        current_match = None
-        for market_row in market_rows:
-            if market_row_matches(row, market_row):
-                current_match = market_row
-                break
+            current_match = None
+            for market_row in market_rows:
+                if market_row_matches(row, market_row):
+                    current_match = market_row
+                    break
 
-        if current_match is None:
-            continue
+            if current_match is None:
+                continue
 
-        df.at[idx, "auto_odd_fechamento"] = float(current_match["odd"])
-        df.at[idx, "final_odd_fechamento"] = resolve_final_closing_odd(df.loc[idx])
-        matched += 1
+            df.at[idx, "auto_odd_fechamento"] = float(current_match["odd"])
+            df.at[idx, "final_odd_fechamento"] = resolve_final_closing_odd(df.loc[idx])
+            matched += 1
 
-    save_ledger(df, ledger_path)
+        return df, (matched, fetched_urls, failed_urls)
+
+    ledger_path, result = update_ledger(ledger_path, mutate)
+    matched, fetched_urls, failed_urls = result
     return ledger_path, matched, fetched_urls, failed_urls
 
 

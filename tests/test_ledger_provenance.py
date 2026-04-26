@@ -9,6 +9,8 @@ import pandas as pd
 
 from vcbet.collectors.results_collector import build_targets, load_ledger as load_results_ledger
 from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger, save_ledger
+from vcbet.core.pipeline.output_writer import write_pipeline_outputs
+from vcbet.core.strategy_config import configure_runtime
 from vcbet.replay.replay_pipeline import _summarize_replay_ledger
 from vcbet.service.dashboard import build_dashboard_payload
 from vcbet.settlement.report_ledger import _read_ledger as read_report_ledger
@@ -171,6 +173,51 @@ class LedgerProvenanceTest(unittest.TestCase):
             save_ledger(loaded, ledger_file)
             reloaded = load_ledger(ledger_file)
             self.assertEqual(str(reloaded.loc[0, "sofascore_event_id"]), "14083330")
+
+    def test_pipeline_outputs_preserve_sofascore_event_id_to_canonical_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "2026-04-24" / "run_phase3"
+            run_dir.mkdir(parents=True)
+            ledger_file = root / "bets_ledger.csv"
+            picks_file = run_dir / "picks_snapshot.csv"
+            quality_report_file = run_dir / "quality_report.json"
+            config_snapshot_file = run_dir / "strategy_config_snapshot.json"
+            quality_report_file.write_text("{}", encoding="utf-8")
+            config_snapshot_file.write_text("{}", encoding="utf-8")
+
+            write_pipeline_outputs(
+                df_final=pd.DataFrame([official_pick(bet_id="event_id_export", sofascore_event_id="14083330.0")]),
+                modo_debug=False,
+                picks_file=picks_file,
+                ledger_file=str(ledger_file),
+                quality_report_file=quality_report_file,
+                run_dir=run_dir,
+                pending_rows=[],
+                status_counts={},
+                run_safety_status="ok",
+                safety_gate_blocked_total=0,
+                runtime_config=configure_runtime(),
+                config_snapshot_file=config_snapshot_file,
+                run_id="run_phase3",
+                odds_path=root / "odds_snapshot.csv",
+                xg_path=root / "xg_snapshot.csv",
+                odds_snapshot_hash="oddsmd5",
+                xg_snapshot_hash="xgmd5",
+                odds_snapshot_time="2026-04-24 09:30:00",
+                xg_asof="2026-04-24 08:45:00",
+                temporal_status="complete",
+                snapshot_validation={"status": "valid", "max_snapshot_age_hours": 36},
+                signal_version="signal_test",
+                pipeline_version="pipeline_test",
+            )
+
+            exported = pd.read_csv(picks_file, sep=";")
+            loaded = load_ledger(ledger_file)
+
+            self.assertIn("sofascore_event_id", exported.columns)
+            self.assertEqual(str(exported.loc[0, "sofascore_event_id"]), "14083330.0")
+            self.assertEqual(str(loaded.loc[0, "sofascore_event_id"]), "14083330")
 
     def test_settlement_prefers_structured_sofascore_event_id_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -345,6 +392,25 @@ class LedgerProvenanceTest(unittest.TestCase):
                 self.assertEqual(api_rows[0]["final_settlement_status"], "win")
             self.assertEqual(len(build_targets(results_loaded, only_ready=False, grace_minutes=0)), 1)
             self.assertIn("ledger_schema_status", report_loaded.columns)
+
+    def test_replay_summary_counts_postponed_separately_from_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "replay_ledger.csv"
+            pd.DataFrame(
+                [
+                    official_pick(
+                        bet_id="postponed_replay",
+                        final_bet_status="postponed",
+                        final_settlement_status="pending",
+                    )
+                ]
+            ).to_csv(ledger_file, index=False, sep=";", encoding="utf-8-sig")
+
+            summary = _summarize_replay_ledger(ledger_file)
+
+            self.assertEqual(summary["postponed"], 1)
+            self.assertEqual(summary["open"], 0)
+            self.assertEqual(summary["settled"], 0)
 
     def test_append_avoids_pandas_concat_future_warning_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

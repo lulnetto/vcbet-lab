@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import multiprocessing
+import importlib.util
 import queue
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -72,6 +74,74 @@ def append_unique_pick_worker(ledger_file: str, worker_index: int, barrier, resu
         result_queue.put(("ok", worker_index))
     except BaseException as exc:
         result_queue.put(("error", worker_index, repr(exc)))
+
+
+def append_single_pick_worker(ledger_file: str, result_queue, started=None) -> None:
+    try:
+        if started is not None:
+            started.set()
+        append_new_picks_to_ledger(
+            pd.DataFrame(
+                [
+                    official_pick(
+                        bet_id="concurrent_append",
+                        run_id="run_concurrent_append",
+                        match_datetime="2026-04-24 16:00",
+                        home_team="Append FC",
+                        away_team="Rival FC",
+                        match_name="Append FC - Rival FC",
+                        event_url="https://example.test/match/append",
+                        selection_raw="Mais de 3.5",
+                        line=3.5,
+                    )
+                ]
+            ),
+            Path(ledger_file),
+        )
+        result_queue.put(("ok", "append"))
+    except BaseException as exc:
+        result_queue.put(("error", "append", repr(exc)))
+
+
+def slow_settlement_worker(ledger_file: str, results_file: str, entered, release, result_queue) -> None:
+    try:
+        from vcbet.settlement import settlement_engine
+
+        def wait_during_mutation(df: pd.DataFrame, path: Path) -> pd.DataFrame:
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("settlement mutation was not released")
+            return df
+
+        with patch.object(settlement_engine, "apply_results_file", wait_during_mutation):
+            settlement_engine.settle_ledger(
+                ledger_file=Path(ledger_file),
+                results_file=Path(results_file),
+                overrides_file=None,
+            )
+        result_queue.put(("ok", "settlement"))
+    except BaseException as exc:
+        result_queue.put(("error", "settlement", repr(exc)))
+
+
+def slow_closing_watcher_worker(ledger_file: str, entered, release, result_queue) -> None:
+    try:
+        from vcbet.service import closing_watcher
+
+        def wait_during_fetch(self, event_url: str) -> list[dict[str, object]]:
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("closing update was not released")
+            return []
+
+        with patch.object(closing_watcher.BetanoClosingOddsCollector, "fetch_market_rows", wait_during_fetch):
+            closing_watcher.update_closing_odds_once(
+                ledger_file=Path(ledger_file),
+                all_pending=True,
+            )
+        result_queue.put(("ok", "closing"))
+    except BaseException as exc:
+        result_queue.put(("error", "closing", repr(exc)))
 
 
 class LedgerPortfolioGateTest(unittest.TestCase):
@@ -154,6 +224,120 @@ class LedgerPortfolioGateTest(unittest.TestCase):
                 sorted(ledger["bet_id"].astype(str).tolist()),
                 [f"concurrent_{index}" for index in range(worker_count)],
             )
+
+    def test_settlement_read_modify_write_does_not_drop_concurrent_append(self) -> None:
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("fork multiprocessing is required for this ledger lock test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            results_file = Path(tmp) / "results.csv"
+            append_new_picks_to_ledger(pd.DataFrame([official_pick(bet_id="existing")]), ledger_file)
+            pd.DataFrame(
+                [
+                    {
+                        "match_name": "Casa FC - Fora FC",
+                        "home_team": "Casa FC",
+                        "away_team": "Fora FC",
+                        "home_goals": 2,
+                        "away_goals": 1,
+                        "bet_status": "settled",
+                    }
+                ]
+            ).to_csv(results_file, index=False, sep=";", encoding="utf-8-sig")
+
+            ctx = multiprocessing.get_context("fork")
+            entered = ctx.Event()
+            release = ctx.Event()
+            append_started = ctx.Event()
+            result_queue = ctx.Queue()
+            settlement_process = ctx.Process(
+                target=slow_settlement_worker,
+                args=(str(ledger_file), str(results_file), entered, release, result_queue),
+            )
+            append_process = ctx.Process(target=append_single_pick_worker, args=(str(ledger_file), result_queue, append_started))
+
+            settlement_process.start()
+            self.assertTrue(entered.wait(timeout=5), "settlement worker did not enter locked mutation")
+            append_process.start()
+            self.assertTrue(append_started.wait(timeout=5), "append worker did not start")
+            time.sleep(0.25)
+            release.set()
+
+            for process in [settlement_process, append_process]:
+                process.join(timeout=20)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
+                    self.fail("ledger concurrency worker did not finish")
+
+            results = []
+            for _ in range(2):
+                try:
+                    results.append(result_queue.get(timeout=5))
+                except queue.Empty:
+                    self.fail("missing result from ledger concurrency worker")
+
+            self.assertEqual([result for result in results if result[0] != "ok"], [])
+            ledger = load_ledger(ledger_file)
+            self.assertEqual(sorted(ledger["bet_id"].astype(str).tolist()), ["concurrent_append", "existing"])
+
+    def test_closing_read_modify_write_does_not_drop_concurrent_append(self) -> None:
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("fork multiprocessing is required for this ledger lock test")
+        if importlib.util.find_spec("bs4") is None:
+            self.skipTest("bs4 dependency is required for closing watcher concurrency test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            append_new_picks_to_ledger(
+                pd.DataFrame(
+                    [
+                        official_pick(
+                            bet_id="existing",
+                            match_datetime="2026-04-24 15:00",
+                            event_url="https://example.test/match/closing",
+                        )
+                    ]
+                ),
+                ledger_file,
+            )
+
+            ctx = multiprocessing.get_context("fork")
+            entered = ctx.Event()
+            release = ctx.Event()
+            append_started = ctx.Event()
+            result_queue = ctx.Queue()
+            closing_process = ctx.Process(
+                target=slow_closing_watcher_worker,
+                args=(str(ledger_file), entered, release, result_queue),
+            )
+            append_process = ctx.Process(target=append_single_pick_worker, args=(str(ledger_file), result_queue, append_started))
+
+            closing_process.start()
+            self.assertTrue(entered.wait(timeout=5), "closing worker did not enter locked mutation")
+            append_process.start()
+            self.assertTrue(append_started.wait(timeout=5), "append worker did not start")
+            time.sleep(0.25)
+            release.set()
+
+            for process in [closing_process, append_process]:
+                process.join(timeout=20)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
+                    self.fail("ledger concurrency worker did not finish")
+
+            results = []
+            for _ in range(2):
+                try:
+                    results.append(result_queue.get(timeout=5))
+                except queue.Empty:
+                    self.fail("missing result from ledger concurrency worker")
+
+            self.assertEqual([result for result in results if result[0] != "ok"], [])
+            ledger = load_ledger(ledger_file)
+            self.assertEqual(sorted(ledger["bet_id"].astype(str).tolist()), ["concurrent_append", "existing"])
 
 
 if __name__ == "__main__":

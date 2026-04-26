@@ -11,6 +11,15 @@ from vcbet.replay.replay_pipeline import (
 
 
 class ReplayComparisonScorecardTest(unittest.TestCase):
+    def test_phase1_public_compatibility_imports(self) -> None:
+        import vcbet.core.ledger_manager as ledger_manager
+        import vcbet.core.team_registry as team_registry
+        import vcbet.replay.replay_pipeline as replay_pipeline
+
+        self.assertTrue(hasattr(ledger_manager, "append_new_picks_to_ledger"))
+        self.assertTrue(hasattr(team_registry, "normalize_team_name"))
+        self.assertTrue(hasattr(replay_pipeline, "replay_configs_for_run"))
+
     def test_config_scorecard_exposes_replay_evidence_coherently(self) -> None:
         item = {
             "config_name": MANUAL_DEFAULT_BASELINE_CONFIG,

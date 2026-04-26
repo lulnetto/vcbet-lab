@@ -10,7 +10,7 @@ from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
 EXPORT_COLS = [
     "bet_id", "run_id", "generated_at", "league", "match_datetime", "home_team", "away_team",
     "match_name", "market_type", "market_scope", "market_raw", "event_url", "selection_raw",
-    "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
+    "sofascore_event_id", "source_event_id", "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
     "prob_model", "ev_percent", "pricing_signal_type", "confidence_score",
     "confidence_score_type", "confidence_score_scale", "stake_units", "entry_reason",
     "risk_flags", "pick_safety_status", "candidate_stage", "safety_gate_reason",
@@ -152,9 +152,13 @@ def write_pipeline_outputs(
         pipeline_version=pipeline_version,
     )
     if not df_final.empty:
+        export_df = df_final.copy()
+        for column in EXPORT_COLS:
+            if column not in export_df.columns:
+                export_df[column] = pd.NA
         if not modo_debug:
-            df_final[EXPORT_COLS].to_csv(picks_file, index=False, sep=";", encoding="utf-8-sig")
-            ledger_path, ledger_added_rows, ledger_total_rows = append_new_picks_to_ledger(df_final[EXPORT_COLS], ledger_file)
+            export_df[EXPORT_COLS].to_csv(picks_file, index=False, sep=";", encoding="utf-8-sig")
+            ledger_path, ledger_added_rows, ledger_total_rows = append_new_picks_to_ledger(export_df[EXPORT_COLS], ledger_file)
             print(f"\n[+] Picks exportadas com sucesso: {picks_file}")
             print(f"[+] Ledger atualizado: {ledger_path} | novas={ledger_added_rows} | total={ledger_total_rows}")
             print(f"[+] Quality report salvo: {quality_report_file}")

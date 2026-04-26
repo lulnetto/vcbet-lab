@@ -4,6 +4,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import pandas as pd
 
@@ -15,6 +16,8 @@ try:
     import fcntl
 except ImportError:  # pragma: no cover - VCBet runtime is WSL/Linux.
     fcntl = None
+
+T = TypeVar("T")
 
 
 def _ledger_lock_path(ledger_file: str | Path) -> Path:
@@ -118,3 +121,15 @@ def save_ledger(df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE)
     with ledger_file_lock(ledger_file):
         return save_ledger_unlocked(df, ledger_file)
 
+
+def update_ledger(
+    ledger_file: str | Path,
+    mutator: Callable[[pd.DataFrame], tuple[pd.DataFrame, T]],
+) -> tuple[Path, T]:
+    """Run a read-mutate-write ledger update under one exclusive file lock."""
+    with ledger_file_lock(ledger_file):
+        path = ensure_ledger_unlocked(ledger_file)
+        current = load_ledger_unlocked(path)
+        updated, result = mutator(current)
+        save_ledger_unlocked(updated, path)
+        return path, result

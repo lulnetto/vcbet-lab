@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,8 +10,8 @@ import pandas as pd
 
 from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger
 from vcbet.core.pipeline_ev import processar_pipeline
-from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, snapshot_time_from_dataframe
-from vcbet.replay.replay_pipeline import _resolve_source_run
+from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, SnapshotValidator, snapshot_time_from_dataframe
+from vcbet.replay.replay_pipeline import _resolve_source_run, _run_single_replay
 from vcbet.service.dashboard import build_dashboard_payload
 
 
@@ -268,6 +269,129 @@ class TemporalContractTest(unittest.TestCase):
             self.assertIn("odds_snapshot_time_missing", error_codes)
             self.assertEqual(report["outputs"]["final_picks_total"], 0)
             self.assertFalse((run_dir / "raw_candidates.csv").exists())
+
+    def test_snapshot_validator_handles_z_and_timezone_offsets(self) -> None:
+        result = SnapshotValidator(max_snapshot_age_hours=36).validate(
+            decision_timestamp="2026-04-24T12:00:00Z",
+            odds_snapshot_time="2026-04-24T10:00:00Z",
+            xg_asof="2026-04-24T09:00:00-03:00",
+        ).to_dict()
+
+        self.assertEqual(result["status"], "valid")
+        self.assertEqual(result["reference_time"], "2026-04-24 12:00:00")
+        self.assertEqual(result["snapshots"]["odds"]["status"], "valid")
+        self.assertEqual(result["snapshots"]["xg"]["status"], "valid")
+        self.assertEqual(result["errors"], [])
+
+    def test_snapshot_validator_rejects_future_snapshot_explicitly(self) -> None:
+        result = SnapshotValidator(max_snapshot_age_hours=36, clock_skew_tolerance_minutes=1).validate(
+            decision_timestamp="2026-04-24 12:00:00",
+            odds_snapshot_time="2026-04-24 12:10:00",
+            xg_asof="2026-04-24 11:00:00",
+        ).to_dict()
+
+        error_codes = {item["code"] for item in result["errors"]}
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["snapshots"]["odds"]["status"], "future")
+        self.assertIn("odds_snapshot_from_future", error_codes)
+
+    def test_snapshot_validator_invalid_timestamp_is_quality_report_safe(self) -> None:
+        result = SnapshotValidator(max_snapshot_age_hours=36).validate(
+            decision_timestamp="2026-04-24 12:00:00",
+            odds_snapshot_time="not-a-timestamp",
+            xg_asof="2026-04-24 11:00:00",
+        ).to_dict()
+
+        error_codes = {item["code"] for item in result["errors"]}
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["snapshots"]["odds"]["status"], "invalid_timestamp")
+        self.assertIn("odds_snapshot_time_invalid", error_codes)
+
+    def test_replay_validates_historical_snapshots_against_source_decision_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            odds_file, xg_file = write_pipeline_snapshots(
+                root / "data" / "runs",
+                odds_collected_at="2020-01-01 10:00:00",
+                xg_collected_at="2020-01-01 09:30:00",
+            )
+            source_dir = odds_file.parent
+            (source_dir / "picks_snapshot.csv").write_text(
+                "match_name;market_type;selection_raw;line\n",
+                encoding="utf-8",
+            )
+            (source_dir / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "source_run",
+                        "target_date": "2026-04-24",
+                        "decision_timestamp": "2020-01-01 12:00:00",
+                        "temporal_contract_status": "complete",
+                        "odds_snapshot_file": str(odds_file),
+                        "xg_snapshot_file": str(xg_file),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            alias_file = root / "aliases.json"
+            alias_file.write_text("{}", encoding="utf-8")
+            config_file = write_strategy_config(root / "strategy.json", max_snapshot_age_hours=36)
+            source_info = _resolve_source_run(source_dir)
+
+            replay = _run_single_replay(
+                source_info=source_info,
+                config_ref=str(config_file),
+                output_root=root / "replays",
+                alias_file=str(alias_file),
+                python_bin=sys.executable,
+            )
+
+            self.assertEqual(replay["return_code"], 0, replay.get("stderr_tail"))
+            report = json.loads(Path(replay["quality_report_file"]).read_text(encoding="utf-8"))
+            validation = report["data_quality"]["snapshot_validation"]
+            self.assertEqual(validation["status"], "valid")
+            self.assertEqual(validation["reference_time"], "2020-01-01 12:00:00")
+
+    def test_replay_without_decision_provenance_fails_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            odds_file, xg_file = write_pipeline_snapshots(
+                root / "data" / "runs",
+                odds_collected_at="2020-01-01 10:00:00",
+                xg_collected_at="2020-01-01 09:30:00",
+            )
+            source_dir = odds_file.parent
+            (source_dir / "picks_snapshot.csv").write_text(
+                "match_name;market_type;selection_raw;line\n",
+                encoding="utf-8",
+            )
+            (source_dir / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "source_run",
+                        "target_date": "2026-04-24",
+                        "temporal_contract_status": "complete",
+                        "odds_snapshot_file": str(odds_file),
+                        "xg_snapshot_file": str(xg_file),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            alias_file = root / "aliases.json"
+            alias_file.write_text("{}", encoding="utf-8")
+            config_file = write_strategy_config(root / "strategy.json", max_snapshot_age_hours=36)
+
+            replay = _run_single_replay(
+                source_info=_resolve_source_run(source_dir),
+                config_ref=str(config_file),
+                output_root=root / "replays",
+                alias_file=str(alias_file),
+                python_bin=sys.executable,
+            )
+
+            self.assertEqual(replay["return_code"], 2)
+            self.assertEqual(replay["error"]["code"], "replay_freshness_reference_missing")
+            self.assertIn("replay_freshness_reference_missing", replay["stderr_tail"][0])
 
     def test_replay_prefers_frozen_local_snapshots_over_manifest_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

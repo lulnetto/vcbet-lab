@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, normalize_sofascore_event_id, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, normalize_sofascore_event_id, update_ledger
 from vcbet.core.run_utils import now_str
 from vcbet.paths import DEFAULT_OVERRIDES_FILE
 RESULTS_REQUIRED_COLUMNS = {"match_name", "home_goals", "away_goals"}
@@ -460,17 +460,19 @@ def settle_ledger(
     results_file: str | Path | None = None,
     overrides_file: str | Path | None = DEFAULT_OVERRIDES_FILE,
 ) -> tuple[Path, int]:
-    ledger_df = _prepare_ledger_dtypes(load_ledger(ledger_file))
-    if results_file:
-        ledger_df = apply_results_file(ledger_df, results_file)
-    if overrides_file:
-        override_path = Path(overrides_file)
-        if override_path.exists() and override_path.stat().st_size > 0:
-            ledger_df = apply_overrides_file(ledger_df, override_path)
-    ledger_df = resolve_final_fields(ledger_df)
-    path = save_ledger(ledger_df, ledger_file)
-    settled_count = int((ledger_df["final_bet_status"].astype(str) == "settled").sum())
-    return path, settled_count
+    def mutate(ledger_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+        updated = _prepare_ledger_dtypes(ledger_df)
+        if results_file:
+            updated = apply_results_file(updated, results_file)
+        if overrides_file:
+            override_path = Path(overrides_file)
+            if override_path.exists() and override_path.stat().st_size > 0:
+                updated = apply_overrides_file(updated, override_path)
+        updated = resolve_final_fields(updated)
+        settled_count = int((updated["final_bet_status"].astype(str) == "settled").sum())
+        return updated, settled_count
+
+    return update_ledger(ledger_file, mutate)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ def processar_pipeline(
     modo_debug: bool = False,
     config_file: str | None = None,
     config_name: str | None = None,
+    snapshot_reference_timestamp: str | None = None,
 ):
     runtime_config = configure_runtime(config_name=config_name, config_file=config_file)
     loaded = load_pipeline_inputs(
@@ -58,6 +59,7 @@ def processar_pipeline(
     df_betano = loaded["df_betano"]
     df_xg = loaded["df_xg"]
     generated_at = now_str()
+    snapshot_validation_reference = snapshot_reference_timestamp or generated_at
     temporal_status = temporal_contract_status(
         decision_timestamp=generated_at,
         odds_snapshot_time=loaded["odds_snapshot_time"],
@@ -66,7 +68,7 @@ def processar_pipeline(
     snapshot_validation_result = SnapshotValidator(
         max_snapshot_age_hours=runtime_config.max_snapshot_age_hours,
     ).validate(
-        decision_timestamp=generated_at,
+        decision_timestamp=snapshot_validation_reference,
         odds_snapshot_time=loaded["odds_snapshot_time"],
         xg_asof=loaded["xg_asof"],
     )
@@ -266,6 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="Executa normalmente, mas não salva arquivos no final")
     parser.add_argument("--config-file", help="Arquivo JSON de configuração de estratégia")
     parser.add_argument("--config-name", help="Nome do preset em ./configs sem .json")
+    parser.add_argument("--snapshot-reference-timestamp", help="Timestamp de referência para validação temporal de snapshots, usado por replay histórico")
     args = parser.parse_args()
 
     processar_pipeline(
@@ -278,4 +281,5 @@ if __name__ == "__main__":
         modo_debug=args.debug,
         config_file=args.config_file,
         config_name=args.config_name,
+        snapshot_reference_timestamp=args.snapshot_reference_timestamp,
     )

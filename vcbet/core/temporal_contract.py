@@ -34,7 +34,7 @@ class SnapshotValidationResult:
 
 
 class SnapshotValidator:
-    def __init__(self, *, max_snapshot_age_hours: float):
+    def __init__(self, *, max_snapshot_age_hours: float, clock_skew_tolerance_minutes: float = 5.0):
         if max_snapshot_age_hours is None:
             raise ValueError("max_snapshot_age_hours is mandatory")
         try:
@@ -44,6 +44,7 @@ class SnapshotValidator:
         if normalized <= 0:
             raise ValueError("max_snapshot_age_hours must be positive")
         self.max_snapshot_age_hours = normalized
+        self.clock_skew_tolerance_hours = max(float(clock_skew_tolerance_minutes), 0.0) / 60.0
 
     def validate(
         self,
@@ -52,7 +53,7 @@ class SnapshotValidator:
         odds_snapshot_time: str | None,
         xg_asof: str | None,
     ) -> SnapshotValidationResult:
-        reference = pd.to_datetime(decision_timestamp, errors="coerce")
+        reference = _parse_timestamp_utc(decision_timestamp)
         errors: list[dict[str, Any]] = []
         if pd.isna(reference):
             errors.append(
@@ -63,7 +64,7 @@ class SnapshotValidator:
                     "snapshot_time": decision_timestamp,
                 }
             )
-            reference = pd.Timestamp.now()
+            reference = pd.Timestamp.now(tz="UTC")
 
         snapshots = {
             "odds": self._validate_one("odds", odds_snapshot_time, reference, errors),
@@ -72,7 +73,7 @@ class SnapshotValidator:
         return SnapshotValidationResult(
             status="valid" if not errors else "invalid",
             max_snapshot_age_hours=self.max_snapshot_age_hours,
-            reference_time=reference.strftime("%Y-%m-%d %H:%M:%S"),
+            reference_time=_format_timestamp_utc(reference),
             snapshots=snapshots,
             errors=errors,
         )
@@ -95,7 +96,7 @@ class SnapshotValidator:
             )
             return {"snapshot_time": None, "age_hours": None, "status": "missing"}
 
-        parsed = pd.to_datetime(value, errors="coerce")
+        parsed = _parse_timestamp_utc(value)
         if pd.isna(parsed):
             errors.append(
                 {
@@ -108,13 +109,25 @@ class SnapshotValidator:
             return {"snapshot_time": value, "age_hours": None, "status": "invalid_timestamp"}
 
         age_hours = round((reference - parsed).total_seconds() / 3600.0, 4)
-        if age_hours > self.max_snapshot_age_hours:
+        if age_hours < -self.clock_skew_tolerance_hours:
+            errors.append(
+                {
+                    "code": f"{snapshot}_snapshot_from_future",
+                    "snapshot": snapshot,
+                    "message": f"{snapshot} snapshot metadata is in the future",
+                    "snapshot_time": _format_timestamp_utc(parsed),
+                    "age_hours": age_hours,
+                    "clock_skew_tolerance_hours": self.clock_skew_tolerance_hours,
+                }
+            )
+            status = "future"
+        elif age_hours > self.max_snapshot_age_hours:
             errors.append(
                 {
                     "code": f"{snapshot}_snapshot_stale",
                     "snapshot": snapshot,
                     "message": f"{snapshot} snapshot is older than max_snapshot_age_hours",
-                    "snapshot_time": parsed.strftime("%Y-%m-%d %H:%M:%S"),
+                    "snapshot_time": _format_timestamp_utc(parsed),
                     "age_hours": age_hours,
                     "max_snapshot_age_hours": self.max_snapshot_age_hours,
                 }
@@ -123,7 +136,7 @@ class SnapshotValidator:
         else:
             status = "valid"
         return {
-            "snapshot_time": parsed.strftime("%Y-%m-%d %H:%M:%S"),
+            "snapshot_time": _format_timestamp_utc(parsed),
             "age_hours": age_hours,
             "status": status,
         }
@@ -139,6 +152,16 @@ def file_md5(path: str | Path) -> str:
 
 def _is_missing(value: Any) -> bool:
     return pd.isna(value) or str(value).strip() == ""
+
+
+def _parse_timestamp_utc(value: Any) -> pd.Timestamp:
+    if _is_missing(value):
+        return pd.NaT
+    return pd.to_datetime(value, errors="coerce", utc=True)
+
+
+def _format_timestamp_utc(value: pd.Timestamp) -> str:
+    return value.tz_convert("UTC").strftime("%Y-%m-%d %H:%M:%S")
 
 
 def latest_timestamp_from_column(df: pd.DataFrame, column: str) -> str | None:

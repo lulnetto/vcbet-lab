@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from vcbet.collectors.closing_odds_collector import BetanoClosingOddsCollector, market_row_matches, parse_match_datetime
-from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, save_ledger
+from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE, load_ledger, update_ledger
 
 
 CLOSING_FIELDS = [
@@ -83,59 +83,87 @@ def update_closing_odds_once(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     ledger_path = Path(ledger_file)
-    df = load_ledger(ledger_path)
     minutes_before = minutes_before if minutes_before is not None else minutes_before_from_env()
-    targets = eligible_rows(
-        df,
-        minutes_before=minutes_before,
-        allow_past_minutes=allow_past_minutes,
-        all_pending=all_pending,
-        bet_ids=bet_ids,
-    )
-    if targets.empty:
-        if not dry_run:
-            save_ledger(df, ledger_path)
-        return {"ledger_file": str(ledger_path), "eligible": 0, "updated": 0, "fetched_urls": 0, "failed_urls": 0, "dry_run": dry_run}
 
-    collector = BetanoClosingOddsCollector()
-    market_cache: dict[str, list[dict[str, Any]]] = {}
-    updated = 0
-    failed_urls = 0
+    def update_payload(df: pd.DataFrame, *, write_changes: bool) -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = df.copy()
+        for column in CLOSING_FIELDS:
+            if column not in df.columns:
+                df[column] = pd.NA
+        df["closing_odd"] = pd.to_numeric(df["closing_odd"], errors="coerce")
+        for column in [
+            "closing_bookmaker",
+            "closing_snapshot_time",
+            "closing_source",
+            "closing_update_status",
+            "closing_update_error",
+        ]:
+            df[column] = df[column].astype("object")
 
-    for idx, row in targets.iterrows():
-        event_url = str(row.get("event_url")).strip()
-        if event_url not in market_cache:
-            try:
-                market_cache[event_url] = collector.fetch_market_rows(event_url)
-            except Exception as exc:
-                market_cache[event_url] = []
-                failed_urls += 1
-                df.at[idx, "closing_update_status"] = "fetch_failed"
-                df.at[idx, "closing_update_error"] = str(exc)[:300]
+        targets = eligible_rows(
+            df,
+            minutes_before=minutes_before,
+            allow_past_minutes=allow_past_minutes,
+            all_pending=all_pending,
+            bet_ids=bet_ids,
+        )
+        if targets.empty:
+            return df, {
+                "ledger_file": str(ledger_path),
+                "eligible": 0,
+                "updated": 0,
+                "fetched_urls": 0,
+                "failed_urls": 0,
+                "dry_run": dry_run,
+            }
+
+        collector = BetanoClosingOddsCollector()
+        market_cache: dict[str, list[dict[str, Any]]] = {}
+        updated = 0
+        failed_urls = 0
+
+        for idx, row in targets.iterrows():
+            event_url = str(row.get("event_url")).strip()
+            if event_url not in market_cache:
+                try:
+                    market_cache[event_url] = collector.fetch_market_rows(event_url)
+                except Exception as exc:
+                    market_cache[event_url] = []
+                    failed_urls += 1
+                    if write_changes:
+                        df.at[idx, "closing_update_status"] = "fetch_failed"
+                        df.at[idx, "closing_update_error"] = str(exc)[:300]
+                    continue
+
+            match = next((market_row for market_row in market_cache[event_url] if market_row_matches(row, market_row)), None)
+            if not match:
+                if write_changes:
+                    df.at[idx, "closing_update_status"] = "market_not_found"
+                    df.at[idx, "closing_update_error"] = "matching market/selection not found for event_url"
                 continue
 
-        match = next((market_row for market_row in market_cache[event_url] if market_row_matches(row, market_row)), None)
-        if not match:
-            df.at[idx, "closing_update_status"] = "market_not_found"
-            df.at[idx, "closing_update_error"] = "matching market/selection not found for event_url"
-            continue
+            if write_changes:
+                df.at[idx, "closing_odd"] = float(match["odd"])
+                df.at[idx, "closing_bookmaker"] = "betano"
+                df.at[idx, "closing_snapshot_time"] = datetime.now().isoformat(timespec="seconds")
+                df.at[idx, "closing_source"] = event_url
+                df.at[idx, "closing_update_status"] = "updated"
+                df.at[idx, "closing_update_error"] = ""
+            updated += 1
 
-        df.at[idx, "closing_odd"] = float(match["odd"])
-        df.at[idx, "closing_bookmaker"] = "betano"
-        df.at[idx, "closing_snapshot_time"] = datetime.now().isoformat(timespec="seconds")
-        df.at[idx, "closing_source"] = event_url
-        df.at[idx, "closing_update_status"] = "updated"
-        df.at[idx, "closing_update_error"] = ""
-        updated += 1
+        return df, {
+            "ledger_file": str(ledger_path),
+            "eligible": int(len(targets)),
+            "updated": updated,
+            "fetched_urls": len(market_cache),
+            "failed_urls": failed_urls,
+            "dry_run": dry_run,
+        }
 
-    if not dry_run:
-        save_ledger(df, ledger_path)
+    if dry_run:
+        _, payload = update_payload(load_ledger(ledger_path), write_changes=False)
+        return payload
 
-    return {
-        "ledger_file": str(ledger_path),
-        "eligible": int(len(targets)),
-        "updated": updated,
-        "fetched_urls": len(market_cache),
-        "failed_urls": failed_urls,
-        "dry_run": dry_run,
-    }
+    path, payload = update_ledger(ledger_path, lambda df: update_payload(df, write_changes=True))
+    payload["ledger_file"] = str(path)
+    return payload

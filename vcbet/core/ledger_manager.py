@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from vcbet.ledger.append_use_case import append_new_picks_to_ledger
 from vcbet.ledger.identity import bet_identity_key, deduplicate_ledger_rows
-from vcbet.ledger.repository import ensure_ledger, load_ledger, save_ledger
+from vcbet.ledger.repository import ensure_ledger, load_ledger, save_ledger, update_ledger
 from vcbet.ledger.schema import (
     LEDGER_COLUMNS,
     LEDGER_REQUIRED_OPERATIONAL_COLUMNS,
@@ -29,4 +29,5 @@ __all__ = [
     "normalize_ledger_schema",
     "normalize_sofascore_event_id",
     "save_ledger",
+    "update_ledger",
 ]
