@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pandas as pd
-
 
 MARKET_PRIORITY = {
     "total_goals": 1,
@@ -12,6 +10,17 @@ MARKET_PRIORITY = {
     "btts": 4,
     "team_total": 5,
 }
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if value != value:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in {"", "nan", "none", "<na>"}
 
 
 def _append_flag(flags: str, new_flag: str) -> str:
@@ -71,7 +80,7 @@ def _candidate_to_rejection(
 def _line_float(candidate: dict[str, Any]) -> float | None:
     try:
         value = candidate.get("line")
-        if pd.isna(value):
+        if _is_missing_value(value):
             return None
         return float(value)
     except (TypeError, ValueError):

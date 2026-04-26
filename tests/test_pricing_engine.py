@@ -7,6 +7,7 @@ from vcbet.core.pricing_engine import (
     expected_value_decimal,
     fair_odd_from_probs,
     price_market_selection,
+    price_market_selection_result,
 )
 
 
@@ -93,6 +94,65 @@ class PricingEngineTest(unittest.TestCase):
             expected_value_decimal(minus_probs, 2.0),
         )
 
+    def test_asian_total_zero_seventy_five_prices_half_results(self) -> None:
+        over = price_market_selection(
+            market_type="asian_total",
+            side="over",
+            line=0.75,
+            target_team_role="geral",
+            lambda_home=0.65,
+            lambda_away=0.55,
+        )
+        under = price_market_selection(
+            market_type="asian_total",
+            side="under",
+            line=0.75,
+            target_team_role="geral",
+            lambda_home=0.65,
+            lambda_away=0.55,
+        )
+
+        self.assertIsNotNone(over)
+        self.assertIsNotNone(under)
+        assert over is not None
+        assert under is not None
+        self.assertGreater(over["probs"]["half_win"], 0.0)
+        self.assertEqual(over["probs"]["half_loss"], 0.0)
+        self.assertGreater(under["probs"]["half_loss"], 0.0)
+        self.assertEqual(under["probs"]["half_win"], 0.0)
+        self.assertAlmostEqual(sum(over["probs"].values()), 1.0)
+        self.assertAlmostEqual(sum(under["probs"].values()), 1.0)
+
+    def test_asian_total_one_twenty_five_prices_half_results(self) -> None:
+        over = price_market_selection(
+            market_type="asian_total",
+            side="over",
+            line=1.25,
+            target_team_role="geral",
+            lambda_home=0.75,
+            lambda_away=0.65,
+        )
+        under = price_market_selection(
+            market_type="asian_total",
+            side="under",
+            line=1.25,
+            target_team_role="geral",
+            lambda_home=0.75,
+            lambda_away=0.65,
+        )
+
+        self.assertIsNotNone(over)
+        self.assertIsNotNone(under)
+        assert over is not None
+        assert under is not None
+        self.assertGreater(over["probs"]["half_loss"], 0.0)
+        self.assertEqual(over["probs"]["half_win"], 0.0)
+        self.assertGreater(under["probs"]["half_win"], 0.0)
+        self.assertEqual(under["probs"]["half_loss"], 0.0)
+        fair_odd = fair_odd_from_probs(over["probs"])
+        assert fair_odd is not None
+        self.assertAlmostZero(expected_value_decimal(over["probs"], fair_odd))
+
     def test_binary_market_fair_odd_stays_inverse_probability(self) -> None:
         result = price_market_selection(
             market_type="btts",
@@ -108,6 +168,42 @@ class PricingEngineTest(unittest.TestCase):
         probs = result["probs"]
         self.assertEqual(probs["push"], 0.0)
         self.assertAlmostEqual(fair_odd_from_probs(probs), 1 / probs["win"])
+
+    def test_scalar_pricing_result_matches_existing_dict_api(self) -> None:
+        legacy = price_market_selection(
+            market_type="asian_total",
+            side="over",
+            line=2.75,
+            target_team_role="geral",
+            lambda_home=1.4,
+            lambda_away=1.2,
+        )
+        result = price_market_selection_result(
+            market_type="asian_total",
+            side="over",
+            line=2.75,
+            target_team_role="geral",
+            lambda_home=1.4,
+            lambda_away=1.2,
+            odd_decimal=2.05,
+        )
+
+        self.assertIsNotNone(legacy)
+        self.assertIsNotNone(result)
+        assert legacy is not None
+        assert result is not None
+        self.assertAlmostEqual(result.prob_model, effective_model_probability(legacy["probs"]))
+        self.assertAlmostEqual(result.fair_odds, fair_odd_from_probs(legacy["probs"]))
+        self.assertAlmostEqual(result.ev_percent, expected_value_decimal(legacy["probs"], 2.05) * 100)
+        self.assertEqual(result.lambda_home, 1.4)
+        self.assertEqual(result.lambda_away, 1.2)
+        self.assertEqual(result.lambda_val, legacy["mu_target"])
+
+    def test_pricing_engine_does_not_import_pandas(self) -> None:
+        import vcbet.core.pricing_engine as pricing_engine
+
+        self.assertNotIn("pandas", pricing_engine.__dict__)
+        self.assertNotIn("pd", pricing_engine.__dict__)
 
 
 if __name__ == "__main__":

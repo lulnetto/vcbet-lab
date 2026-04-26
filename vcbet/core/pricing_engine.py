@@ -5,6 +5,8 @@ from typing import Any
 
 from scipy.stats import poisson
 
+from vcbet.domain.contracts import PricingResult
+
 
 def calculate_lambdas(xg_home: float, xga_home: float, xg_away: float, xga_away: float) -> dict[str, float]:
     lambda_home = max((float(xg_home) + float(xga_away)) / 2, 0.01)
@@ -50,6 +52,33 @@ def fair_odd_from_probs(probs: dict[str, float]) -> float | None:
     if fair_profit_loss_ratio is None:
         return None
     return 1.0 + fair_profit_loss_ratio
+
+
+def pricing_result_from_probs(
+    *,
+    probs: dict[str, float],
+    odd_decimal: float,
+    lambda_home: float | None = None,
+    lambda_away: float | None = None,
+    lambda_val: float | None = None,
+    method: str | None = None,
+    model: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> PricingResult | None:
+    fair_odd = fair_odd_from_probs(probs)
+    if fair_odd is None:
+        return None
+    return PricingResult(
+        prob_model=effective_model_probability(probs),
+        fair_odds=fair_odd,
+        ev_percent=expected_value_decimal(probs, float(odd_decimal)) * 100,
+        lambda_home=lambda_home,
+        lambda_away=lambda_away,
+        lambda_val=lambda_val,
+        method=method,
+        model=model,
+        metadata=metadata or {},
+    )
 
 
 def _univariate_probs(mu: float, side: str, line: float) -> dict[str, float] | None:
@@ -230,3 +259,35 @@ def price_market_selection(
         return {"probs": probs, "mu_target": None, "mu_total": mu_total}
 
     return None
+
+
+def price_market_selection_result(
+    *,
+    market_type: str,
+    side: str,
+    line: float | None,
+    target_team_role: str,
+    lambda_home: float,
+    lambda_away: float,
+    odd_decimal: float,
+) -> PricingResult | None:
+    priced = price_market_selection(
+        market_type=market_type,
+        side=side,
+        line=line,
+        target_team_role=target_team_role,
+        lambda_home=lambda_home,
+        lambda_away=lambda_away,
+    )
+    if not priced:
+        return None
+    return pricing_result_from_probs(
+        probs=priced["probs"],
+        odd_decimal=odd_decimal,
+        lambda_home=lambda_home,
+        lambda_away=lambda_away,
+        lambda_val=priced["mu_target"],
+        method=market_type,
+        model="poisson",
+        metadata={"mu_total": priced["mu_total"], "probs": priced["probs"]},
+    )

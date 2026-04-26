@@ -8,6 +8,7 @@ from typing import Callable, TypeVar
 
 import pandas as pd
 
+from vcbet.domain.contracts import BetRecord, LedgerAppendResult
 from vcbet.ledger.schema import LEDGER_COLUMNS, normalize_ledger_schema
 from vcbet.paths import DEFAULT_LEDGER_FILE
 
@@ -133,3 +134,19 @@ def update_ledger(
         updated, result = mutator(current)
         save_ledger_unlocked(updated, path)
         return path, result
+
+
+class LedgerRepository:
+    def __init__(self, ledger_file: str | Path = DEFAULT_LEDGER_FILE):
+        self.ledger_file = Path(ledger_file)
+
+    def read(self) -> list[BetRecord]:
+        ledger = load_ledger(self.ledger_file)
+        return [BetRecord.from_mapping(row.to_dict()) for _, row in ledger.iterrows()]
+
+    def append(self, picks: list[dict] | tuple[dict, ...] | list[BetRecord] | tuple[BetRecord, ...]) -> LedgerAppendResult:
+        from vcbet.ledger.append_use_case import append_new_picks_to_ledger_result
+
+        rows = [pick.to_mapping() if isinstance(pick, BetRecord) else dict(pick) for pick in picks]
+        _path, result = append_new_picks_to_ledger_result(pd.DataFrame(rows), self.ledger_file)
+        return result

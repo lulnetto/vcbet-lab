@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from vcbet.core.ledger_portfolio_gate import check_against_open_ledger, is_official_ledger_path
+from vcbet.domain.contracts import LedgerAppendResult
 from vcbet.ledger.identity import bet_identity_key, deduplicate_ledger_rows
 from vcbet.ledger.repository import (
     ensure_ledger_unlocked,
@@ -150,13 +151,19 @@ def _persist_blocked_candidates(blocked_rows: list[dict], ledger_file: Path) -> 
     write_ledger_csv_unlocked(combined, path)
 
 
-def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> tuple[Path, int, int]:
+def append_new_picks_to_ledger_result(picks_df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> tuple[Path, LedgerAppendResult]:
     with ledger_file_lock(ledger_file):
         path = ensure_ledger_unlocked(ledger_file)
         ledger_df = load_ledger_unlocked(path)
+        attempted = int(len(picks_df))
         if picks_df.empty:
             save_ledger_unlocked(ledger_df, path)
-            return path, 0, len(ledger_df)
+            return path, LedgerAppendResult(
+                appended=0,
+                blocked=0,
+                duplicate=0,
+                provenance={"ledger_file": str(path), "total_rows": int(len(ledger_df)), "attempted": attempted},
+            )
 
         ledger_df, _ = deduplicate_ledger_rows(ledger_df)
         existing_ids = set(ledger_df["bet_id"].dropna().astype(str).tolist())
@@ -164,11 +171,17 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
         existing_key_to_bet_id = {bet_identity_key(row): str(row.get("bet_id") or "") for _, row in ledger_df.iterrows()}
         new_rows = []
         blocked_rows = []
+        duplicate_count = 0
+        blocked_count = 0
+        reasons: set[str] = set()
         apply_ledger_gate = is_official_ledger_path(path)
         for _, row in picks_df.iterrows():
             bet_id = str(row["bet_id"])
             identity_key = bet_identity_key(row)
             if bet_id in existing_ids or identity_key in existing_keys:
+                duplicate_count += 1
+                blocked_count += 1
+                reasons.add("LEDGER_DUPLICATE_OPEN_PICK")
                 if apply_ledger_gate:
                     blocked = row.to_dict()
                     blocked.update(
@@ -187,6 +200,8 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
             if apply_ledger_gate:
                 gate = check_against_open_ledger(row.to_dict(), ledger_df)
                 if gate["status"] == "blocked":
+                    blocked_count += 1
+                    reasons.add(str(gate["reason"]))
                     blocked = row.to_dict()
                     blocked.update(
                         {
@@ -224,5 +239,20 @@ def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path =
         save_ledger_unlocked(ledger_df, path)
         if apply_ledger_gate:
             _persist_blocked_candidates(blocked_rows, path)
-        return path, len(new_rows), len(ledger_df)
+        return path, LedgerAppendResult(
+            appended=len(new_rows),
+            blocked=blocked_count,
+            duplicate=duplicate_count,
+            provenance={
+                "ledger_file": str(path),
+                "total_rows": int(len(ledger_df)),
+                "attempted": attempted,
+                "official_gate": apply_ledger_gate,
+            },
+            reasons=tuple(sorted(reasons)),
+        )
 
+
+def append_new_picks_to_ledger(picks_df: pd.DataFrame, ledger_file: str | Path = DEFAULT_LEDGER_FILE) -> tuple[Path, int, int]:
+    path, result = append_new_picks_to_ledger_result(picks_df, ledger_file)
+    return path, result.appended, int(result.provenance["total_rows"])

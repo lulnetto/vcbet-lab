@@ -6,6 +6,7 @@ import pandas as pd
 
 from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
 from vcbet.core.line_selector import select_top_picks
+from vcbet.core.selection.line_selection import select_top_picks as select_top_candidate_dicts
 from vcbet.core.pricing_engine import expected_value_decimal, price_market_selection
 from vcbet.core.risk_policy import assess_risk_flags, safety_gate_flags
 from vcbet.core.strategy_config import configure_runtime
@@ -140,6 +141,36 @@ class DecisionArchitectureTest(unittest.TestCase):
         self.assertEqual(rejected.iloc[0]["selection_policy_status"], "rejected_by_line_selector")
         self.assertEqual(rejected.iloc[0]["portfolio_reject_reason"], "HIGH_CORRELATION_WITH_SELECTED")
         self.assertEqual(rejected.iloc[0].get("pick_safety_status", ""), "")
+
+    def test_selection_core_accepts_plain_candidate_dicts(self) -> None:
+        first = {
+            **base_candidate(selection_raw="Mais de 2.5", line=2.5),
+            "bet_id": "first",
+            "ev_percent": 20.0,
+            "confidence_score": 5,
+            "stake_units": 1.0,
+            "risk_flags": "SEM_FLAG",
+            "candidate_stage": "eligible_pick",
+            "market_priority": 1,
+        }
+        second = {
+            **base_candidate(selection_raw="Mais de 3.0", line=3.0, odd_entrada=2.1, ev_decimal=0.18),
+            "bet_id": "second",
+            "ev_percent": 18.0,
+            "confidence_score": 5,
+            "stake_units": 1.0,
+            "risk_flags": "SEM_FLAG",
+            "candidate_stage": "eligible_pick",
+            "market_priority": 1,
+        }
+
+        selected, rejected = select_top_candidate_dicts([first, second], return_meta=True)
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["bet_id"], "first")
+        self.assertEqual(selected[0]["selection_policy_status"], "selected")
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0]["portfolio_reject_reason"], "HIGH_CORRELATION_WITH_SELECTED")
 
     def test_downstream_payload_loads_decision_and_selection_fields(self) -> None:
         row = {

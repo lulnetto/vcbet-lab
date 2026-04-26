@@ -2,20 +2,33 @@ from __future__ import annotations
 
 from typing import Any
 
-import pandas as pd
-
 from vcbet.core.selection import _append_flag, _candidate_family_key, _candidate_to_rejection
 from vcbet.core.strategy_config import get_runtime_config
 
 
-def _apply_asian_total_line_ladder(group: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value is None or str(value).strip().lower() in {"", "nan", "none", "<na>"}:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_sort_value(candidate: dict[str, Any], name: str, default: float = 0.0) -> float:
+    value = _float_or_none(candidate.get(name))
+    return default if value is None else value
+
+
+def _apply_asian_total_line_ladder(candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     runtime = get_runtime_config()
     portfolio_rules = runtime.rules.get("portfolio", {})
     ladder_rules = portfolio_rules.get("asian_total_line_ladder", {})
+    work = [dict(candidate) for candidate in candidates]
+    for candidate in work:
+        candidate.setdefault("portfolio_line_role", "standard")
+
     if not ladder_rules.get("enabled", False):
-        work = group.copy()
-        if "portfolio_line_role" not in work.columns:
-            work["portfolio_line_role"] = "standard"
         return work, []
 
     target_gap = float(ladder_rules.get("target_gap", 0.75))
@@ -24,77 +37,97 @@ def _apply_asian_total_line_ladder(group: pd.DataFrame) -> tuple[pd.DataFrame, l
     prefer_lowest = str(ladder_rules.get("primary_line_strategy", "lowest_line")) == "lowest_line"
     fallback_highest = bool(ladder_rules.get("fallback_to_highest_if_no_gap_match", True))
 
-    work = group.copy()
-    if "portfolio_line_role" not in work.columns:
-        work["portfolio_line_role"] = "standard"
-
-    keep_idx: set[int] = set(work.index)
+    keep_idx: set[int] = set(range(len(work)))
     rejections: list[dict[str, Any]] = []
 
-    asian_mask = work["market_type"] == "asian_total"
-    if not asian_mask.any():
+    asian_indices = [idx for idx, candidate in enumerate(work) if candidate.get("market_type") == "asian_total"]
+    if not asian_indices:
         return work, rejections
 
-    asian_df = work.loc[asian_mask].copy()
     family_map: dict[tuple[Any, ...], list[int]] = {}
-    for idx, row in asian_df.iterrows():
-        family_map.setdefault(_candidate_family_key(row.to_dict()), []).append(idx)
+    for idx in asian_indices:
+        family_map.setdefault(_candidate_family_key(work[idx]), []).append(idx)
 
     for _, indices in family_map.items():
         if len(indices) < 2:
             continue
-        family = work.loc[indices].copy()
-        family = family[pd.to_numeric(family["line"], errors="coerce").notna()].copy()
+        family = [(idx, work[idx], _float_or_none(work[idx].get("line"))) for idx in indices]
+        family = [(idx, candidate, line) for idx, candidate, line in family if line is not None]
         if len(family) < 2:
             continue
-        family["line_num"] = pd.to_numeric(family["line"], errors="coerce")
-        family["ev_num"] = pd.to_numeric(family["ev_percent"], errors="coerce").fillna(0.0)
-        family["conf_num"] = pd.to_numeric(family["confidence_score"], errors="coerce").fillna(0.0)
-        family = family.sort_values(["line_num", "conf_num", "ev_num", "odd_entrada"], ascending=[True, False, False, True])
+        family = sorted(
+            family,
+            key=lambda item: (
+                item[2],
+                -_candidate_sort_value(item[1], "confidence_score"),
+                -_candidate_sort_value(item[1], "ev_percent"),
+                _candidate_sort_value(item[1], "odd_entrada"),
+            ),
+        )
 
-        primary = family.iloc[0] if prefer_lowest else family.iloc[-1]
-        primary_idx = int(primary.name)
-        work.at[primary_idx, "portfolio_line_role"] = "asian_total_ladder_primary"
-        work.at[primary_idx, "selection_policy_status"] = "selected"
+        primary_idx, primary, primary_line = family[0] if prefer_lowest else family[-1]
+        work[primary_idx]["portfolio_line_role"] = "asian_total_ladder_primary"
+        work[primary_idx]["selection_policy_status"] = "selected"
         selected_indices = {primary_idx}
 
-        remaining = family.loc[family.index != primary_idx].copy()
         secondary_idx: int | None = None
-        if not remaining.empty:
-            remaining["gap"] = remaining["line_num"] - float(primary["line_num"])
-            gap_candidates = remaining.loc[remaining["gap"] >= min_gap].copy()
-            if not gap_candidates.empty:
-                gap_candidates["gap_distance"] = (gap_candidates["gap"] - target_gap).abs()
-                target_candidates = gap_candidates.loc[gap_candidates["gap_distance"] <= tolerance].copy()
-                if not target_candidates.empty:
-                    target_candidates = target_candidates.sort_values(["gap_distance", "conf_num", "ev_num", "line_num"], ascending=[True, False, False, True])
-                    secondary_idx = int(target_candidates.iloc[0].name)
-                elif fallback_highest:
-                    gap_candidates = gap_candidates.sort_values(["gap", "conf_num", "ev_num"], ascending=[False, False, False])
-                    secondary_idx = int(gap_candidates.iloc[0].name)
+        remaining = [item for item in family if item[0] != primary_idx]
+        gap_candidates = [
+            (idx, candidate, line, line - float(primary_line))
+            for idx, candidate, line in remaining
+            if line - float(primary_line) >= min_gap
+        ]
+        if gap_candidates:
+            target_candidates = [
+                (idx, candidate, line, gap, abs(gap - target_gap))
+                for idx, candidate, line, gap in gap_candidates
+                if abs(gap - target_gap) <= tolerance
+            ]
+            if target_candidates:
+                target_candidates = sorted(
+                    target_candidates,
+                    key=lambda item: (
+                        item[4],
+                        -_candidate_sort_value(item[1], "confidence_score"),
+                        -_candidate_sort_value(item[1], "ev_percent"),
+                        item[2],
+                    ),
+                )
+                secondary_idx = target_candidates[0][0]
+            elif fallback_highest:
+                gap_candidates = sorted(
+                    gap_candidates,
+                    key=lambda item: (
+                        -item[3],
+                        -_candidate_sort_value(item[1], "confidence_score"),
+                        -_candidate_sort_value(item[1], "ev_percent"),
+                    ),
+                )
+                secondary_idx = gap_candidates[0][0]
 
         if secondary_idx is not None:
             selected_indices.add(secondary_idx)
-            work.at[secondary_idx, "portfolio_line_role"] = "asian_total_ladder_secondary"
-            work.at[secondary_idx, "selection_policy_status"] = "selected"
-            work.at[secondary_idx, "stake_units"] = min(float(work.at[secondary_idx, "stake_units"]), 0.5)
-            work.at[secondary_idx, "risk_flags"] = _append_flag(str(work.at[secondary_idx, "risk_flags"]), "CORRELACAO_JOGO")
-            work.at[secondary_idx, "coexistence_status"] = "keep_both_with_secondary_half_unit"
-            work.at[secondary_idx, "correlation_level"] = "medium"
-            work.at[secondary_idx, "correlated_with_bet_id"] = work.at[primary_idx, "bet_id"]
+            secondary = work[secondary_idx]
+            secondary["portfolio_line_role"] = "asian_total_ladder_secondary"
+            secondary["selection_policy_status"] = "selected"
+            secondary["stake_units"] = min(float(secondary["stake_units"]), 0.5)
+            secondary["risk_flags"] = _append_flag(str(secondary["risk_flags"]), "CORRELACAO_JOGO")
+            secondary["coexistence_status"] = "keep_both_with_secondary_half_unit"
+            secondary["correlation_level"] = "medium"
+            secondary["correlated_with_bet_id"] = work[primary_idx].get("bet_id")
 
-        for idx in family.index:
-            if int(idx) in selected_indices:
+        for idx, _, _ in family:
+            if idx in selected_indices:
                 continue
-            keep_idx.discard(int(idx))
+            keep_idx.discard(idx)
             rejections.append(
                 _candidate_to_rejection(
-                    work.loc[idx].to_dict(),
+                    work[idx],
                     "ASIAN_TOTAL_LINE_SUPERSEDED",
-                    related_bet_id=work.at[primary_idx, "bet_id"],
-                    details=f"line={float(work.at[idx, 'line']):.2f}|primary_line={float(work.at[primary_idx, 'line']):.2f}",
+                    related_bet_id=work[primary_idx].get("bet_id"),
+                    details=f"line={float(work[idx]['line']):.2f}|primary_line={float(work[primary_idx]['line']):.2f}",
                 )
             )
 
-    filtered = work.loc[sorted(keep_idx)].copy()
+    filtered = [work[idx] for idx in range(len(work)) if idx in keep_idx]
     return filtered, rejections

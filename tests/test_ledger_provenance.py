@@ -9,6 +9,8 @@ import pandas as pd
 
 from vcbet.collectors.results_collector import build_targets, load_ledger as load_results_ledger
 from vcbet.core.ledger_manager import append_new_picks_to_ledger, load_ledger, save_ledger
+from vcbet.domain.contracts import BetRecord
+from vcbet.ledger.repository import LedgerRepository
 from vcbet.core.pipeline.output_writer import write_pipeline_outputs
 from vcbet.core.strategy_config import configure_runtime
 from vcbet.replay.replay_pipeline import _summarize_replay_ledger
@@ -74,6 +76,64 @@ def official_pick(**overrides) -> dict:
 
 
 class LedgerProvenanceTest(unittest.TestCase):
+    def test_repository_read_returns_domain_records_for_legacy_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "old_ledger.csv"
+            legacy = pd.DataFrame(
+                [
+                    {
+                        "bet_id": "legacy_repo",
+                        "run_id": "old_run",
+                        "league": "Liga Teste",
+                        "match_datetime": "2026-04-24 15:00",
+                        "home_team": "Casa FC",
+                        "away_team": "Fora FC",
+                        "match_name": "Casa FC - Fora FC",
+                        "market_type": "total_goals",
+                        "market_scope": "full_time",
+                        "side": "over",
+                        "line": 2.5,
+                        "selection_raw": "Mais de 2.5",
+                        "odd_entrada": 2.0,
+                        "stake_units": 0.5,
+                        "final_bet_status": "open",
+                        "final_settlement_status": "pending",
+                    }
+                ]
+            )
+            legacy.to_csv(ledger_file, index=False, sep=";", encoding="utf-8-sig")
+
+            records = LedgerRepository(ledger_file).read()
+
+            self.assertEqual(len(records), 1)
+            self.assertIsInstance(records[0], BetRecord)
+            self.assertEqual(records[0].bet_id, "legacy_repo")
+            self.assertIsNone(records[0].sofascore_event_id)
+            self.assertEqual(records[0].final_bet_status, "open")
+
+    def test_repository_append_uses_locked_append_and_reports_dedupe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_file = Path(tmp) / "bets_ledger.csv"
+            repo = LedgerRepository(ledger_file)
+
+            first = repo.append([official_pick(bet_id="repo_append")])
+            duplicate = repo.append([official_pick(bet_id="repo_append")])
+            ledger = load_ledger(ledger_file)
+
+            self.assertEqual(first.appended, 1)
+            self.assertEqual(first.blocked, 0)
+            self.assertEqual(duplicate.appended, 0)
+            self.assertEqual(duplicate.blocked, 1)
+            self.assertEqual(duplicate.duplicate, 1)
+            self.assertIn("LEDGER_DUPLICATE_OPEN_PICK", duplicate.reasons)
+            self.assertEqual(len(ledger), 1)
+            self.assertIn("sofascore_event_id", ledger.columns)
+
+    def test_ledger_manager_keeps_repository_compatibility_import(self) -> None:
+        from vcbet.core import ledger_manager
+
+        self.assertIs(ledger_manager.LedgerRepository, LedgerRepository)
+
     def test_new_official_picks_persist_provenance_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ledger_file = Path(tmp) / "bets_ledger.csv"

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
-
-import pandas as pd
 
 from vcbet.core.selection import MARKET_PRIORITY, _append_flag, _candidate_to_rejection, market_family
 from vcbet.core.selection.asian_ladder import _apply_asian_total_line_ladder
@@ -12,22 +11,64 @@ from vcbet.core.selection.exposure import _exposure_rejection, _record_exposure
 from vcbet.core.strategy_config import get_runtime_config
 
 
-def select_top_picks(df_candidates: pd.DataFrame, return_meta: bool = False):
-    if df_candidates.empty:
-        empty = df_candidates.copy()
-        empty_rejections = pd.DataFrame()
-        return (empty, empty_rejections) if return_meta else empty
+def _numeric_sort_value(candidate: dict[str, Any], field: str, default: float = 0.0) -> float:
+    try:
+        value = candidate.get(field)
+        if value is None or str(value).strip().lower() in {"", "nan", "none", "<na>"}:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ascending_line_value(candidate: dict[str, Any]) -> float:
+    return _numeric_sort_value(candidate, "line", default=float("inf"))
+
+
+def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        -_numeric_sort_value(candidate, "confidence_score"),
+        -_numeric_sort_value(candidate, "ev_percent"),
+        _numeric_sort_value(candidate, "market_priority", default=float(MARKET_PRIORITY.get(str(candidate.get("market_type") or ""), 999))),
+        _numeric_sort_value(candidate, "odd_entrada"),
+        _ascending_line_value(candidate),
+    )
+
+
+def _result_sort_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        -_numeric_sort_value(candidate, "confidence_score"),
+        -_numeric_sort_value(candidate, "ev_percent"),
+        str(candidate.get("market_type") or ""),
+    )
+
+
+def _group_by_match(candidates: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+    for candidate in candidates:
+        key = str(candidate.get("match_name") or "")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(candidate)
+    return [groups[key] for key in order]
+
+
+def select_top_picks(candidates: Iterable[Mapping[str, Any]], return_meta: bool = False):
+    candidate_rows = [dict(candidate) for candidate in candidates]
+    if not candidate_rows:
+        return ([], []) if return_meta else []
 
     runtime = get_runtime_config()
     portfolio_rules = runtime.rules.get("portfolio", {})
     max_picks_per_match = int(portfolio_rules.get("max_picks_per_match", 2))
 
-    df = df_candidates.copy()
-    if "portfolio_line_role" not in df.columns:
-        df["portfolio_line_role"] = "standard"
-    if "selection_policy_status" not in df.columns:
-        df["selection_policy_status"] = "selection_pending"
-    df["market_family"] = df.apply(lambda row: market_family(row.to_dict()), axis=1)
+    for candidate in candidate_rows:
+        candidate.setdefault("portfolio_line_role", "standard")
+        candidate.setdefault("selection_policy_status", "selection_pending")
+        candidate["market_family"] = candidate.get("market_family") or market_family(candidate)
+
     rejections: list[dict[str, Any]] = []
     selected_all: list[dict[str, Any]] = []
     selected_count_by_scope: dict[tuple[str, str], int] = {}
@@ -37,17 +78,14 @@ def select_top_picks(df_candidates: pd.DataFrame, return_meta: bool = False):
     medium_correlation_policy = str(portfolio_rules.get("medium_correlation_policy", "downgrade"))
 
     kept_rows: list[dict[str, Any]] = []
-    for _, raw_group in df.groupby("match_name", sort=False):
+    for raw_group in _group_by_match(candidate_rows):
         group, ladder_rejections = _apply_asian_total_line_ladder(raw_group)
         rejections.extend(ladder_rejections)
-        group = group.sort_values(
-            by=["confidence_score", "ev_percent", "market_priority", "odd_entrada", "line"],
-            ascending=[False, False, True, True, True],
-        )
+        group = sorted(group, key=_candidate_sort_key)
 
         selected: list[dict[str, Any]] = []
-        for _, row in group.iterrows():
-            candidate = row.to_dict()
+        for row in group:
+            candidate = dict(row)
             candidate["market_family"] = candidate.get("market_family") or market_family(candidate)
 
             duplicate_ref = next(
@@ -156,13 +194,12 @@ def select_top_picks(df_candidates: pd.DataFrame, return_meta: bool = False):
         kept_rows.extend(selected)
 
     if not kept_rows:
-        empty = pd.DataFrame(columns=df_candidates.columns)
-        rejection_df = pd.DataFrame(rejections)
-        return (empty, rejection_df) if return_meta else empty
+        return ([], rejections) if return_meta else []
 
-    result = pd.DataFrame(kept_rows)
-    if "market_priority" in result.columns:
-        result = result.drop(columns=["market_priority"])
-    result = result.sort_values(by=["confidence_score", "ev_percent", "market_type"], ascending=[False, False, True])
-    rejection_df = pd.DataFrame(rejections)
-    return (result, rejection_df) if return_meta else result
+    result = []
+    for candidate in kept_rows:
+        payload = dict(candidate)
+        payload.pop("market_priority", None)
+        result.append(payload)
+    result = sorted(result, key=_result_sort_key)
+    return (result, rejections) if return_meta else result

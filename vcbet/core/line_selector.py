@@ -21,7 +21,21 @@ from vcbet.core.selection.line_selection import select_top_picks as _select_top_
 
 
 def select_top_picks(df_candidates: pd.DataFrame, return_meta: bool = False):
-    return _select_top_picks(df_candidates, return_meta=return_meta)
+    if not isinstance(df_candidates, pd.DataFrame):
+        return _select_top_picks(df_candidates, return_meta=return_meta)
+
+    if df_candidates.empty:
+        empty = df_candidates.copy()
+        empty_rejections = pd.DataFrame()
+        return (empty, empty_rejections) if return_meta else empty
+
+    selected, rejections = _select_top_picks(df_candidates.to_dict("records"), return_meta=True)
+    if selected:
+        selected_df = pd.DataFrame(selected)
+    else:
+        selected_df = pd.DataFrame(columns=df_candidates.columns)
+    rejection_df = pd.DataFrame(rejections)
+    return (selected_df, rejection_df) if return_meta else selected_df
 
 
 __all__ = [
