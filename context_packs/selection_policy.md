@@ -56,6 +56,13 @@ Work on candidate eligibility, safety gates, confidence, risk flags, portfolio e
 - `vcbet/core/decision_policy.py` is near the 300 LOC target and concentrates identity, confidence, and acceptance policy.
 - `vcbet/core/pipeline/filtering_stage.py` and `vcbet/core/pipeline/output_writer.py` are the daily pipeline call sites for this domain; `vcbet/core/pipeline_ev.py` should stay a thin compatibility orchestrator.
 
+## Fase 1.5 Correlation Audit Notes
+
+- Over goals + BTTS: run-level selection treats most `total_goals`/`btts` pairs as medium correlation, with `Under` + `BTTS No` classified high. The official open-ledger gate blocks any open cross-market exposure among goals total, team goals, and BTTS. Bettor decision needed before making run-level selection as strict as the ledger gate or before allowing ledger coexistence.
+- Team total + match total: current logic is mostly medium, with one broad low-correlation carveout for team `Over` low line plus match `Under` high line. It does not encode full deterministic incompatibility intervals such as a team-total over line that makes a lower match-total under line impossible. Bettor decision needed on exact interval rules and whether they should reject or downgrade.
+- Handicap + moneyline equivalents: no `moneyline`/1X2 market family is currently normalized in the active selection path. If that market is introduced, define equivalence with handicap lines such as 0, -0.25, -0.5, and +0.5 before enabling coexistence.
+- Over/under contradictory lines: same-family opposite sides are rejected only when lines are equal or near within `contradictory_line_tolerance`. Wider impossible pairs, for example `Over 3.5` with `Under 2.5`, are currently handled as medium correlation rather than contradiction. Bettor decision needed before changing this from tolerance-based matching to interval-based contradiction detection.
+
 ## Refactor Direction
 
 Separate pure policy decisions from dataframe grouping and output shaping. Target small strategy/policy functions with explicit candidate and rejection contracts.
