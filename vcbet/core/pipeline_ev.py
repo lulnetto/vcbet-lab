@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pandas as pd
 
@@ -19,7 +20,7 @@ from vcbet.core.pipeline.quality_report import (
     to_sorted_dict,
 )
 from vcbet.core.pipeline.team_resolution import prepare_team_resolution_state
-from vcbet.core.run_utils import now_str, update_manifest
+from vcbet.core.run_utils import load_json_file, now_str, update_manifest
 from vcbet.core.strategy_config import configure_runtime
 from vcbet.core.temporal_contract import SnapshotValidator, temporal_contract_status
 
@@ -60,11 +61,15 @@ def processar_pipeline(
     df_betano = loaded["df_betano"]
     df_xg = loaded["df_xg"]
 
+    odds_manifest_path = Path(loaded["run_dir"]) / "odds_collection_manifest.json"
+    odds_manifest = load_json_file(odds_manifest_path) if odds_manifest_path.exists() else None
+
     snapshot_health = validate_snapshot_health(
         df_betano,
         df_xg,
         max_invalid_snapshot_row_rate=runtime_config.data_quality.get("max_invalid_snapshot_row_rate", 0.25),
         require_snapshot_health_ok=runtime_config.data_quality.get("require_snapshot_health_ok", True),
+        odds_manifest=odds_manifest,
     )
     if not snapshot_health["is_valid"]:
         generated_at = now_str()

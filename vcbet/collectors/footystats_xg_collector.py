@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
+from vcbet.collectors.footystats_fetcher import FootyStatsBrowserFetcher
 from vcbet.core.config_ligas import carregar_ligas_footystats
 from vcbet.core.run_utils import build_manifest, ensure_run_dir, generate_run_id, save_manifest, update_manifest
 from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, file_md5, snapshot_time_from_dataframe
@@ -24,7 +25,7 @@ def parse_leagues_arg(raw_value: str | None) -> List[str] | None:
 
 
 
-def extrair_dados_completos(url):
+def _fetch_html_requests(url: str, timeout: int = 20) -> str:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) "
@@ -33,11 +34,13 @@ def extrair_dados_completos(url):
         ),
         "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8",
     }
-
-    resposta = requests.get(url, headers=headers, timeout=20)
+    resposta = requests.get(url, headers=headers, timeout=timeout)
     resposta.raise_for_status()
+    return resposta.text
 
-    soup = BeautifulSoup(resposta.text, "html.parser")
+
+def extrair_dados_completos(html: str) -> pd.DataFrame:
+    soup = BeautifulSoup(html, "html.parser")
 
     tabela = soup.select_one("table.full-league-table")
     if not tabela:
@@ -136,6 +139,45 @@ def extrair_dados_completos(url):
     return pd.DataFrame(lista_final)
 
 
+def _slugify_league(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _fetch_html(
+    url: str,
+    *,
+    fetch_mode: str = "browser",
+    fetcher: FootyStatsBrowserFetcher | None = None,
+) -> str:
+    if fetch_mode in ("browser", "browser_only"):
+        if fetcher is None:
+            raise RuntimeError(
+                "footystats_browser_unavailable: browser fetch mode requires FootyStatsBrowserFetcher."
+            )
+        result = fetcher.fetch_html(url)
+        if not result.ok:
+            raise RuntimeError(
+                f"footystats_browser_fetch_failed: {result.error}"
+            )
+        if result.html is None:
+            raise RuntimeError("footystats_browser_fetch_failed: empty html response")
+        return result.html
+
+    if fetch_mode == "browser_first":
+        if fetcher is not None:
+            result = fetcher.fetch_html(url)
+            if result.ok and result.html:
+                return result.html
+            print(f"      [ALERTA] Browser fetch falhou para {url}; tentando requests fallback.")
+        else:
+            print("      [ALERTA] Browser fetcher não disponível; tentando requests fallback.")
+        return _fetch_html_requests(url)
+
+    if fetch_mode == "requests":
+        return _fetch_html_requests(url)
+
+    raise ValueError(f"fetch_mode desconhecido: {fetch_mode}")
+
 
 def construir_banco_dados(
     run_id: str,
@@ -143,9 +185,13 @@ def construir_banco_dados(
     output_dir: str,
     ligas_alvo: Iterable[str] | None = None,
     modo_debug: bool = False,
+    fetch_mode: str = "browser",
+    browser_headed: bool = False,
+    browser_profile_dir: str | None = None,
 ):
     print(f"================ [ ATUALIZANDO BANCO DE DADOS DE xG | RUN_ID: {run_id} ] ================")
     run_dir = ensure_run_dir(run_id=run_id, target_date=target_date, base_output_dir=output_dir)
+    debug_dir = run_dir / "_debug"
 
     manifest = build_manifest(
         run_id=run_id,
@@ -173,25 +219,58 @@ def construir_banco_dados(
 
     lista_dfs = []
     collected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    league_failures: list[dict] = []
 
-    for liga, url_base in mapa_footystats.items():
-        print(f" -> Baixando: {liga}...")
-        try:
-            df_completo = extrair_dados_completos(f"{url_base}/xg")
-            if df_completo is not None and not df_completo.empty:
-                df_completo["run_id"] = run_id
-                df_completo["collected_at"] = collected_at
-                df_completo["source"] = "footystats"
-                df_completo["league"] = liga
-                lista_dfs.append(df_completo)
-                print(f"    [OK] {len(df_completo)} equipas extraídas.")
-            else:
-                print(f"    [ERRO] DataFrame vazio retornado para {liga}.")
-        except Exception:
-            print(f"    [ERRO FATAL] Falha processando {liga}:")
-            traceback.print_exc()
+    browser_fetcher: FootyStatsBrowserFetcher | None = None
+    try:
+        if fetch_mode in ("browser", "browser_only", "browser_first"):
+            browser_fetcher = FootyStatsBrowserFetcher(
+                debug=modo_debug,
+                headless=not browser_headed,
+                profile_dir=browser_profile_dir,
+            )
+            browser_fetcher.__enter__()
 
-        time.sleep(2)
+        for liga, url_base in mapa_footystats.items():
+            print(f" -> Baixando: {liga}...")
+            league_slug = _slugify_league(liga)
+            try:
+                if fetch_mode in ("browser", "browser_only", "browser_first") and browser_fetcher is not None:
+                    result = browser_fetcher.fetch_html(f"{url_base}/xg")
+                    if not result.ok:
+                        print(f"    [ERRO] Fetch falhou para {liga}: {result.error} (status={result.status_code})")
+                        league_failures.append({"league": liga, "error": result.error, "status_code": result.status_code})
+                        if browser_fetcher is not None:
+                            browser_fetcher.save_debug_artifact(
+                                url=f"{url_base}/xg",
+                                debug_dir=debug_dir,
+                                slug=league_slug,
+                            )
+                        continue
+                    html = result.html
+                else:
+                    html = _fetch_html(f"{url_base}/xg", fetch_mode=fetch_mode, fetcher=browser_fetcher)
+
+                df_completo = extrair_dados_completos(html)
+                if df_completo is not None and not df_completo.empty:
+                    df_completo["run_id"] = run_id
+                    df_completo["collected_at"] = collected_at
+                    df_completo["source"] = "footystats"
+                    df_completo["league"] = liga
+                    df_completo["fetch_method"] = "browser" if fetch_mode in ("browser", "browser_only", "browser_first") and browser_fetcher is not None else fetch_mode
+                    lista_dfs.append(df_completo)
+                    print(f"    [OK] {len(df_completo)} equipas extraídas.")
+                else:
+                    print(f"    [ERRO] DataFrame vazio retornado para {liga}.")
+            except Exception:
+                print(f"    [ERRO FATAL] Falha processando {liga}:")
+                traceback.print_exc()
+                league_failures.append({"league": liga, "error": "exception", "status_code": None})
+
+            time.sleep(2)
+    finally:
+        if browser_fetcher is not None:
+            browser_fetcher.__exit__(None, None, None)
 
     if lista_dfs:
         df_final = pd.concat(lista_dfs, ignore_index=True)
@@ -208,7 +287,10 @@ def construir_banco_dados(
             "xga_home",
             "xga_away",
         ]
-        df_final = df_final[ordered_columns]
+        # Preserve fetch_method if present (add after ordered columns)
+        if "fetch_method" in df_final.columns:
+            ordered_columns.append("fetch_method")
+        df_final = df_final[ordered_columns + [c for c in df_final.columns if c not in ordered_columns]]
         xg_snapshot_path = run_dir / "xg_snapshot.csv"
 
         if not modo_debug:
@@ -228,6 +310,7 @@ def construir_banco_dados(
             xg_asof=snapshot_time_from_dataframe(df_final),
             temporal_contract_version=TEMPORAL_CONTRACT_VERSION,
             xg_target_leagues=list(mapa_footystats.keys()),
+            xg_league_failures=league_failures if league_failures else None,
         )
     else:
         update_manifest(
@@ -235,6 +318,7 @@ def construir_banco_dados(
             status="xg_empty",
             xg_rows=0,
             xg_target_leagues=list(mapa_footystats.keys()),
+            xg_league_failures=league_failures if league_failures else None,
         )
         print("\n[FALHA] Nenhum dado foi extraído.")
 
@@ -246,6 +330,15 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="data/runs", help="Diretório base para salvar as runs")
     parser.add_argument("--data", type=str, help="Data da run no formato YYYY-MM-DD")
     parser.add_argument("--leagues", type=str, help="Lista de ligas separadas por vírgula para limitar a coleta de xG")
+    parser.add_argument(
+        "--fetch-mode",
+        type=str,
+        default="browser",
+        choices=["browser", "browser_only", "browser_first", "requests"],
+        help="Modo de fetch: browser (padrão), browser_only, browser_first, requests",
+    )
+    parser.add_argument("--browser-headed", action="store_true", help="Abre o Chromium visível para depuração")
+    parser.add_argument("--browser-profile-dir", type=str, help="Diretório de perfil persistente do browser para reuso de sessão")
     args = parser.parse_args()
 
     target_date = args.data or datetime.today().strftime("%Y-%m-%d")
@@ -257,4 +350,7 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         ligas_alvo=ligas_alvo,
         modo_debug=args.debug,
+        fetch_mode=args.fetch_mode,
+        browser_headed=args.browser_headed,
+        browser_profile_dir=args.browser_profile_dir,
     )

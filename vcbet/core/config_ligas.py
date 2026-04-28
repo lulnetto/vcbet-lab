@@ -123,3 +123,25 @@ def carregar_ligas_sofascore_ids(
         if value not in (None, "", 0):
             result[liga["nome"]] = int(value)
     return result
+
+
+def carregar_ligas_fotmob(
+    ligas_nomes: List[str] | Set[str] | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Return leagues configured with FotMob IDs.
+
+    Returns a dict mapping league name to a dict with:
+      - fotmob_league_id (int)
+      - fotmob_ccode3 (str)
+    """
+    ligas = _filtrar_por_nomes(carregar_ligas(), ligas_nomes)
+    result: Dict[str, Dict[str, Any]] = {}
+    for liga in ligas:
+        league_id = liga.get("fotmob_league_id")
+        ccode3 = liga.get("fotmob_ccode3")
+        if league_id not in (None, "", 0) and ccode3:
+            result[liga["nome"]] = {
+                "fotmob_league_id": int(league_id),
+                "fotmob_ccode3": str(ccode3),
+            }
+    return result

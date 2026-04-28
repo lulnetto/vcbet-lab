@@ -15,6 +15,7 @@ JSON_FLAG=0
 PYTHON_BIN="python3"
 CONFIG_FILE=""
 CONFIG_NAME=""
+XG_SOURCE="fotmob"
 TEMP_ROOT=""
 ORIGINAL_OUTPUT_DIR="$OUTPUT_DIR"
 ORIGINAL_LEDGER_FILE="$LEDGER_FILE"
@@ -49,6 +50,7 @@ Parâmetros:
   --python-bin   Binário do Python (default: python3)
   --config-file  Arquivo JSON da estratégia
   --config-name  Preset da estratégia em ./configs
+  --xg-source    footystats | fotmob (default: footystats)
 USAGE
 }
 
@@ -76,6 +78,8 @@ while [[ $# -gt 0 ]]; do
       CONFIG_FILE="$2"; shift 2 ;;
     --config-name)
       CONFIG_NAME="$2"; shift 2 ;;
+    --xg-source)
+      XG_SOURCE="$2"; shift 2 ;;
     --json)
       JSON_FLAG=1; shift ;;
     --debug)
@@ -268,7 +272,11 @@ if [[ -n "$CONFIG_NAME" ]]; then
   PIPELINE_ARGS+=(--config-name "$CONFIG_NAME")
 fi
 
-"$PYTHON_BIN" -m vcbet.collectors.footystats_xg_collector "${XG_ARGS[@]}"
+if [[ "$XG_SOURCE" == "fotmob" ]]; then
+  "$PYTHON_BIN" -m vcbet.collectors.fotmob_xg_collector "${XG_ARGS[@]}"
+else
+  "$PYTHON_BIN" -m vcbet.collectors.footystats_xg_collector "${XG_ARGS[@]}"
+fi
 
 if [[ ! -f "$XG_SNAPSHOT" ]]; then
   echo "[ERRO] xg_snapshot.csv não foi gerado. Abortando o pipeline." >&2
