@@ -4,6 +4,7 @@ import argparse
 
 import pandas as pd
 
+from vcbet.core.data_health import validate_snapshot_health
 from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE
 from vcbet.core.pipeline.filtering_stage import build_normalization_filter, select_and_annotate_final_picks
 from vcbet.core.pipeline.input_loader import carregar_snapshot_odds, carregar_snapshot_xg, load_pipeline_inputs
@@ -58,6 +59,81 @@ def processar_pipeline(
     )
     df_betano = loaded["df_betano"]
     df_xg = loaded["df_xg"]
+
+    snapshot_health = validate_snapshot_health(
+        df_betano,
+        df_xg,
+        max_invalid_snapshot_row_rate=runtime_config.data_quality.get("max_invalid_snapshot_row_rate", 0.25),
+        require_snapshot_health_ok=runtime_config.data_quality.get("require_snapshot_health_ok", True),
+    )
+    if not snapshot_health["is_valid"]:
+        generated_at = now_str()
+        temporal_status = temporal_contract_status(
+            decision_timestamp=generated_at,
+            odds_snapshot_time=loaded["odds_snapshot_time"],
+            xg_asof=loaded["xg_asof"],
+        )
+        quality_report = build_snapshot_rejection_report(
+            run_id=loaded["run_id"],
+            target_date=loaded["target_date"],
+            runtime_config=runtime_config,
+            config_snapshot_file=loaded["config_snapshot_file"],
+            generated_at=generated_at,
+            odds_path=loaded["odds_path"],
+            xg_path=loaded["xg_path"],
+            odds_run_id=loaded["odds_run_id"],
+            xg_run_id=loaded["xg_run_id"],
+            odds_snapshot_hash=loaded["odds_snapshot_hash"],
+            xg_snapshot_hash=loaded["xg_snapshot_hash"],
+            odds_snapshot_time=loaded["odds_snapshot_time"],
+            xg_asof=loaded["xg_asof"],
+            temporal_status=temporal_status,
+            snapshot_validation={
+                "status": "rejected",
+                "errors": snapshot_health["errors"],
+                "max_snapshot_age_hours": runtime_config.max_snapshot_age_hours,
+            },
+            signal_version=SIGNAL_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+            alias_file=alias_file,
+            ledger_file=ledger_file,
+        )
+        quality_report["error"] = {
+            "code": "snapshot_health_check_failed",
+            "message": "Snapshot health check rejected odds/xG inputs before pricing.",
+            "details": snapshot_health["errors"],
+        }
+        quality_report["data_quality"]["snapshot_health"] = snapshot_health
+        quality_report_file = save_run_quality_report(loaded["run_dir"], quality_report)
+        update_manifest(
+            loaded["run_dir"],
+            status="pipeline_rejected_snapshot_health",
+            picks_rows=0,
+            quality_report_file=str(quality_report_file),
+            run_safety_status="rejected_snapshot_health",
+            safety_gate_blocked_total=0,
+            strategy_config_name=runtime_config.name,
+            strategy_config_fingerprint=runtime_config.fingerprint,
+            strategy_config_file=str(loaded["config_snapshot_file"]),
+            config_name=runtime_config.name,
+            config_fingerprint=runtime_config.fingerprint,
+            config_source_path=runtime_config.source_path,
+            config_snapshot_file=str(loaded["config_snapshot_file"]),
+            source_run_id=loaded["run_id"],
+            source_snapshot_ref=f"odds:{loaded['odds_path']}|xg:{loaded['xg_path']}",
+            odds_snapshot_hash=loaded["odds_snapshot_hash"],
+            xg_snapshot_hash=loaded["xg_snapshot_hash"],
+            odds_snapshot_time=loaded["odds_snapshot_time"],
+            xg_asof=loaded["xg_asof"],
+            temporal_contract_status=temporal_status,
+            max_snapshot_age_hours=runtime_config.max_snapshot_age_hours,
+            snapshot_validation_status="rejected",
+            signal_version=SIGNAL_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+        )
+        error_codes = ", ".join(str(item.get("code")) for item in snapshot_health["errors"])
+        raise ValueError(f"Snapshot health check failed: {error_codes}")
+
     generated_at = now_str()
     snapshot_validation_reference = snapshot_reference_timestamp or generated_at
     temporal_status = temporal_contract_status(

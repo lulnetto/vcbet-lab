@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from vcbet.collectors.results_collector import (
+    build_targets,
+    collect_results_sofascore_api,
+    collect_results_sofascore_auto,
+    collect_results_sofascore_browser,
+    load_ledger as load_ledger_for_results,
+    save_results_csv,
+    summarize,
+)
 from vcbet.core.ledger_manager import normalize_ledger_schema
+from vcbet.core.pipeline_ev import processar_pipeline
 from vcbet.core.strategy_config import resolve_config_file
 from vcbet.replay.scoring import (
     _asian_total_line_drift,
@@ -16,6 +25,7 @@ from vcbet.replay.scoring import (
     _sorted_counter_dict,
 )
 from vcbet.replay.source_resolver import _load_json
+from vcbet.settlement.settlement_engine import settle_ledger
 
 
 def _load_picks_csv(path: Path) -> pd.DataFrame:
@@ -95,40 +105,69 @@ def _run_replay_settlement(
     results_file = replay_dir / "results_auto.csv"
     debug_dir = replay_dir / "results_debug"
 
-    results_cmd = [
-        python_bin,
-        "-m",
-        "vcbet.collectors.results_collector",
-        "--ledger-file", str(ledger_file),
-        "--output-file", str(results_file),
-        "--all-pending",
-        "--grace-minutes", str(results_grace_minutes),
-        "--debug-dir", str(debug_dir),
-        "--max-pages", str(results_max_pages),
-        "--source", results_source,
-    ]
-    if results_debug:
-        results_cmd.append("--debug")
+    results_stdout_lines: list[str] = []
+    results_stderr_lines: list[str] = []
+    settlement_stdout_lines: list[str] = []
+    settlement_stderr_lines: list[str] = []
+    results_return_code = 0
 
-    settlement_cmd = [
-        python_bin,
-        "-m",
-        "vcbet.settlement.settlement_engine",
-        "--ledger-file", str(ledger_file),
-        "--results-file", str(results_file),
-    ]
+    try:
+        df = load_ledger_for_results(ledger_file)
+        targets = build_targets(df, only_ready=False, grace_minutes=results_grace_minutes)
+        if not targets:
+            results_stdout_lines.append("Nenhum jogo pendente elegível para coleta.")
+        else:
+            debug_dir_obj = debug_dir if results_debug else None
+            if results_source == "browser":
+                results = collect_results_sofascore_browser(
+                    targets,
+                    debug=results_debug,
+                    debug_dir=debug_dir_obj,
+                    max_pages=results_max_pages,
+                )
+            elif results_source == "api":
+                results = collect_results_sofascore_api(
+                    targets,
+                    debug=results_debug,
+                    debug_dir=debug_dir_obj,
+                    max_pages=results_max_pages,
+                )
+            else:
+                results = collect_results_sofascore_auto(
+                    targets,
+                    debug=results_debug,
+                    debug_dir=debug_dir_obj,
+                    max_pages=results_max_pages,
+                )
+            output_path = save_results_csv(results, results_file)
+            results_stdout_lines.append(summarize(results))
+            results_stdout_lines.append(f"Arquivo salvo: {output_path}")
+    except Exception as exc:
+        results_stderr_lines.append(str(exc))
+        results_return_code = 1
 
-    results_proc = subprocess.run(results_cmd, cwd=Path.cwd(), capture_output=True, text=True)
-    settlement_proc = subprocess.run(settlement_cmd, cwd=Path.cwd(), capture_output=True, text=True) if results_proc.returncode == 0 else None
+    settlement_return_code: int | None = None
+    if results_return_code == 0:
+        try:
+            settle_ledger(
+                ledger_file=ledger_file,
+                results_file=results_file,
+                overrides_file=None,
+            )
+            settlement_return_code = 0
+            settlement_stdout_lines.append(f"Ledger atualizado: {ledger_file}")
+        except Exception as exc:
+            settlement_stderr_lines.append(str(exc))
+            settlement_return_code = 1
 
     return {
         "results_file": str(results_file),
-        "results_return_code": results_proc.returncode,
-        "results_stdout_tail": results_proc.stdout.splitlines()[-50:],
-        "results_stderr_tail": results_proc.stderr.splitlines()[-30:],
-        "settlement_return_code": settlement_proc.returncode if settlement_proc else None,
-        "settlement_stdout_tail": settlement_proc.stdout.splitlines()[-50:] if settlement_proc else [],
-        "settlement_stderr_tail": settlement_proc.stderr.splitlines()[-30:] if settlement_proc else [],
+        "results_return_code": results_return_code,
+        "results_stdout_tail": results_stdout_lines[-50:],
+        "results_stderr_tail": results_stderr_lines[-30:],
+        "settlement_return_code": settlement_return_code,
+        "settlement_stdout_tail": settlement_stdout_lines[-50:] if settlement_return_code is not None else [],
+        "settlement_stderr_tail": settlement_stderr_lines[-30:] if settlement_return_code is not None else [],
         "settlement_summary": _summarize_replay_ledger(ledger_file),
     }
 
@@ -222,29 +261,24 @@ def _run_single_replay(
         (replay_dir / "replay_result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return payload
 
-    cmd = [
-        python_bin,
-        "-m",
-        "vcbet.core.pipeline_ev",
-        "--run-id", replay_run_id,
-        "--odds-file", str(source_info["odds_path"]),
-        "--xg-file", str(source_info["xg_path"]),
-        "--alias-file", alias_file,
-        "--ledger-file", str(ledger_file),
-        "--output-dir", str(output_root),
-        "--snapshot-reference-timestamp", str(snapshot_reference_timestamp),
-    ]
-    if config_path:
-        cmd += ["--config-file", str(config_path)]
-    else:
-        cmd += ["--config-name", config_ref]
-
-    result = subprocess.run(
-        cmd,
-        cwd=Path.cwd(),
-        capture_output=True,
-        text=True,
-    )
+    replay_stdout: list[str] = []
+    replay_stderr: list[str] = []
+    return_code = 0
+    try:
+        processar_pipeline(
+            odds_file=str(source_info["odds_path"]),
+            xg_file=str(source_info["xg_path"]),
+            run_id=replay_run_id,
+            output_dir=str(output_root),
+            alias_file=alias_file,
+            ledger_file=str(ledger_file),
+            config_file=str(config_path) if config_path else None,
+            config_name=config_ref if not config_path else None,
+            snapshot_reference_timestamp=str(snapshot_reference_timestamp),
+        )
+    except Exception as exc:
+        return_code = 1
+        replay_stderr.append(str(exc))
 
     replay_picks = replay_dir / "picks_snapshot.csv"
     candidate_df = _load_picks_csv(replay_picks)
@@ -253,7 +287,7 @@ def _run_single_replay(
     asian_total_line_drift = _asian_total_line_drift(reference_df, candidate_df)
 
     settlement_payload = None
-    if evaluate_results and result.returncode == 0:
+    if evaluate_results and return_code == 0:
         settlement_payload = _run_replay_settlement(
             replay_dir=replay_dir,
             ledger_file=ledger_file,
@@ -269,9 +303,9 @@ def _run_single_replay(
         "config_name": config_name,
         "config_path": str(config_path) if config_path else config_ref,
         "run_id": replay_run_id,
-        "return_code": result.returncode,
-        "stdout_tail": result.stdout.splitlines()[-80:],
-        "stderr_tail": result.stderr.splitlines()[-40:],
+        "return_code": return_code,
+        "stdout_tail": replay_stdout[-80:],
+        "stderr_tail": replay_stderr[-40:],
         "picks_total": int(len(candidate_df)),
         "picks_by_market": _sorted_counter_dict(candidate_df.get("market_type", pd.Series(dtype=object))),
         "picks_by_league": _sorted_counter_dict(candidate_df.get("league", pd.Series(dtype=object))),

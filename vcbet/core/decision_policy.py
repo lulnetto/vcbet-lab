@@ -180,6 +180,10 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
     if ev_decimal < thresholds.edge_min:
         return None, "edge_below_min", None
 
+    max_ev_percent = float(runtime.rules.get("max_ev_percent", 20.0))
+    if ev_decimal * 100 > max_ev_percent:
+        return None, "ev_outlier_above_max", _rejected_candidate_payload(candidate, reject_reason="ev_outlier_above_max")
+
     flags = assess_risk_flags(candidate)
     confidence_score, reasons, cap_value = _confidence_score(candidate, flags)
     blocked_flags = safety_gate_flags(flags)

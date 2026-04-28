@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from vcbet.core.data_health import validate_snapshot_health
 from vcbet.core.market_normalizer import normalize_odds_dataframe
 from vcbet.core.run_utils import ensure_run_dir
 from vcbet.core.strategy_config import save_runtime_snapshot

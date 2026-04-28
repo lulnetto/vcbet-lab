@@ -229,11 +229,15 @@ def append_new_picks_to_ledger_result(picks_df: pd.DataFrame, ledger_file: str |
             existing_key_to_bet_id[identity_key] = bet_id
 
         if new_rows:
+            new_df = pd.DataFrame(new_rows)
             if ledger_df.empty:
-                ledger_df = normalize_ledger_schema(pd.DataFrame(new_rows))
+                ledger_df = normalize_ledger_schema(new_df)
             else:
-                for new_row in new_rows:
-                    ledger_df.loc[len(ledger_df)] = {column: new_row.get(column, pd.NA) for column in ledger_df.columns}
+                for column in ledger_df.columns:
+                    if column not in new_df.columns:
+                        new_df[column] = pd.NA
+                new_df = new_df[ledger_df.columns]
+                ledger_df = pd.concat([ledger_df, new_df], ignore_index=True)
 
         ledger_df, _removed_duplicates = deduplicate_ledger_rows(ledger_df)
         save_ledger_unlocked(ledger_df, path)

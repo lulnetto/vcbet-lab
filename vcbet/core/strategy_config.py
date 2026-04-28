@@ -103,8 +103,11 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
     },
     "data_quality": {
         "max_snapshot_age_hours": 36,
+        "max_invalid_snapshot_row_rate": 0.25,
+        "require_snapshot_health_ok": True,
     },
     "rules": {
+        "max_ev_percent": 20.0,
         "very_strong_edge": 0.14,
         "bonuses": {
             "primary_market": 1,

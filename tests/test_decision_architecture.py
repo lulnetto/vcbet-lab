@@ -80,6 +80,26 @@ class DecisionArchitectureTest(unittest.TestCase):
         self.assertEqual(candidate["odd_justa"], 1.75)
         self.assertEqual(candidate["prob_model"], 0.571429)
 
+    def test_ev_outlier_above_max_is_rejected_explicitly(self) -> None:
+        candidate = base_candidate(ev_decimal=0.25, odd_entrada=2.5)
+
+        evaluated, reject_reason, rejected = evaluate_pick_candidate_with_details(candidate)
+
+        self.assertIsNone(evaluated)
+        self.assertEqual(reject_reason, "ev_outlier_above_max")
+        self.assertIsNotNone(rejected)
+        assert rejected is not None
+        self.assertEqual(rejected["decision_reject_reason"], "ev_outlier_above_max")
+
+    def test_ev_at_max_boundary_passes(self) -> None:
+        candidate = base_candidate(ev_decimal=0.20, odd_entrada=2.2)
+
+        evaluated, reject_reason, rejected = evaluate_pick_candidate_with_details(candidate)
+
+        self.assertIsNotNone(evaluated)
+        self.assertIsNone(reject_reason)
+        self.assertIsNone(rejected)
+
     def test_risk_policy_blocking_is_distinct_from_value_rejection(self) -> None:
         candidate = base_candidate(match_status_home="auto_fuzzy_high")
         flags = assess_risk_flags(candidate)
