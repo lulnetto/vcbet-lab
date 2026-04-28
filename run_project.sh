@@ -50,7 +50,7 @@ Parâmetros:
   --python-bin   Binário do Python (default: python3)
   --config-file  Arquivo JSON da estratégia
   --config-name  Preset da estratégia em ./configs
-  --xg-source    footystats | fotmob (default: footystats)
+  --xg-source    fotmob | footystats (default: fotmob)
 USAGE
 }
 
@@ -250,7 +250,23 @@ fi
 
 echo "[FULL] Ligas detectadas nas odds: $ACTIVE_LEAGUES"
 
-XG_ARGS=(--run-id "$RUN_ID" --data "$TARGET_DATE" --output-dir "$OUTPUT_DIR" --leagues "$ACTIVE_LEAGUES")
+DAILY_XG_DIR="data/xg/$TARGET_DATE"
+DAILY_XG_SNAPSHOT="$DAILY_XG_DIR/xg_snapshot.csv"
+
+if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
+  echo "[FULL] Reutilizando snapshot xG diário: $DAILY_XG_SNAPSHOT"
+  cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
+else
+  echo "[FULL] Coletando snapshot xG diário (fonte: $XG_SOURCE)..."
+  "$PYTHON_BIN" -m vcbet.collectors.xg_daily_store \
+    --date "$TARGET_DATE" \
+    --source "$XG_SOURCE" \
+    --leagues "$ACTIVE_LEAGUES"
+  if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
+    cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
+  fi
+fi
+
 PIPELINE_ARGS=(
   --run-id "$RUN_ID"
   --odds-file "$ODDS_SNAPSHOT"
@@ -261,7 +277,6 @@ PIPELINE_ARGS=(
 )
 
 if [[ "$DEBUG" -eq 1 ]]; then
-  XG_ARGS+=(--debug)
   PIPELINE_ARGS+=(--debug)
 fi
 
@@ -270,12 +285,6 @@ if [[ -n "$CONFIG_FILE" ]]; then
 fi
 if [[ -n "$CONFIG_NAME" ]]; then
   PIPELINE_ARGS+=(--config-name "$CONFIG_NAME")
-fi
-
-if [[ "$XG_SOURCE" == "fotmob" ]]; then
-  "$PYTHON_BIN" -m vcbet.collectors.fotmob_xg_collector "${XG_ARGS[@]}"
-else
-  "$PYTHON_BIN" -m vcbet.collectors.footystats_xg_collector "${XG_ARGS[@]}"
 fi
 
 if [[ ! -f "$XG_SNAPSHOT" ]]; then

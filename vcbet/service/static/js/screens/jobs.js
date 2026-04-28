@@ -4,6 +4,7 @@ async function submitAnalysis() {
     date: document.getElementById('analysisDate').value || null,
     ledger_file: document.getElementById('analysisLedger').value,
     config_name: document.getElementById('analysisConfig').value,
+    xg_source: document.getElementById('analysisXgSource').value,
     debug: document.getElementById('analysisDebug').checked,
     dry_run: document.getElementById('analysisDryRun').checked,
   });
@@ -15,6 +16,7 @@ async function submitDailyRun() {
     ledger_file: document.getElementById('dailyLedger').value,
     results_file: document.getElementById('dailyResults').value,
     config_name: document.getElementById('dailyConfig').value,
+    xg_source: document.getElementById('dailyXgSource').value,
     debug: document.getElementById('dailyDebug').checked,
     skip_results_collection: document.getElementById('skipResults').checked,
     skip_settlement: document.getElementById('skipSettlement').checked,
@@ -69,7 +71,9 @@ function formatJob(job) {
   const config = req.config_name ? ` | config=${req.config_name}` : '';
   const replayCfg = req.configs ? ` | configs=${req.configs.join(',')}` : '';
   const canCancel = ['queued','running'].includes(job.status);
+  const canDelete = !canCancel;
   const cancelButton = canCancel ? `<button class="danger small" onclick="cancelJob('${escapeHtml(job.id)}')">cancelar</button>` : '';
+  const deleteButton = canDelete ? `<button class="danger small" onclick="deleteJob('${escapeHtml(job.id)}')">deletar</button>` : '';
   const failed = ['failed','error'].includes(String(job.status || '').toLowerCase());
   const requestBits = [
     req.target_date ? `data=${req.target_date}` : '',
@@ -86,6 +90,7 @@ function formatJob(job) {
     <div class="inline" style="margin-top:8px;">
       <button class="ghost small" onclick="viewLogs('${escapeHtml(job.id)}')">logs</button>
       ${cancelButton}
+      ${deleteButton}
     </div></div>`;
 }
 
@@ -150,6 +155,18 @@ async function cancelJob(jobId) {
   await loadJobs();
 }
 
+async function deleteJob(jobId) {
+  if (!confirm('Deletar este job permanentemente?')) return;
+  await api(`/jobs/${jobId}`, { method:'DELETE' });
+  await loadJobs();
+}
+
+async function cleanupFailedJobs() {
+  if (!confirm('Remover todos os jobs com erro finalizados?')) return;
+  await api('/jobs/cleanup-failed', { method:'POST' });
+  await loadJobs();
+}
+
 Object.assign(window, {
   submitAnalysis,
   submitDailyRun,
@@ -165,4 +182,6 @@ Object.assign(window, {
   viewLogs,
   reloadSelectedLogs,
   cancelJob,
+  deleteJob,
+  cleanupFailedJobs,
 });

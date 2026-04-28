@@ -132,6 +132,7 @@
           <summary>Avançado</summary>
           <div class="row" style="margin-top:10px;">
             <div><label>Modo</label><select id="analysisMode"><option value="full">full</option><option value="legacy">legacy</option></select></div>
+            <div><label>Fonte xG</label><select id="analysisXgSource"><option value="fotmob" selected>fotmob</option><option value="footystats">footystats</option></select></div>
             <div><label>Ledger file manual</label><input id="analysisLedger" value="data/history/bets_ledger.csv"></div>
           </div>
           <div class="inline" style="margin-top:10px;">
@@ -148,6 +149,7 @@
         <div class="row">
           <div><label>Data</label><input id="dailyDate" type="date"></div>
           <div><label>Config</label><select id="dailyConfig"></select></div>
+          <div><label>Fonte xG</label><select id="dailyXgSource"><option value="fotmob" selected>fotmob</option><option value="footystats">footystats</option></select></div>
           <div><label>Ledger</label><select id="dailyLedgerSelect"></select></div>
         </div>
         <details class="advanced">
@@ -272,7 +274,7 @@
     <div class="grid">
       <div class="card">
         <div class="section-title"><h2>Registry de Times</h2><button class="ghost" onclick="loadTeamRegistry(true)">Atualizar</button></div>
-        <p class="muted">Fonte principal para aliases Betano ↔ FootyStats. Aprove pendências aqui para reutilizar em próximas runs.</p>
+        <p class="muted">Fonte principal para aliases Betano ↔ fonte xG. Aprove pendências aqui para reutilizar em próximas runs.</p>
         <div class="row">
           <div><label>Liga</label><select id="teamRegistryLeague"></select></div>
           <div style="align-self:end;"><button id="teamRegistrySyncLeagueBtn" class="green" onclick="syncSelectedTeamRegistryLeague()">Sincronizar liga</button></div>
@@ -322,7 +324,7 @@
   <section id="tab-jobs" class="tab">
     <div class="jobs-grid">
       <div class="card">
-        <div class="section-title"><h2>Monitor</h2><div class="inline"><span class="muted">auto 5s</span><button class="ghost" onclick="loadJobs()">Atualizar</button></div></div>
+        <div class="section-title"><h2>Monitor</h2><div class="inline"><span class="muted">auto 5s</span><button class="ghost" onclick="loadJobs()">Atualizar</button><button class="ghost danger small" onclick="cleanupFailedJobs()">Limpar com erro</button></div></div>
         <div class="inline pager">
           <button class="ghost small" onclick="previousJobsPage()">Anterior</button>
           <span class="muted" id="jobsPageInfo">Página 1</span>

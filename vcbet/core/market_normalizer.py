@@ -105,11 +105,176 @@ DEFAULT_NORMALIZED = {
 }
 
 
+def _normalize_btts(selection: str, selection_slug: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    result.update(
+        {
+            "market_type": "btts",
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+        }
+    )
+    if selection_slug == "sim":
+        result.update({"side": "yes", "line": None, "normalized_status": "ok"})
+        return result
+    if selection_slug in {"nao", "não"}:
+        result.update({"side": "no", "line": None, "normalized_status": "ok"})
+        return result
+    result["normalized_status"] = "unknown_selection"
+    return result
+
+
+def _normalize_asian_handicap(
+    selection: str, result: Dict[str, Any], home_team: str, away_team: str
+) -> Dict[str, Any]:
+    parsed = parse_numeric_line_suffix(selection)
+    if parsed is None:
+        result["normalized_status"] = "unknown_selection"
+        return result
+
+    team_name, line = parsed
+    if compare_team_name(team_name, home_team):
+        target_role = "home"
+        side = "home"
+        canonical_name = home_team
+    elif compare_team_name(team_name, away_team):
+        target_role = "away"
+        side = "away"
+        canonical_name = away_team
+    else:
+        result["normalized_status"] = "parse_error"
+        return result
+
+    result.update(
+        {
+            "market_type": "asian_handicap",
+            "side": side,
+            "line": line,
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+        }
+    )
+    return result
+
+
+def _normalize_total_goals(selection: str, selection_slug: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    line = parse_numeric_line(selection)
+    if line is None:
+        result["normalized_status"] = "unknown_selection"
+        return result
+    if selection_slug.startswith("mais de"):
+        side = "over"
+    elif selection_slug.startswith("menos de"):
+        side = "under"
+    else:
+        result["normalized_status"] = "unknown_selection"
+        return result
+
+    result.update(
+        {
+            "market_type": "total_goals",
+            "side": side,
+            "line": line,
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "normalized_status": "ok",
+        }
+    )
+    return result
+
+
+def _normalize_asian_total(selection: str, selection_slug: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    line = parse_numeric_line(selection)
+    if line is None:
+        result["normalized_status"] = "unknown_selection"
+        return result
+    if selection_slug.startswith("mais de"):
+        side = "over"
+    elif selection_slug.startswith("menos de"):
+        side = "under"
+    else:
+        result["normalized_status"] = "unknown_selection"
+        return result
+
+    result.update(
+        {
+            "market_type": "asian_total",
+            "side": side,
+            "line": line,
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "normalized_status": "ok",
+        }
+    )
+    return result
+
+
+def _normalize_team_total(
+    selection: str,
+    selection_slug: str,
+    result: Dict[str, Any],
+    home_team: str,
+    away_team: str,
+    target_role: str,
+) -> Dict[str, Any]:
+    line = parse_numeric_line(selection)
+    if line is None:
+        result["normalized_status"] = "unknown_selection"
+        return result
+
+    if selection_slug.startswith("mais de"):
+        side = "over"
+    elif selection_slug.startswith("menos de"):
+        side = "under"
+    else:
+        result["normalized_status"] = "unknown_selection"
+        return result
+
+    canonical_name = home_team if target_role == "home" else away_team
+
+    result.update(
+        {
+            "market_type": "team_total",
+            "side": side,
+            "line": line,
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+        }
+    )
+    return result
+
+
+def _normalize_by_family(
+    family: str,
+    selection: str,
+    selection_slug: str,
+    result: Dict[str, Any],
+    home_team: str,
+    away_team: str,
+) -> Dict[str, Any] | None:
+    if family == "btts":
+        return _normalize_btts(selection, selection_slug, result)
+    if family == "asian_handicap":
+        return _normalize_asian_handicap(selection, result, home_team, away_team)
+    if family == "asian_total":
+        return _normalize_asian_total(selection, selection_slug, result)
+    if family in {"asian_total_or_total_ou", "total_goals", "total_goals_alt"}:
+        return _normalize_total_goals(selection, selection_slug, result)
+    if family == "home_team_total_ou":
+        return _normalize_team_total(selection, selection_slug, result, home_team, away_team, "home")
+    if family == "away_team_total_ou":
+        return _normalize_team_total(selection, selection_slug, result, home_team, away_team, "away")
+    return None
+
+
 def normalize_market_entry(
     market_raw: str,
     selection_raw: str,
     home_team: str,
     away_team: str,
+    betano_market_type_id: int | None = None,
+    betano_market_family: str | None = None,
 ) -> Dict[str, Any]:
     market = str(market_raw or "").strip()
     selection = str(selection_raw or "").strip()
@@ -140,103 +305,26 @@ def normalize_market_entry(
         result["normalized_status"] = "ignored_market"
         return result
 
-    if "ambas equipes marcam" in market_slug:
-        result.update(
-            {
-                "market_type": "btts",
-                "target_team_role": "geral",
-                "target_team_name": "geral",
-            }
+    # Priority: betano_market_family when available
+    if betano_market_family:
+        family_result = _normalize_by_family(
+            betano_market_family, selection, selection_slug, result, home_team, away_team
         )
-        if selection_slug == "sim":
-            result.update({"side": "yes", "line": None, "normalized_status": "ok"})
-            return result
-        if selection_slug in {"nao", "não"}:
-            result.update({"side": "no", "line": None, "normalized_status": "ok"})
-            return result
-        result["normalized_status"] = "unknown_selection"
-        return result
+        if family_result is not None:
+            return family_result
+
+    # Legacy fallback by market name
+    if "ambas equipes marcam" in market_slug:
+        return _normalize_btts(selection, selection_slug, result)
 
     if "handicap asiatico" in market_slug:
-        parsed = parse_numeric_line_suffix(selection)
-        if parsed is None:
-            result["normalized_status"] = "unknown_selection"
-            return result
-
-        team_name, line = parsed
-        if compare_team_name(team_name, home_team):
-            target_role = "home"
-            side = "home"
-            canonical_name = home_team
-        elif compare_team_name(team_name, away_team):
-            target_role = "away"
-            side = "away"
-            canonical_name = away_team
-        else:
-            result["normalized_status"] = "parse_error"
-            return result
-
-        result.update(
-            {
-                "market_type": "asian_handicap",
-                "side": side,
-                "line": line,
-                "target_team_role": target_role,
-                "target_team_name": canonical_name,
-                "normalized_status": "ok",
-            }
-        )
-        return result
+        return _normalize_asian_handicap(selection, result, home_team, away_team)
 
     if market_slug == "total de gols mais/menos":
-        line = parse_numeric_line(selection)
-        if line is None:
-            result["normalized_status"] = "unknown_selection"
-            return result
-        if selection_slug.startswith("mais de"):
-            side = "over"
-        elif selection_slug.startswith("menos de"):
-            side = "under"
-        else:
-            result["normalized_status"] = "unknown_selection"
-            return result
-
-        result.update(
-            {
-                "market_type": "total_goals",
-                "side": side,
-                "line": line,
-                "target_team_role": "geral",
-                "target_team_name": "geral",
-                "normalized_status": "ok",
-            }
-        )
-        return result
+        return _normalize_total_goals(selection, selection_slug, result)
 
     if market_slug == "asiatico (mais/menos) total de gols":
-        line = parse_numeric_line(selection)
-        if line is None:
-            result["normalized_status"] = "unknown_selection"
-            return result
-        if selection_slug.startswith("mais de"):
-            side = "over"
-        elif selection_slug.startswith("menos de"):
-            side = "under"
-        else:
-            result["normalized_status"] = "unknown_selection"
-            return result
-
-        result.update(
-            {
-                "market_type": "asian_total",
-                "side": side,
-                "line": line,
-                "target_team_role": "geral",
-                "target_team_name": "geral",
-                "normalized_status": "ok",
-            }
-        )
-        return result
+        return _normalize_asian_total(selection, selection_slug, result)
 
     if market_slug.endswith(" - total de gols mais/menos"):
         team_name = market.rsplit(" - Total de Gols Mais/Menos", 1)[0].strip()
@@ -302,6 +390,8 @@ def normalize_odds_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             selection_raw=row.get("selection_raw"),
             home_team=row.get("home_team", ""),
             away_team=row.get("away_team", ""),
+            betano_market_type_id=row.get("betano_market_type_id"),
+            betano_market_family=row.get("betano_market_family"),
         )
         for _, row in df.iterrows()
     ]

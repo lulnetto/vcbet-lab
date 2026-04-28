@@ -52,6 +52,7 @@ class AnalysisRequest(BaseModel):
     dry_run: bool = False
     config_file: str | None = None
     config_name: str | None = None
+    xg_source: str = "fotmob"
 
 
 class ClosingOddsRequest(BaseModel):
@@ -120,6 +121,7 @@ class DailyRunRequest(BaseModel):
     refresh_catalogs: bool = True
     config_file: str | None = None
     config_name: str | None = None
+    xg_source: str = "fotmob"
 
 
 class ReplayRunRequest(BaseModel):
@@ -133,6 +135,7 @@ class ReplayRunRequest(BaseModel):
     results_grace_minutes: int = 110
     results_max_pages: int = 6
     results_debug: bool = False
+    persist: bool = False
 
 
 class AliasApprovalItem(BaseModel):
@@ -155,6 +158,8 @@ class TeamRegistryAliasRequest(BaseModel):
     betano_url: str = ""
     suggested_footystats_name: str | None = None
     footystats_name: str | None = None
+    canonical_xg_name: str | None = None
+    xg_provider: str = "fotmob"
     top_score: str | None = None
     review_reason: str | None = None
     ambiguous_options: str | None = None

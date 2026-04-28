@@ -60,6 +60,21 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
             return {"job_id": job_id, "cancelled": False, "message": "job não está rodando"}
         return {"job_id": job_id, "cancelled": True}
 
+    @app.delete("/jobs/{job_id}")
+    def delete_job(job_id: str):
+        job = ctx.manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job não encontrado")
+        if job.status in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="Não é permitido deletar job em execução. Cancele primeiro.")
+        ctx.manager.store.delete(job_id)
+        return {"job_id": job_id, "deleted": True}
+
+    @app.post("/jobs/cleanup-failed")
+    def cleanup_failed_jobs():
+        removed = ctx.manager.store.delete_finished_failed()
+        return {"removed": removed}
+
     @app.post("/jobs/analysis", response_model=JobCreatedResponse)
     def start_analysis(req: AnalysisRequest) -> JobCreatedResponse:
         try:
@@ -159,7 +174,9 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
     def start_replay_run(req: ReplayRunRequest) -> JobCreatedResponse:
         try:
             command = build_replay_command(ctx.settings.project_root, req)
-            commands = [command, build_replay_catalog_command(ctx.settings.project_root)]
+            commands = [command]
+            if req.persist:
+                commands.append(build_replay_catalog_command(ctx.settings.project_root))
             job = ctx.manager.submit_pipeline_job(
                 title="Replay run",
                 job_type="replay_run",

@@ -74,14 +74,13 @@ function renderTodayCockpit() {
   const incompleteReplay = state.replaySummaries.some(item => ['incomplete','blocked','bad'].some(x => String(item.replay_quality_status || item.temporal_contract_status || '').toLowerCase().includes(x)));
   const warningItems = [];
   if (aliases) warningItems.push(`${aliases} alias(es) pendente(s) em Qualidade de Dados.`);
-  if (!aliases && (legacyAliases || legacyBlockedAliases)) {
-  warningItems.push(`${legacyAliases + legacyBlockedAliases} diagnóstico(s) legado(s) de alias em runs/replays. Registry está sem pendências.`);
-  }
+  // legacy aliases não são pendência operacional se registry está limpo
   if (failedJobs) warningItems.push(`${failedJobs} job(s) com erro no Monitor.`);
   if (state.loadErrors.dashboard) warningItems.push('Carteira não verificada nesta carga.');
   if (state.loadErrors.replay) warningItems.push('Replay Lab não verificado nesta carga.');
-  if (incompleteReplay) warningItems.push('Há replay com qualidade ou contrato temporal fraco/incompleto.');
-  if (!total && !state.loadErrors.dashboard) warningItems.push('Nenhuma pick disponível no filtro atual.');
+  if (!total && !state.loadErrors.dashboard) {
+    // empty state, não alerta
+  }
 
   document.getElementById('todayDate').textContent = formatPtDate(operationalDate()) || 'não selecionada';
   document.getElementById('todayConfig').textContent = selectedConfigName() || 'não verificada';

@@ -76,6 +76,21 @@ class JobStore:
         records.sort(key=lambda item: item.created_at, reverse=True)
         return records
 
+    def delete(self, job_id: str) -> bool:
+        path = self._path_for(job_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def delete_finished_failed(self) -> int:
+        removed = 0
+        for record in self.list_all():
+            if record.status in {"failed", "cancelled", "interrupted", "blocked"}:
+                if self.delete(record.id):
+                    removed += 1
+        return removed
+
     def mark_interrupted_runs(self) -> None:
         for record in self.list_all():
             if record.status in {"queued", "running"}:

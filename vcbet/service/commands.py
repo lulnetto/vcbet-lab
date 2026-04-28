@@ -57,6 +57,7 @@ def build_analysis_command(project_root: Path, req: AnalysisRequest) -> CommandS
     _append_if(args, req.json_output, "--json")
     _append_if(args, req.debug, "--debug")
     _append_if(args, req.dry_run, "--dry-run")
+    args += ["--xg-source", req.xg_source]
     return CommandSpec(name="analysis", command=args, cwd=project_root)
 
 
@@ -172,6 +173,7 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
                     dry_run=req.dry_run,
                     config_file=req.config_file,
                     config_name=req.config_name,
+                    xg_source=req.xg_source,
                 ),
             )
         )
@@ -230,12 +232,17 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
 
 
 def build_replay_command(project_root: Path, req: ReplayRunRequest) -> CommandSpec:
+    import tempfile
+    if req.persist:
+        output_dir = _resolve(project_root, req.output_dir)
+    else:
+        output_dir = tempfile.mkdtemp(prefix="vcbet_replay_")
     args = [
         req.python_bin,
         "-m",
         "vcbet.replay.replay_pipeline",
         "--source-run-dir", _resolve(project_root, req.source_run_dir),
-        "--output-dir", _resolve(project_root, req.output_dir),
+        "--output-dir", output_dir,
         "--alias-file", _resolve(project_root, req.alias_file),
         "--python-bin", req.python_bin,
     ]

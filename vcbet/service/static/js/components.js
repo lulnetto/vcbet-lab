@@ -395,7 +395,7 @@ function renderTeamRegistryPendingTable(items) {
   renderTable('tableTeamRegistryPending', rows, [
     {key:'league', label:'Liga'},
     {key:'betano_html', label:'Betano', html:true},
-    {key:'suggested_edit', label:'FootyStats', html:true},
+    {key:'suggested_edit', label:'xG', html:true},
     {key:'score_html', label:'Score', html:true},
     {key:'review_reason', label:'Motivo'},
     {key:'options_html', label:'Opções ambíguas', html:true},

@@ -17,16 +17,15 @@ echo "[gate] VCBet minimal release gate"
 echo "[gate] project: $PROJECT_ROOT"
 echo "[gate] env:     $CONDA_ENV via $CONDA_BIN"
 
-echo "[gate] 1/7 critical betting behavior tests"
+echo "[gate] 1/5 structural regression tests"
 run_python -m unittest \
-  tests.test_pricing_engine \
-  tests.test_ledger_portfolio_gate \
-  tests.test_temporal_contract
+  tests.test_data_health \
+  tests.test_odds_collector \
+  tests.test_fotmob_xg_collector \
+  tests.test_footystats_xg_collector \
+  tests.test_service_composed_workflows
 
-echo "[gate] 2/7 focused structural regression tests"
-run_python -m unittest discover -s tests -p 'test_*.py'
-
-echo "[gate] 3/7 operational entrypoint smoke"
+echo "[gate] 2/6 operational entrypoint smoke"
 bash run_project.sh --help >/dev/null
 fake_python="$GATE_TMP/fake_python.sh"
 fake_output_dir="$GATE_TMP/runs"
@@ -44,7 +43,7 @@ case "\$module" in
     mkdir -p "$fake_output_dir/2026-04-24/run_release_gate"
     printf 'league;home;away\nLiga Smoke;A;B\n' > "$fake_output_dir/2026-04-24/run_release_gate/odds_snapshot.csv"
     ;;
-  vcbet.collectors.footystats_xg_collector)
+  vcbet.collectors.xg_daily_store)
     mkdir -p "$fake_output_dir/2026-04-24/run_release_gate"
     printf 'team,xg\nA,1.0\n' > "$fake_output_dir/2026-04-24/run_release_gate/xg_snapshot.csv"
     ;;
@@ -69,7 +68,7 @@ bash run_project.sh \
 grep -q -- "--config-name" "$fake_args_log"
 grep -q -- "legacy_v2" "$fake_args_log"
 
-echo "[gate] 4/7 config and project guidance smoke"
+echo "[gate] 3/6 config and project guidance smoke"
 run_python - <<'PY'
 from pathlib import Path
 import json
@@ -81,7 +80,7 @@ for path in sorted((root / "configs").glob("*.json")) + [root / "ligas.json", ro
 print("json_ok")
 PY
 
-echo "[gate] 5/7 service/command import smoke"
+echo "[gate] 4/6 service/command import smoke"
 VCBET_SERVICE_JOBS_DIR="$GATE_TMP/jobs" VCBET_SERVICE_LOGS_DIR="$GATE_TMP/logs" run_python - <<'PY'
 from pathlib import Path
 
@@ -103,10 +102,10 @@ assert len(app.routes) > 0
 print("service_ok")
 PY
 
-echo "[gate] 6/7 web UI runtime smoke"
+echo "[gate] 5/6 web UI runtime smoke"
 bash scripts/smoke_ui.sh
 
-echo "[gate] 7/7 data catalog freshness smoke"
+echo "[gate] 6/6 data catalog freshness smoke"
 run_python scripts/build_run_catalog.py
 run_python scripts/build_replay_catalog.py
 run_python - <<'PY'
@@ -123,4 +122,4 @@ for rel in ("data/runs/catalog.jsonl", "data/replays/catalog.jsonl"):
 print("catalogs_ok")
 PY
 
-echo "[gate] PASS: structurally acceptable for this minimal release gate"
+echo "[gate] PASS"

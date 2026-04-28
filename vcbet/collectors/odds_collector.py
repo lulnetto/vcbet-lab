@@ -30,18 +30,26 @@ BLOCK_INDICATORS = [
 MAX_EVENT_FAILURE_RATE = 0.25
 MIN_RAW_SELECTIONS_PER_EVENT = 10
 MIN_SUPPORTED_ROWS_PER_EVENT = 2
+MIN_SUPPORTED_MARKET_TYPES_PER_EVENT = 1
 MIN_FINAL_ROWS_TOTAL = 1
 
 LEAGUE_FETCH_RETRIES = 3
 EVENT_FETCH_RETRIES = 3
 RETRY_DELAY_BASE = 1.0
 
-SUPPORTED_MARKET_NAMES = [
-    "Total de Gols Mais/Menos",
-    "Ambas equipes Marcam",
-    "Total de gols",
-    "Handicap Asiático",
-]
+DEFAULT_BETANO_BT = "14"
+
+SUPPORTED_MARKET_TYPE_IDS = {
+    13: "asian_total_or_total_ou",
+    15: "btts",
+    84: "home_team_total_ou",
+    85: "away_team_total_ou",
+    185: "asian_handicap",
+    189: "asian_total",
+    2818: "total_goals",
+    104: "total_goals_alt",
+    503: "total_goals_alt",
+}
 
 
 def extract_initial_state_json(html: str) -> dict:
@@ -116,17 +124,41 @@ def _iter_selections(market: dict) -> Iterator[Tuple[dict, dict]]:
             for sel in group.get("selections", []):
                 yield sel, {**row_meta, **group_meta}
 
-def force_bt99_url(url: str) -> str:
+
+def force_bt_url(url: str, bt: str = DEFAULT_BETANO_BT) -> str:
     parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query["bt"] = "15"
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() != "bt"
+    ]
+    query.append(("bt", str(bt)))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def url_has_bt99(url: str) -> bool:
+def url_has_expected_bt(url: str, bt: str = DEFAULT_BETANO_BT) -> bool:
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    return query.get("bt") == "15"
+    return query.get("bt") == str(bt)
+
+
+def build_betano_api_odds_url(match_path: str, base_url: str = "https://www.betano.bet.br", bt: str = DEFAULT_BETANO_BT) -> str:
+    if match_path.startswith("http"):
+        parts = urlsplit(match_path)
+        path = parts.path
+    else:
+        path = match_path
+
+    path = path.rstrip("/")
+    if not path.startswith("/"):
+        path = "/" + path
+
+    if "/api/odds/" not in path:
+        path = path.replace("/odds/", "/api/odds/", 1)
+
+    url = f"{base_url}{path}"
+    return force_bt_url(url, bt)
+
 
 class BetanoExtractor:
     def __init__(self):
@@ -180,6 +212,65 @@ class BetanoExtractor:
 
         raise RuntimeError(f"{description} max retries exceeded")
 
+    def _fetch_json(self, url: str, description: str, max_retries: int = 3) -> dict:
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.session.get(url, timeout=15)
+            except Exception as exc:
+                logging.warning(f"{description} fetch error (attempt {attempt}/{max_retries}): {exc}")
+                if attempt == max_retries:
+                    raise RuntimeError(f"{description} fetch failed after {max_retries} attempts: {exc}") from exc
+                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(delay)
+                continue
+
+            if not (200 <= response.status_code < 300):
+                logging.warning(f"{description} non-2xx status {response.status_code} (attempt {attempt}/{max_retries})")
+                if attempt == max_retries:
+                    raise RuntimeError(f"{description} non-2xx status {response.status_code}")
+                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(delay)
+                continue
+
+            content_type = response.headers.get("Content-Type", "")
+            if "json" not in content_type.lower():
+                blocked = is_page_blocked(response.text)
+                if blocked:
+                    logging.warning(f"{description} blocked page indicator '{blocked}' (attempt {attempt}/{max_retries})")
+                    if attempt == max_retries:
+                        raise RuntimeError(f"{description} blocked page indicator: {blocked}")
+                    delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                    time.sleep(delay)
+                    continue
+                if attempt == max_retries:
+                    raise RuntimeError(f"{description} response is not JSON (content-type={content_type})")
+                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(delay)
+                continue
+
+            try:
+                data = response.json()
+            except json.JSONDecodeError as exc:
+                logging.warning(f"{description} JSON decode error (attempt {attempt}/{max_retries}): {exc}")
+                if attempt == max_retries:
+                    raise RuntimeError(f"{description} JSON decode error: {exc}")
+                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(delay)
+                continue
+
+            if not isinstance(data, dict) or "data" not in data or "event" not in data.get("data", {}):
+                logging.warning(f"{description} missing data.event (attempt {attempt}/{max_retries})")
+                if attempt == max_retries:
+                    raise RuntimeError(f"{description} missing data.event in JSON response")
+                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(delay)
+                continue
+
+            logging.info(f"Betano API JSON fetched | requested={url} | final={response.url}")
+            return data
+
+        raise RuntimeError(f"{description} max retries exceeded")
+
     def get_match_urls_by_date(self, league_path: str, target_date: str) -> Tuple[List[str], Dict[str, Any]]:
         url = f"{self.base_url}{league_path}"
         try:
@@ -205,20 +296,23 @@ class BetanoExtractor:
 
         return list(set(match_urls)), {"success": True, "events_found": len(match_urls)}
 
-    def _parse_event_odds(self, state: dict, min_odd: float, league_name: str, run_id: str, event_url: str) -> Tuple[List[Dict], Dict[str, Any]]:
+    def _parse_event_odds(self, state: dict, league_name: str, run_id: str, event_url: str) -> Tuple[List[Dict], Dict[str, Any]]:
         rows: List[Dict] = []
         diag: Dict[str, Any] = {
             "success": False,
             "raw_markets_seen": 0,
             "raw_selections_seen": 0,
-            "supported_market_rows_before_min_odd": 0,
-            "rows_after_min_odd_filter": 0,
+            "supported_market_rows_seen": 0,
+            "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
             "markets_seen_by_name": {},
+            "markets_seen_by_type_id": {},
+            "supported_market_type_ids_seen": [],
             "failure_reason": None,
             "declared_total_markets": 0,
             "market_completeness_ratio": 0.0,
+            "missing_supported_market_type_ids": [],
         }
         try:
             event_data = state["data"]["event"]
@@ -236,40 +330,42 @@ class BetanoExtractor:
                 diag["market_completeness_ratio"] = len(markets) / declared_total_markets
             betano_markets_count = len(markets)
 
-            if declared_total_markets >= 100 and len(markets) < declared_total_markets * 0.50:
-                diag["failure_reason"] = "event_markets_incomplete"
-                logging.error(
-                    f"Evento {event_url} parcial: {len(markets)} mercados extraídos de {declared_total_markets} "
-                    f"(ratio {diag['market_completeness_ratio']:.2f})"
-                )
-                return [], diag
-
             collected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            seen_type_ids: set[int] = set()
 
             for market in markets:
                 market_name = market.get("name", "")
                 diag["markets_seen_by_name"][market_name] = diag["markets_seen_by_name"].get(market_name, 0) + 1
 
                 market_type = market.get("type")
-                market_type_id = market.get("typeId")
+                raw_type_id = market.get("typeId")
                 market_id = market.get("id")
 
-                is_supported_name = any(key.lower() in market_name.lower() for key in SUPPORTED_MARKET_NAMES)
+                try:
+                    market_type_id = int(raw_type_id) if raw_type_id is not None else None
+                except (TypeError, ValueError):
+                    market_type_id = None
+
+                if market_type_id is not None:
+                    diag["markets_seen_by_type_id"][market_type_id] = diag["markets_seen_by_type_id"].get(market_type_id, 0) + 1
+
+                if market_type_id not in SUPPORTED_MARKET_TYPE_IDS:
+                    continue
+
+                seen_type_ids.add(market_type_id)
 
                 for sel, meta in _iter_selections(market):
                     diag["raw_selections_seen"] += 1
-                    if not is_supported_name:
-                        continue
-                    diag["supported_market_rows_before_min_odd"] += 1
+                    diag["supported_market_rows_seen"] += 1
 
                     odd_value = sel.get("price")
                     try:
                         if odd_value is None:
                             continue
                         odd_float = float(odd_value)
-                        if odd_float < min_odd:
+                        if odd_float <= 0:
                             continue
-                        diag["rows_after_min_odd_filter"] += 1
+                        diag["supported_market_rows_with_valid_odd"] += 1
                     except (ValueError, TypeError):
                         continue
 
@@ -278,6 +374,8 @@ class BetanoExtractor:
                         selection_raw=sel.get("name"),
                         home_team=home_team,
                         away_team=away_team,
+                        betano_market_type_id=market_type_id,
+                        betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
                     )
 
                     if normalized.get("normalized_status") == "ok":
@@ -305,16 +403,38 @@ class BetanoExtractor:
                             "betano_market_id": market_id,
                             "betano_market_type": market_type,
                             "betano_market_type_id": market_type_id,
+                            "betano_market_unique_id": market.get("uniqueId"),
+                            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS[market_type_id],
                             "betano_selection_id": sel.get("id"),
                             "betano_bet_ref": sel.get("betRef"),
                             "betano_total_markets_available": total_markets_available,
                             "betano_markets_count": betano_markets_count,
-                            "betano_fetch_method": "event_initial_state_bt99",
+                            "betano_fetch_method": "event_api_odds_bt14",
                             "betano_table_row_name": meta.get("table_row_name"),
                             "betano_group_name": meta.get("group_name"),
                             **normalized,
                         }
                     )
+
+            diag["supported_market_type_ids_seen"] = sorted(seen_type_ids)
+            missing = set(SUPPORTED_MARKET_TYPE_IDS.keys()) - seen_type_ids
+            diag["missing_supported_market_type_ids"] = sorted(missing)
+
+            if diag["supported_market_rows_with_valid_odd"] < MIN_SUPPORTED_ROWS_PER_EVENT:
+                diag["failure_reason"] = "event_missing_supported_markets"
+                logging.warning(
+                    f"Evento {event_url} sem mercados suportados suficientes: "
+                    f"{diag['supported_market_rows_with_valid_odd']} rows com odd válida (min={MIN_SUPPORTED_ROWS_PER_EVENT})"
+                )
+                return rows, diag
+
+            if len(seen_type_ids) < MIN_SUPPORTED_MARKET_TYPES_PER_EVENT:
+                diag["failure_reason"] = "event_missing_supported_market_types"
+                logging.warning(
+                    f"Evento {event_url} sem typeIds suportados suficientes: "
+                    f"{len(seen_type_ids)} tipos (min={MIN_SUPPORTED_MARKET_TYPES_PER_EVENT})"
+                )
+                return rows, diag
 
             diag["success"] = True
 
@@ -324,79 +444,95 @@ class BetanoExtractor:
 
         return rows, diag
 
-    def extract_all_odds(self, match_path: str, min_odd: float, league_name: str, run_id: str) -> Tuple[List[Dict], Dict[str, Any]]:
+    def _extract_from_html_fallback(self, match_path: str, league_name: str, run_id: str) -> Tuple[List[Dict], Dict[str, Any]]:
         event_url = f"{self.base_url}{match_path}" if match_path.startswith("/") else match_path
-        url = force_bt99_url(event_url)
+        url = force_bt_url(event_url, DEFAULT_BETANO_BT)
+        last_diag: Dict[str, Any] = {
+            "success": False,
+            "raw_markets_seen": 0,
+            "raw_selections_seen": 0,
+            "supported_market_rows_seen": 0,
+            "supported_market_rows_with_valid_odd": 0,
+            "normalized_ok_rows": 0,
+            "normalized_non_ok_rows": 0,
+            "markets_seen_by_name": {},
+            "markets_seen_by_type_id": {},
+            "supported_market_type_ids_seen": [],
+            "failure_reason": None,
+            "declared_total_markets": 0,
+            "market_completeness_ratio": 0.0,
+            "missing_supported_market_type_ids": [],
+        }
+
+        try:
+            response = self._fetch(url, description=f"event_html_fallback {url}", max_retries=1)
+        except Exception as exc:
+            last_diag["failure_reason"] = str(exc)
+            logging.error(f"Event HTML fallback failed for {url}: {exc}")
+            return [], last_diag
+
+        state = extract_initial_state_json(response.text)
+        if not state:
+            last_diag["failure_reason"] = "missing_initial_state"
+            logging.error(f"Event HTML fallback missing_initial_state: {url}")
+            return [], last_diag
+
+        rows, diag = self._parse_event_odds(state, league_name, run_id, url)
+        for row in rows:
+            row["betano_fetch_method"] = "event_html_initial_state_bt14_fallback"
+        return rows, diag
+
+    def extract_all_odds(self, match_path: str, league_name: str, run_id: str) -> Tuple[List[Dict], Dict[str, Any]]:
+        event_url = f"{self.base_url}{match_path}" if match_path.startswith("/") else match_path
+        api_url = build_betano_api_odds_url(event_url, self.base_url, DEFAULT_BETANO_BT)
 
         last_diag: Dict[str, Any] = {
             "success": False,
             "raw_markets_seen": 0,
             "raw_selections_seen": 0,
-            "supported_market_rows_before_min_odd": 0,
-            "rows_after_min_odd_filter": 0,
+            "supported_market_rows_seen": 0,
+            "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
             "markets_seen_by_name": {},
+            "markets_seen_by_type_id": {},
+            "supported_market_type_ids_seen": [],
             "failure_reason": None,
             "declared_total_markets": 0,
             "market_completeness_ratio": 0.0,
+            "missing_supported_market_type_ids": [],
         }
 
         for attempt in range(1, EVENT_FETCH_RETRIES + 1):
             try:
-                response = self._fetch(url, description=f"event {url}", max_retries=1)
-                final_url = str(getattr(response, "url", url))
-
-                if not url_has_bt99(final_url):
-                    last_diag["failure_reason"] = "event_bt99_dropped"
-                    logging.error(
-                        f"Betano event response lost bt=99 | requested={url} | final={final_url}"
-                    )
-                    if attempt == EVENT_FETCH_RETRIES:
-                        return [], last_diag
-
-                    delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
-                    time.sleep(delay)
-                    continue
-
-                logging.info(f"Betano event fetched | requested={url} | final={final_url}")
+                state = self._fetch_json(api_url, description=f"event_api {api_url}", max_retries=1)
             except Exception as exc:
                 last_diag["failure_reason"] = str(exc)
-                logging.error(f"Event fetch failed for {url} (attempt {attempt}/{EVENT_FETCH_RETRIES}): {exc}")
+                logging.error(f"Event API fetch failed for {api_url} (attempt {attempt}/{EVENT_FETCH_RETRIES}): {exc}")
                 if attempt == EVENT_FETCH_RETRIES:
-                    return [], last_diag
+                    logging.warning(f"Falling back to HTML initial_state for {event_url}")
+                    return self._extract_from_html_fallback(match_path, league_name, run_id)
                 delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
                 time.sleep(delay)
                 continue
 
-            state = extract_initial_state_json(response.text)
-            if not state:
-                last_diag["failure_reason"] = "missing_initial_state"
-                logging.error(f"Event page missing_initial_state: {url} (attempt {attempt}/{EVENT_FETCH_RETRIES})")
-                if attempt == EVENT_FETCH_RETRIES:
-                    return [], last_diag
-                delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
-                time.sleep(delay)
-                continue
-
-            rows, diag = self._parse_event_odds(state, min_odd, league_name, run_id, url)
+            rows, diag = self._parse_event_odds(state, league_name, run_id, api_url)
             last_diag = diag
 
             if diag.get("success"):
                 return rows, diag
 
-            if diag.get("failure_reason") == "event_markets_incomplete":
+            if diag.get("failure_reason") == "event_missing_supported_markets":
                 logging.warning(
-                    f"Evento {url} incompleto na tentativa {attempt}/{EVENT_FETCH_RETRIES}; "
+                    f"Evento {api_url} sem mercados suportados na tentativa {attempt}/{EVENT_FETCH_RETRIES}; "
                     f"reattempting..."
                 )
                 if attempt == EVENT_FETCH_RETRIES:
-                    return [], diag
+                    return rows, diag
                 delay = RETRY_DELAY_BASE * (2 ** (attempt - 1)) + random.uniform(0, 1)
                 time.sleep(delay)
                 continue
 
-            # Outra falha de parsing (ex: invalid_event_structure) — não retry
             return rows, diag
 
         return [], last_diag
@@ -462,15 +598,15 @@ def evaluate_collection_health(total_stats: dict, final_rows: int) -> Tuple[bool
         avg_raw = total_stats["raw_selections_seen"] / events_success
         if avg_raw < MIN_RAW_SELECTIONS_PER_EVENT:
             failures.append(f"avg_raw_selections_{avg_raw:.1f}_below_{MIN_RAW_SELECTIONS_PER_EVENT}")
-        avg_supported = total_stats["supported_market_rows_before_min_odd"] / events_success
+        avg_supported = total_stats["supported_market_rows_seen"] / events_success
         if avg_supported < MIN_SUPPORTED_ROWS_PER_EVENT:
             failures.append(f"avg_supported_rows_{avg_supported:.1f}_below_{MIN_SUPPORTED_ROWS_PER_EVENT}")
 
     if total_stats.get("normalized_ok_rows", 0) == 0 and total_stats.get("raw_selections_seen", 0) > 0:
         failures.append("odds_no_supported_markets_after_normalization")
 
-    if final_rows == 0 and total_stats.get("supported_market_rows_before_min_odd", 0) > 0:
-        warnings.append("min_odd_filtered_all_supported_rows")
+    if final_rows == 0 and total_stats.get("supported_market_rows_seen", 0) > 0:
+        warnings.append("no_final_rows_despite_supported_markets")
     elif final_rows < MIN_FINAL_ROWS_TOTAL:
         warnings.append(f"final_rows_{final_rows}_below_{MIN_FINAL_ROWS_TOTAL}")
 
@@ -492,6 +628,8 @@ def build_odds_manifest(
         "target_date": target_date,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "status": status,
+        "fetch_method": "event_api_odds_bt14",
+        "supported_market_type_ids": sorted(SUPPORTED_MARKET_TYPE_IDS.keys()),
         "leagues": {
             name: {
                 "events_found": diag.get("events_found", 0),
@@ -499,11 +637,14 @@ def build_odds_manifest(
                 "events_failed": diag.get("events_failed", 0),
                 "raw_markets_seen": diag.get("raw_markets_seen", 0),
                 "raw_selections_seen": diag.get("raw_selections_seen", 0),
-                "supported_market_rows_before_min_odd": diag.get("supported_market_rows_before_min_odd", 0),
-                "rows_after_min_odd_filter": diag.get("rows_after_min_odd_filter", 0),
+                "supported_market_rows_seen": diag.get("supported_market_rows_seen", 0),
+                "supported_market_rows_with_valid_odd": diag.get("supported_market_rows_with_valid_odd", 0),
                 "normalized_ok_rows": diag.get("normalized_ok_rows", 0),
                 "normalized_non_ok_rows": diag.get("normalized_non_ok_rows", 0),
                 "markets_seen_by_name": diag.get("markets_seen_by_name", {}),
+                "markets_seen_by_type_id": diag.get("markets_seen_by_type_id", {}),
+                "supported_market_type_ids_seen": diag.get("supported_market_type_ids_seen", []),
+                "missing_supported_market_type_ids": diag.get("missing_supported_market_type_ids", []),
             }
             for name, diag in league_stats.items()
         },
@@ -552,7 +693,6 @@ def main():
         )
         save_manifest(run_dir, manifest)
 
-        odd_minima = 1.01
         ligas_alvo = carregar_ligas_betano()
 
         if not ligas_alvo:
@@ -563,7 +703,6 @@ def main():
         crawler = BetanoExtractor()
         all_odds_data: List[Dict] = []
         league_stats: Dict[str, Dict[str, Any]] = {}
-        has_incomplete_event = False
         total_stats = {
             "events_found": 0,
             "events_attempted": 0,
@@ -571,11 +710,12 @@ def main():
             "events_failed": 0,
             "raw_markets_seen": 0,
             "raw_selections_seen": 0,
-            "supported_market_rows_before_min_odd": 0,
-            "rows_after_min_odd_filter": 0,
+            "supported_market_rows_seen": 0,
+            "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
             "markets_seen_by_name": {},
+            "markets_seen_by_type_id": {},
         }
 
         logging.info(f"=== INICIANDO RASPAGEM PARA A DATA: {data_alvo} | RUN_ID: {run_id} ===")
@@ -588,11 +728,12 @@ def main():
                 "events_failed": 0,
                 "raw_markets_seen": 0,
                 "raw_selections_seen": 0,
-                "supported_market_rows_before_min_odd": 0,
-                "rows_after_min_odd_filter": 0,
+                "supported_market_rows_seen": 0,
+                "supported_market_rows_with_valid_odd": 0,
                 "normalized_ok_rows": 0,
                 "normalized_non_ok_rows": 0,
                 "markets_seen_by_name": {},
+                "markets_seen_by_type_id": {},
             }
 
             logging.info(f"-> Buscando jogos para: {league_name}")
@@ -616,18 +757,19 @@ def main():
             for match_url in urls:
                 total_stats["events_attempted"] += 1
                 try:
-                    match_odds, event_diag = crawler.extract_all_odds(match_url, min_odd=odd_minima, league_name=league_name, run_id=run_id)
+                    match_odds, event_diag = crawler.extract_all_odds(match_url, league_name=league_name, run_id=run_id)
                 except Exception as exc:
                     logging.error(f"Event fetch failed for {match_url}: {exc}")
                     event_diag = {
                         "success": False,
                         "raw_markets_seen": 0,
                         "raw_selections_seen": 0,
-                        "supported_market_rows_before_min_odd": 0,
-                        "rows_after_min_odd_filter": 0,
+                        "supported_market_rows_seen": 0,
+                        "supported_market_rows_with_valid_odd": 0,
                         "normalized_ok_rows": 0,
                         "normalized_non_ok_rows": 0,
                         "markets_seen_by_name": {},
+                        "markets_seen_by_type_id": {},
                         "failure_reason": str(exc),
                     }
                     match_odds = []
@@ -640,14 +782,12 @@ def main():
                 else:
                     total_stats["events_failed"] += 1
                     league_diag["events_failed"] += 1
-                    if event_diag.get("failure_reason") == "event_markets_incomplete":
-                        has_incomplete_event = True
 
                 for key in (
                     "raw_markets_seen",
                     "raw_selections_seen",
-                    "supported_market_rows_before_min_odd",
-                    "rows_after_min_odd_filter",
+                    "supported_market_rows_seen",
+                    "supported_market_rows_with_valid_odd",
                     "normalized_ok_rows",
                     "normalized_non_ok_rows",
                 ):
@@ -659,17 +799,16 @@ def main():
                     league_diag["markets_seen_by_name"][name] = league_diag["markets_seen_by_name"].get(name, 0) + count
                     total_stats["markets_seen_by_name"][name] = total_stats["markets_seen_by_name"].get(name, 0) + count
 
+                for tid, count in event_diag.get("markets_seen_by_type_id", {}).items():
+                    league_diag["markets_seen_by_type_id"][tid] = league_diag["markets_seen_by_type_id"].get(tid, 0) + count
+                    total_stats["markets_seen_by_type_id"][tid] = total_stats["markets_seen_by_type_id"].get(tid, 0) + count
+
                 time.sleep(random.uniform(0.5, 1.5))
 
             league_stats[league_name] = league_diag
             time.sleep(random.uniform(2.0, 4.0))
 
         health_ok, health_reasons, health_warnings = evaluate_collection_health(total_stats, len(all_odds_data))
-
-        if has_incomplete_event:
-            health_ok = False
-            if "event_markets_incomplete" not in health_reasons:
-                health_reasons.append("event_markets_incomplete")
 
         odds_manifest = build_odds_manifest(
             run_id=run_id,
@@ -695,7 +834,7 @@ def main():
                 odds_events_success=total_stats["events_success"],
                 odds_events_failed=total_stats["events_failed"],
                 odds_raw_selections_seen=total_stats["raw_selections_seen"],
-                odds_supported_rows_before_min_odd=total_stats["supported_market_rows_before_min_odd"],
+                odds_supported_rows=total_stats["supported_market_rows_seen"],
                 odds_normalized_ok_rows=total_stats["normalized_ok_rows"],
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="failed",
@@ -731,7 +870,7 @@ def main():
                 odds_events_success=total_stats["events_success"],
                 odds_events_failed=total_stats["events_failed"],
                 odds_raw_selections_seen=total_stats["raw_selections_seen"],
-                odds_supported_rows_before_min_odd=total_stats["supported_market_rows_before_min_odd"],
+                odds_supported_rows=total_stats["supported_market_rows_seen"],
                 odds_normalized_ok_rows=total_stats["normalized_ok_rows"],
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="completed",
@@ -747,7 +886,7 @@ def main():
                 odds_events_success=total_stats["events_success"],
                 odds_events_failed=total_stats["events_failed"],
                 odds_raw_selections_seen=total_stats["raw_selections_seen"],
-                odds_supported_rows_before_min_odd=total_stats["supported_market_rows_before_min_odd"],
+                odds_supported_rows=total_stats["supported_market_rows_seen"],
                 odds_normalized_ok_rows=total_stats["normalized_ok_rows"],
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="empty",
