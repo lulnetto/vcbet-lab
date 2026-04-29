@@ -16,6 +16,7 @@ from vcbet.collectors.odds_collector import (
     extract_initial_state_json,
     save_to_csv,
 )
+from vcbet.core.market_normalizer import normalize_betano_market_contract
 from vcbet.core.pipeline.input_loader import carregar_snapshot_odds
 
 
@@ -550,6 +551,172 @@ class NormalizeByFamilyTest(unittest.TestCase):
         )
         self.assertEqual(r["market_type"], "total_goals")
         self.assertEqual(r["side"], "over")
+
+
+class NormalizeBetanoContractTest(unittest.TestCase):
+    """Testa normalize_betano_market_contract com dados reais da API."""
+
+    def _market(self, type_id: int, name: str, market_type: str = "", handicap=None) -> dict:
+        m = {"name": name, "type": market_type, "typeId": type_id}
+        if handicap is not None:
+            m["handicap"] = handicap
+        return m
+
+    def _sel(self, name: str, price: float = 1.9, handicap=None) -> dict:
+        s = {"name": name, "price": price}
+        if handicap is not None:
+            s["handicap"] = handicap
+        return s
+
+    def test_typeid_13_standard_over_under(self) -> None:
+        market = self._market(13, "Total de Gols Mais/Menos", "Total de Gols Mais/Menos", handicap=2.5)
+        sel = self._sel("Mais de 2.5", handicap=2.5)
+        c = normalize_betano_market_contract(market, sel, "Girona", "Mallorca")
+        self.assertIsNotNone(c)
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "asian_total")
+        self.assertEqual(c["market_scope"], "full_time")
+        self.assertEqual(c["side"], "over")
+        self.assertEqual(c["line"], 2.5)
+
+    def test_typeid_13_alternative_over_under(self) -> None:
+        market = self._market(13, "Total de Gols Mais/Menos (alternativas)", "Total de Gols Mais/Menos", handicap=3.5)
+        sel = self._sel("Menos de 3.5", handicap=3.5)
+        c = normalize_betano_market_contract(market, sel, "Girona", "Mallorca")
+        self.assertIsNotNone(c)
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "asian_total")
+        self.assertEqual(c["side"], "under")
+        self.assertEqual(c["line"], 3.5)
+
+    def test_typeid_13_first_half_is_unsupported_scope(self) -> None:
+        market = self._market(13, "Total de gols Mais/Menos - 1° Tempo", "Total de Gols Mais/Menos", handicap=1.5)
+        sel = self._sel("Mais de 1.5", handicap=1.5)
+        c = normalize_betano_market_contract(market, sel, "Girona", "Mallorca")
+        self.assertIsNotNone(c)
+        self.assertEqual(c["normalized_status"], "unsupported_scope")
+        self.assertIn("scope_", c["unsupported_reason"])
+
+    def test_typeid_15_btts_yes_no(self) -> None:
+        market = self._market(15, "Ambas equipes Marcam", "Ambas equipes Marcam")
+        c_yes = normalize_betano_market_contract(market, self._sel("Sim"), "A", "B")
+        self.assertEqual(c_yes["normalized_status"], "ok")
+        self.assertEqual(c_yes["market_type"], "btts")
+        self.assertEqual(c_yes["side"], "yes")
+
+        c_no = normalize_betano_market_contract(market, self._sel("Não"), "A", "B")
+        self.assertEqual(c_no["normalized_status"], "ok")
+        self.assertEqual(c_no["side"], "no")
+
+    def test_typeid_84_home_team_total(self) -> None:
+        market = self._market(84, "Girona FC - Total de Gols Mais/Menos", "Equipe Total de Gols Mais/Menos", handicap=1.5)
+        sel = self._sel("Mais de 1.5", handicap=1.5)
+        c = normalize_betano_market_contract(market, sel, "Girona FC", "Mallorca")
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "team_total")
+        self.assertEqual(c["side"], "over")
+        self.assertEqual(c["target_team_role"], "home")
+        self.assertEqual(c["target_team_name"], "Girona FC")
+
+    def test_typeid_85_away_team_total(self) -> None:
+        market = self._market(85, "RCD Mallorca - Total de Gols Mais/Menos", "Equipe Total de Gols Mais/Menos", handicap=0.5)
+        sel = self._sel("Menos de 0.5", handicap=0.5)
+        c = normalize_betano_market_contract(market, sel, "Girona", "RCD Mallorca")
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "team_total")
+        self.assertEqual(c["side"], "under")
+        self.assertEqual(c["target_team_role"], "away")
+        self.assertEqual(c["target_team_name"], "RCD Mallorca")
+
+    def test_typeid_185_asian_handicap(self) -> None:
+        market = self._market(185, "Handicap Asiático (Resultado atual 0 - 0)", "Handicap Asiático", handicap=-0.25)
+        sel = self._sel("Girona FC -0.25", handicap=-0.25)
+        c = normalize_betano_market_contract(market, sel, "Girona FC", "Mallorca")
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "asian_handicap")
+        self.assertEqual(c["side"], "home")
+        self.assertEqual(c["line"], -0.25)
+        self.assertEqual(c["target_team_role"], "home")
+
+    def test_typeid_189_asian_total(self) -> None:
+        market = self._market(189, "Asiático (Mais/Menos) Total de gols", "Asiático (Mais/Menos) Total de gols", handicap=2.75)
+        sel = self._sel("Mais de 2.75", handicap=2.75)
+        c = normalize_betano_market_contract(market, sel, "A", "B")
+        self.assertEqual(c["normalized_status"], "ok")
+        self.assertEqual(c["market_type"], "asian_total")
+        self.assertEqual(c["side"], "over")
+        self.assertEqual(c["line"], 2.75)
+
+    def test_typeid_2818_range_exact_no_parser(self) -> None:
+        market = self._market(2818, "Total de gols", "Total de gols")
+        sel = self._sel("2-3")
+        c = normalize_betano_market_contract(market, sel, "A", "B")
+        self.assertIsNotNone(c)
+        self.assertEqual(c["normalized_status"], "unsupported_market_shape")
+        self.assertEqual(c["unsupported_reason"], "range_exact_goals_no_parser")
+
+    def test_typeid_104_and_503_also_rejected(self) -> None:
+        for tid in (104, 503):
+            market = self._market(tid, "Total de gols", "Total de gols")
+            sel = self._sel("4+")
+            c = normalize_betano_market_contract(market, sel, "A", "B")
+            self.assertEqual(c["normalized_status"], "unsupported_market_shape", f"typeId={tid}")
+
+    def test_collector_uses_contract_counters(self) -> None:
+        """O collector deve pular seleções com contrato não-ok e contabilizar."""
+        extractor = BetanoExtractor()
+        state = {
+            "data": {
+                "event": {
+                    "id": 1,
+                    "name": "A - B",
+                    "startTime": 1714000000000,
+                    "totalMarketsAvailable": 10,
+                    "markets": [
+                        {
+                            "id": 100,
+                            "name": "Total de gols Mais/Menos - 1° Tempo",
+                            "type": "Total de Gols Mais/Menos",
+                            "typeId": 13,
+                            "handicap": 1.5,
+                            "selections": [
+                                {"id": 200, "name": "Mais de 1.5", "price": 2.0, "handicap": 1.5},
+                                {"id": 201, "name": "Menos de 1.5", "price": 1.8, "handicap": 1.5},
+                            ],
+                        },
+                        {
+                            "id": 101,
+                            "name": "Total de gols",
+                            "type": "Total de gols",
+                            "typeId": 2818,
+                            "selections": [
+                                {"id": 202, "name": "2-3", "price": 2.0},
+                            ],
+                        },
+                        {
+                            "id": 102,
+                            "name": "Total de Gols Mais/Menos",
+                            "type": "Total de Gols Mais/Menos",
+                            "typeId": 13,
+                            "handicap": 2.5,
+                            "selections": [
+                                {"id": 203, "name": "Mais de 2.5", "price": 2.0, "handicap": 2.5},
+                                {"id": 204, "name": "Menos de 2.5", "price": 1.8, "handicap": 2.5},
+                            ],
+                        },
+                    ],
+                }
+            }
+        }
+        rows, diag = extractor._parse_event_odds(state, "Liga Test", "run_1", "http://test")
+        self.assertTrue(diag["success"])
+        self.assertEqual(diag["skipped_unsupported_scope"], 2)  # 2 selections 1st half
+        self.assertEqual(diag["skipped_unsupported_market_shape"], 1)  # 2-3 range
+        self.assertEqual(diag["normalized_ok_rows"], 2)  # O/U 2.5 over+under
+        self.assertEqual(diag["collected_supported_rows"], 2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["market_type"], "asian_total")
+        self.assertEqual(rows[0]["line"], 2.5)
 
 
 if __name__ == "__main__":

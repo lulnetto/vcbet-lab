@@ -14,7 +14,7 @@ import pandas as pd
 from curl_cffi import requests
 
 from vcbet.core.config_ligas import carregar_ligas_betano
-from vcbet.core.market_normalizer import normalize_market_entry
+from vcbet.core.market_normalizer import normalize_betano_market_contract, normalize_market_entry
 from vcbet.core.run_utils import build_manifest, ensure_run_dir, generate_run_id, save_manifest, update_manifest
 from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION, file_md5, snapshot_time_from_dataframe
 
@@ -306,9 +306,15 @@ class BetanoExtractor:
             "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
+            "collected_supported_rows": 0,
+            "skipped_unsupported_type_id": 0,
+            "skipped_unparseable_selection": 0,
+            "skipped_unsupported_scope": 0,
+            "skipped_unsupported_market_shape": 0,
             "markets_seen_by_name": {},
             "markets_seen_by_type_id": {},
             "supported_market_type_ids_seen": [],
+            "supported_market_families_seen": [],
             "failure_reason": None,
             "declared_total_markets": 0,
             "market_completeness_ratio": 0.0,
@@ -332,6 +338,7 @@ class BetanoExtractor:
 
             collected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             seen_type_ids: set[int] = set()
+            seen_families: set[str] = set()
 
             for market in markets:
                 market_name = market.get("name", "")
@@ -350,6 +357,7 @@ class BetanoExtractor:
                     diag["markets_seen_by_type_id"][market_type_id] = diag["markets_seen_by_type_id"].get(market_type_id, 0) + 1
 
                 if market_type_id not in SUPPORTED_MARKET_TYPE_IDS:
+                    diag["skipped_unsupported_type_id"] += 1
                     continue
 
                 seen_type_ids.add(market_type_id)
@@ -365,23 +373,35 @@ class BetanoExtractor:
                         odd_float = float(odd_value)
                         if odd_float <= 0:
                             continue
-                        diag["supported_market_rows_with_valid_odd"] += 1
                     except (ValueError, TypeError):
                         continue
 
-                    normalized = normalize_market_entry(
-                        market_raw=market_name,
-                        selection_raw=sel.get("name"),
+                    contract = normalize_betano_market_contract(
+                        market=market,
+                        selection=sel,
                         home_team=home_team,
                         away_team=away_team,
-                        betano_market_type_id=market_type_id,
-                        betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
                     )
 
-                    if normalized.get("normalized_status") == "ok":
-                        diag["normalized_ok_rows"] += 1
-                    else:
+                    if contract is None:
+                        diag["skipped_unsupported_type_id"] += 1
                         diag["normalized_non_ok_rows"] += 1
+                        continue
+
+                    if contract["normalized_status"] != "ok":
+                        if contract["normalized_status"] == "unsupported_scope":
+                            diag["skipped_unsupported_scope"] += 1
+                        elif contract["normalized_status"] == "unparseable_selection":
+                            diag["skipped_unparseable_selection"] += 1
+                        elif contract["normalized_status"] == "unsupported_market_shape":
+                            diag["skipped_unsupported_market_shape"] += 1
+                        diag["normalized_non_ok_rows"] += 1
+                        continue
+
+                    diag["supported_market_rows_with_valid_odd"] += 1
+                    diag["normalized_ok_rows"] += 1
+                    diag["collected_supported_rows"] += 1
+                    seen_families.add(contract["betano_market_family"])
 
                     rows.append(
                         {
@@ -404,7 +424,7 @@ class BetanoExtractor:
                             "betano_market_type": market_type,
                             "betano_market_type_id": market_type_id,
                             "betano_market_unique_id": market.get("uniqueId"),
-                            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS[market_type_id],
+                            "betano_market_family": contract["betano_market_family"],
                             "betano_selection_id": sel.get("id"),
                             "betano_bet_ref": sel.get("betRef"),
                             "betano_total_markets_available": total_markets_available,
@@ -412,11 +432,18 @@ class BetanoExtractor:
                             "betano_fetch_method": "event_api_odds_bt14",
                             "betano_table_row_name": meta.get("table_row_name"),
                             "betano_group_name": meta.get("group_name"),
-                            **normalized,
+                            "market_type": contract["market_type"],
+                            "market_scope": contract["market_scope"],
+                            "side": contract["side"],
+                            "line": contract["line"],
+                            "target_team_role": contract["target_team_role"],
+                            "target_team_name": contract["target_team_name"],
+                            "normalized_status": contract["normalized_status"],
                         }
                     )
 
             diag["supported_market_type_ids_seen"] = sorted(seen_type_ids)
+            diag["supported_market_families_seen"] = sorted(seen_families)
             missing = set(SUPPORTED_MARKET_TYPE_IDS.keys()) - seen_type_ids
             diag["missing_supported_market_type_ids"] = sorted(missing)
 
@@ -455,9 +482,15 @@ class BetanoExtractor:
             "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
+            "collected_supported_rows": 0,
+            "skipped_unsupported_type_id": 0,
+            "skipped_unparseable_selection": 0,
+            "skipped_unsupported_scope": 0,
+            "skipped_unsupported_market_shape": 0,
             "markets_seen_by_name": {},
             "markets_seen_by_type_id": {},
             "supported_market_type_ids_seen": [],
+            "supported_market_families_seen": [],
             "failure_reason": None,
             "declared_total_markets": 0,
             "market_completeness_ratio": 0.0,
@@ -494,9 +527,15 @@ class BetanoExtractor:
             "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
+            "collected_supported_rows": 0,
+            "skipped_unsupported_type_id": 0,
+            "skipped_unparseable_selection": 0,
+            "skipped_unsupported_scope": 0,
+            "skipped_unsupported_market_shape": 0,
             "markets_seen_by_name": {},
             "markets_seen_by_type_id": {},
             "supported_market_type_ids_seen": [],
+            "supported_market_families_seen": [],
             "failure_reason": None,
             "declared_total_markets": 0,
             "market_completeness_ratio": 0.0,
@@ -641,9 +680,15 @@ def build_odds_manifest(
                 "supported_market_rows_with_valid_odd": diag.get("supported_market_rows_with_valid_odd", 0),
                 "normalized_ok_rows": diag.get("normalized_ok_rows", 0),
                 "normalized_non_ok_rows": diag.get("normalized_non_ok_rows", 0),
+                "collected_supported_rows": diag.get("collected_supported_rows", 0),
+                "skipped_unsupported_type_id": diag.get("skipped_unsupported_type_id", 0),
+                "skipped_unparseable_selection": diag.get("skipped_unparseable_selection", 0),
+                "skipped_unsupported_scope": diag.get("skipped_unsupported_scope", 0),
+                "skipped_unsupported_market_shape": diag.get("skipped_unsupported_market_shape", 0),
                 "markets_seen_by_name": diag.get("markets_seen_by_name", {}),
                 "markets_seen_by_type_id": diag.get("markets_seen_by_type_id", {}),
                 "supported_market_type_ids_seen": diag.get("supported_market_type_ids_seen", []),
+                "supported_market_families_seen": diag.get("supported_market_families_seen", []),
                 "missing_supported_market_type_ids": diag.get("missing_supported_market_type_ids", []),
             }
             for name, diag in league_stats.items()
@@ -714,6 +759,11 @@ def main():
             "supported_market_rows_with_valid_odd": 0,
             "normalized_ok_rows": 0,
             "normalized_non_ok_rows": 0,
+            "collected_supported_rows": 0,
+            "skipped_unsupported_type_id": 0,
+            "skipped_unparseable_selection": 0,
+            "skipped_unsupported_scope": 0,
+            "skipped_unsupported_market_shape": 0,
             "markets_seen_by_name": {},
             "markets_seen_by_type_id": {},
         }
@@ -732,6 +782,11 @@ def main():
                 "supported_market_rows_with_valid_odd": 0,
                 "normalized_ok_rows": 0,
                 "normalized_non_ok_rows": 0,
+                "collected_supported_rows": 0,
+                "skipped_unsupported_type_id": 0,
+                "skipped_unparseable_selection": 0,
+                "skipped_unsupported_scope": 0,
+                "skipped_unsupported_market_shape": 0,
                 "markets_seen_by_name": {},
                 "markets_seen_by_type_id": {},
             }
@@ -768,6 +823,11 @@ def main():
                         "supported_market_rows_with_valid_odd": 0,
                         "normalized_ok_rows": 0,
                         "normalized_non_ok_rows": 0,
+                        "collected_supported_rows": 0,
+                        "skipped_unsupported_type_id": 0,
+                        "skipped_unparseable_selection": 0,
+                        "skipped_unsupported_scope": 0,
+                        "skipped_unsupported_market_shape": 0,
                         "markets_seen_by_name": {},
                         "markets_seen_by_type_id": {},
                         "failure_reason": str(exc),
@@ -790,6 +850,11 @@ def main():
                     "supported_market_rows_with_valid_odd",
                     "normalized_ok_rows",
                     "normalized_non_ok_rows",
+                    "collected_supported_rows",
+                    "skipped_unsupported_type_id",
+                    "skipped_unparseable_selection",
+                    "skipped_unsupported_scope",
+                    "skipped_unsupported_market_shape",
                 ):
                     val = event_diag.get(key, 0)
                     total_stats[key] += val

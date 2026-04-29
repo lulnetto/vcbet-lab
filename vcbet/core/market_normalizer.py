@@ -37,6 +37,18 @@ COMPOSITE_SELECTION_PATTERN = re.compile(r"\s(e|ou)\s|\(|\)", re.IGNORECASE)
 LINE_PATTERN = re.compile(r"([-+]?\d+(?:[\.,]\d+)?)")
 LINE_SUFFIX_PATTERN = re.compile(r"^(?P<label>.*?)\s+(?P<line>[-+]?\d+(?:[\.,]\d+)?)\s*$")
 
+SUPPORTED_MARKET_TYPE_IDS = {
+    13: "asian_total_or_total_ou",
+    15: "btts",
+    84: "home_team_total_ou",
+    85: "away_team_total_ou",
+    185: "asian_handicap",
+    189: "asian_total",
+    2818: "total_goals",
+    104: "total_goals_alt",
+    503: "total_goals_alt",
+}
+
 
 def slug_text(value: str) -> str:
     if value is None:
@@ -103,6 +115,290 @@ DEFAULT_NORMALIZED = {
     "target_team_name": None,
     "normalized_status": "unknown_market",
 }
+
+
+def normalize_betano_market_contract(
+    market: dict,
+    selection: dict,
+    home_team: str,
+    away_team: str,
+) -> dict | None:
+    """Retorna contrato canônico para um mercado/selection Betano.
+
+    Campos retornados:
+      - betano_market_type_id
+      - betano_market_family
+      - market_type
+      - market_scope
+      - side
+      - line
+      - target_team_role
+      - target_team_name
+      - normalized_status
+      - unsupported_reason
+    """
+    type_id_raw = market.get("typeId")
+    try:
+        type_id = int(type_id_raw) if type_id_raw is not None else None
+    except (TypeError, ValueError):
+        type_id = None
+
+    if type_id is None:
+        return None
+
+    market_name = str(market.get("name") or "")
+    market_type_str = str(market.get("type") or "")
+    combined_slug = slug_text(f"{market_name} {market_type_str}")
+
+    scope = detect_market_scope(combined_slug)
+    if scope != "full_time":
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": None,
+            "market_scope": scope,
+            "side": None,
+            "line": None,
+            "target_team_role": None,
+            "target_team_name": None,
+            "normalized_status": "unsupported_scope",
+            "unsupported_reason": f"scope_{scope}",
+        }
+
+    if any(term in combined_slug for term in UNSUPPORTED_SCOPE_SLUGS):
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": None,
+            "market_scope": None,
+            "side": None,
+            "line": None,
+            "target_team_role": None,
+            "target_team_name": None,
+            "normalized_status": "unsupported_scope",
+            "unsupported_reason": "unsupported_scope_term",
+        }
+
+    if "tempo" in combined_slug or "parte" in combined_slug or "periodo" in combined_slug:
+        # Extra safety: any remaining half/part references
+        # But be careful: "tempo" could appear in "tempo regulamentar" which is full_time.
+        # Only reject if it looks like first/second half.
+        if any(term in combined_slug for term in FIRST_HALF_SLUGS + SECOND_HALF_SLUGS):
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": None,
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unsupported_scope",
+                "unsupported_reason": "scope_half_period",
+            }
+
+    selection_name = str(selection.get("name") or "")
+    selection_slug = slug_text(selection_name)
+
+    # --- BTTS ---
+    if type_id == 15:
+        if selection_slug == "sim":
+            side = "yes"
+        elif selection_slug in {"nao", "não"}:
+            side = "no"
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": "btts",
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "btts_selection_not_yes_no",
+            }
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": "btts",
+            "market_type": "btts",
+            "market_scope": "full_time",
+            "side": side,
+            "line": None,
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
+
+    # --- Asian Total / Total Goals O/U (typeId 13, 189) ---
+    if type_id in (13, 189):
+        line = selection.get("handicap")
+        if line is None:
+            line = market.get("handicap")
+        if line is None:
+            line = parse_numeric_line(selection_name)
+        if line is None:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "missing_line",
+            }
+        if selection_slug.startswith("mais de"):
+            side = "over"
+        elif selection_slug.startswith("menos de"):
+            side = "under"
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "selection_not_over_under",
+            }
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": "asian_total",
+            "market_scope": "full_time",
+            "side": side,
+            "line": float(line),
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
+
+    # --- Team Totals (typeId 84, 85) ---
+    if type_id in (84, 85):
+        line = selection.get("handicap")
+        if line is None:
+            line = market.get("handicap")
+        if line is None:
+            line = parse_numeric_line(selection_name)
+        if line is None:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "missing_line",
+            }
+        if selection_slug.startswith("mais de"):
+            side = "over"
+        elif selection_slug.startswith("menos de"):
+            side = "under"
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "selection_not_over_under",
+            }
+        target_role = "home" if type_id == 84 else "away"
+        canonical_name = home_team if target_role == "home" else away_team
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": "team_total",
+            "market_scope": "full_time",
+            "side": side,
+            "line": float(line),
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
+
+    # --- Asian Handicap (typeId 185) ---
+    if type_id == 185:
+        parsed = parse_numeric_line_suffix(selection_name)
+        if parsed is None:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": "asian_handicap",
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "missing_handicap_line",
+            }
+        team_name, line = parsed
+        if compare_team_name(team_name, home_team):
+            target_role = "home"
+            canonical_name = home_team
+        elif compare_team_name(team_name, away_team):
+            target_role = "away"
+            canonical_name = away_team
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": "asian_handicap",
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "team_not_matched",
+            }
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": "asian_handicap",
+            "market_type": "asian_handicap",
+            "market_scope": "full_time",
+            "side": target_role,
+            "line": line,
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
+
+    # --- Range / Exact goals (typeId 2818, 104, 503) ---
+    if type_id in (2818, 104, 503):
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": None,
+            "market_scope": "full_time",
+            "side": None,
+            "line": None,
+            "target_team_role": None,
+            "target_team_name": None,
+            "normalized_status": "unsupported_market_shape",
+            "unsupported_reason": "range_exact_goals_no_parser",
+        }
+
+    return None
 
 
 def _normalize_btts(selection: str, selection_slug: str, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -275,6 +571,7 @@ def normalize_market_entry(
     away_team: str,
     betano_market_type_id: int | None = None,
     betano_market_family: str | None = None,
+    contract: dict | None = None,
 ) -> Dict[str, Any]:
     market = str(market_raw or "").strip()
     selection = str(selection_raw or "").strip()
@@ -284,6 +581,13 @@ def normalize_market_entry(
     result: Dict[str, Any] = dict(DEFAULT_NORMALIZED)
     market_scope, scope_status = detect_market_scope_status(market_slug)
     result["market_scope"] = market_scope
+
+    # If collector already provided a contract, trust it directly
+    if contract is not None:
+        for key in ("market_type", "market_scope", "side", "line", "target_team_role", "target_team_name", "normalized_status"):
+            if key in contract:
+                result[key] = contract[key]
+        return result
 
     if not market or not selection:
         result["normalized_status"] = "parse_error"
