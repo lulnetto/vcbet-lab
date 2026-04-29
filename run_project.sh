@@ -251,7 +251,11 @@ fi
 echo "[FULL] Ligas detectadas nas odds: $ACTIVE_LEAGUES"
 
 SNAPSHOT_DATE="$(date +%F)"
-DAILY_XG_DIR="data/xg/$SNAPSHOT_DATE"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  DAILY_XG_DIR="$TEMP_ROOT/xg/$SNAPSHOT_DATE"
+else
+  DAILY_XG_DIR="data/xg/$SNAPSHOT_DATE"
+fi
 DAILY_XG_SNAPSHOT="$DAILY_XG_DIR/xg_snapshot.csv"
 
 if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
@@ -259,10 +263,18 @@ if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
   cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
 else
   echo "[FULL] Coletando snapshot xG diário (fonte: $XG_SOURCE) para $SNAPSHOT_DATE..."
-  "$PYTHON_BIN" -m vcbet.collectors.xg_daily_store \
-    --date "$TARGET_DATE" \
-    --source "$XG_SOURCE" \
-    --snapshot-date "$SNAPSHOT_DATE"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    "$PYTHON_BIN" -m vcbet.collectors.xg_daily_store \
+      --date "$TARGET_DATE" \
+      --source "$XG_SOURCE" \
+      --snapshot-date "$SNAPSHOT_DATE" \
+      --output-dir "$TEMP_ROOT/xg"
+  else
+    "$PYTHON_BIN" -m vcbet.collectors.xg_daily_store \
+      --date "$TARGET_DATE" \
+      --source "$XG_SOURCE" \
+      --snapshot-date "$SNAPSHOT_DATE"
+  fi
   if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
     cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
   fi

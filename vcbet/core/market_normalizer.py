@@ -38,7 +38,7 @@ LINE_PATTERN = re.compile(r"([-+]?\d+(?:[\.,]\d+)?)")
 LINE_SUFFIX_PATTERN = re.compile(r"^(?P<label>.*?)\s+(?P<line>[-+]?\d+(?:[\.,]\d+)?)\s*$")
 
 SUPPORTED_MARKET_TYPE_IDS = {
-    13: "asian_total_or_total_ou",
+    13: "total_goals",
     15: "btts",
     84: "home_team_total_ou",
     85: "away_team_total_ou",
@@ -232,8 +232,58 @@ def normalize_betano_market_contract(
             "unsupported_reason": None,
         }
 
-    # --- Asian Total / Total Goals O/U (typeId 13, 189) ---
-    if type_id in (13, 189):
+    # --- Total Goals O/U (typeId 13) ---
+    if type_id == 13:
+        line = selection.get("handicap")
+        if line is None:
+            line = market.get("handicap")
+        if line is None:
+            line = parse_numeric_line(selection_name)
+        if line is None:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "missing_line",
+            }
+        if selection_slug.startswith("mais de"):
+            side = "over"
+        elif selection_slug.startswith("menos de"):
+            side = "under"
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "selection_not_over_under",
+            }
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": SUPPORTED_MARKET_TYPE_IDS.get(type_id),
+            "market_type": "total_goals",
+            "market_scope": "full_time",
+            "side": side,
+            "line": float(line),
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
+
+    # --- Asian Total (typeId 189) ---
+    if type_id == 189:
         line = selection.get("handicap")
         if line is None:
             line = market.get("handicap")
@@ -601,7 +651,12 @@ def normalize_market_entry(
         result["normalized_status"] = "ignored_market"
         return result
 
-    if any(term in market_slug for term in IGNORED_MARKET_TERMS):
+    # Preserve total_goals/alternativas when family/type indicates supported O/U
+    is_known_total_family = (
+        betano_market_family in {"total_goals", "total_goals_alt", "asian_total"}
+        or betano_market_type_id in {13, 189, 2818, 104, 503}
+    )
+    if any(term in market_slug for term in IGNORED_MARKET_TERMS) and not is_known_total_family:
         result["normalized_status"] = "ignored_market"
         return result
 

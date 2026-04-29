@@ -464,7 +464,7 @@ class NormalizeByFamilyTest(unittest.TestCase):
             home_team="A",
             away_team="B",
             betano_market_type_id=13,
-            betano_market_family="asian_total_or_total_ou",
+            betano_market_family="total_goals",
         )
         self.assertEqual(r13["market_type"], "total_goals")
         self.assertEqual(r13["side"], "over")
@@ -552,6 +552,22 @@ class NormalizeByFamilyTest(unittest.TestCase):
         self.assertEqual(r["market_type"], "total_goals")
         self.assertEqual(r["side"], "over")
 
+    def test_alternativas_total_goals_not_ignored(self) -> None:
+        from vcbet.core.market_normalizer import normalize_market_entry
+
+        r = normalize_market_entry(
+            market_raw="Total de Gols Mais/Menos (alternativas)",
+            selection_raw="Mais de 3.5",
+            home_team="A",
+            away_team="B",
+            betano_market_type_id=13,
+            betano_market_family="total_goals",
+        )
+        self.assertNotEqual(r["normalized_status"], "ignored_market")
+        self.assertEqual(r["market_type"], "total_goals")
+        self.assertEqual(r["side"], "over")
+        self.assertEqual(r["line"], 3.5)
+
 
 class NormalizeBetanoContractTest(unittest.TestCase):
     """Testa normalize_betano_market_contract com dados reais da API."""
@@ -574,7 +590,7 @@ class NormalizeBetanoContractTest(unittest.TestCase):
         c = normalize_betano_market_contract(market, sel, "Girona", "Mallorca")
         self.assertIsNotNone(c)
         self.assertEqual(c["normalized_status"], "ok")
-        self.assertEqual(c["market_type"], "asian_total")
+        self.assertEqual(c["market_type"], "total_goals")
         self.assertEqual(c["market_scope"], "full_time")
         self.assertEqual(c["side"], "over")
         self.assertEqual(c["line"], 2.5)
@@ -585,7 +601,7 @@ class NormalizeBetanoContractTest(unittest.TestCase):
         c = normalize_betano_market_contract(market, sel, "Girona", "Mallorca")
         self.assertIsNotNone(c)
         self.assertEqual(c["normalized_status"], "ok")
-        self.assertEqual(c["market_type"], "asian_total")
+        self.assertEqual(c["market_type"], "total_goals")
         self.assertEqual(c["side"], "under")
         self.assertEqual(c["line"], 3.5)
 
@@ -715,7 +731,7 @@ class NormalizeBetanoContractTest(unittest.TestCase):
         self.assertEqual(diag["normalized_ok_rows"], 2)  # O/U 2.5 over+under
         self.assertEqual(diag["collected_supported_rows"], 2)
         self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["market_type"], "asian_total")
+        self.assertEqual(rows[0]["market_type"], "total_goals")
         self.assertEqual(rows[0]["line"], 2.5)
 
 

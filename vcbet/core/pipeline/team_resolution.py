@@ -4,13 +4,13 @@ from collections import Counter
 
 import pandas as pd
 
-from vcbet.core.team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
+from vcbet.core.team_matcher import PendingAliasRow, match_team_name, write_pending_aliases
 from vcbet.team_identity.review_writer import upsert_pending_to_functional_file
 
 
 def prepare_team_resolution_state(alias_file: str, df_xg: pd.DataFrame) -> dict[str, object]:
     return {
-        "alias_cache": load_alias_cache(alias_file),
+        "alias_cache": {},
         "xg_by_league": {league: league_df.copy() for league, league_df in df_xg.groupby("league")},
         "pending_rows": [],
         "pending_seen": set(),

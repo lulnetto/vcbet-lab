@@ -566,6 +566,34 @@ class UnifiedCollectorFallbackTest(unittest.TestCase):
             snapshot_path = Path(tmp) / "2026-04-28" / "run_skip" / "xg_snapshot.csv"
             self.assertFalse(snapshot_path.exists())
 
+    def test_xg_daily_store_respects_output_dir(self) -> None:
+        from vcbet.collectors.xg_daily_store import get_or_build_daily_xg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "vcbet.collectors.xg_daily_store.carregar_ligas_fotmob"
+            ) as mock_fotmob_map, patch(
+                "vcbet.collectors.xg_daily_store.FotMobClient"
+            ) as MockClient:
+
+                mock_fotmob_map.return_value = {"Brasileirão Série A": {"fotmob_league_id": 268, "fotmob_ccode3": "BRA"}}
+                mock_client = MagicMock()
+                mock_client.warmup.return_value = MagicMock(ok=True)
+                mock_client.fetch_league_data.return_value = MagicMock(
+                    ok=True, status_code=200, json_data=SAMPLE_FOTMOB_JSON, error=None
+                )
+                MockClient.return_value = mock_client
+
+                path = get_or_build_daily_xg(
+                    target_date="2026-04-28",
+                    source="fotmob",
+                    leagues="Brasileirão Série A",
+                    output_dir=tmp,
+                    snapshot_date="2026-04-28",
+                )
+                self.assertTrue(Path(path).exists())
+                self.assertTrue(str(path).startswith(str(tmp)))
+
 
 class PipelineSkipMissingXgTest(unittest.TestCase):
     def test_leagues_without_xg_skipped_before_pricing(self) -> None:

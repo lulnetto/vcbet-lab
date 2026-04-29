@@ -35,42 +35,8 @@ def main() -> int:
     parser.add_argument("--include-blocked", action="store_true")
     args = parser.parse_args()
 
-    pending_file = Path(args.pending_file)
-    alias_file = Path(args.alias_file)
-
-    rows, delimiter, fieldnames = read_rows(pending_file)
-    if not rows:
-        print("Nenhuma linha no pending file.")
-        if pending_file.exists():
-            pending_file.unlink()
-        return 0
-
-    alias_map = {}
-    if alias_file.exists():
-        alias_map = json.loads(alias_file.read_text(encoding="utf-8"))
-
-    remaining = []
-    saved = 0
-    for row in rows:
-        status = str(row.get("match_status", "")).strip()
-        visible = status == "pending_review" or (args.include_blocked and status == "blocked")
-        if visible:
-          source = str(row.get("source_name", "")).strip()
-          target = str(row.get("suggestion", "")).strip()
-          if source and target:
-              alias_map[source] = target
-              saved += 1
-          continue
-        remaining.append(row)
-
-    alias_file.write_text(json.dumps(alias_map, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    write_rows(pending_file, remaining, delimiter, fieldnames)
-
-    if not remaining:
-        print(f"Aprovados={saved}. Pending file removido.")
-    else:
-        print(f"Aprovados={saved}. Restantes={len(remaining)}")
-    return 0
+    print("[DEPRECATED] Legacy alias approval is disabled. Use the team registry as the canonical source.")
+    return 1
 
 
 if __name__ == "__main__":

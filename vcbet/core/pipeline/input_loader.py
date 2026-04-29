@@ -41,9 +41,12 @@ def carregar_snapshot_odds(odds_file: str | Path) -> pd.DataFrame:
             df_betano["home_team"] = split_cols[0].fillna("").str.strip()
             df_betano["away_team"] = split_cols[1].fillna("").str.strip() if split_cols.shape[1] > 1 else ""
 
-    if {"market_raw", "selection_raw", "home_team", "away_team"}.issubset(df_betano.columns):
-        df_betano = normalize_odds_dataframe(df_betano)
-    elif "normalized_status" not in df_betano.columns:
+    needs_normalization = (
+        "normalized_status" not in df_betano.columns
+        or "market_type" not in df_betano.columns
+        or df_betano["normalized_status"].isna().all()
+    )
+    if needs_normalization and {"market_raw", "selection_raw", "home_team", "away_team"}.issubset(df_betano.columns):
         df_betano = normalize_odds_dataframe(df_betano)
 
     return df_betano
