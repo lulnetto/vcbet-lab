@@ -131,6 +131,17 @@ def registry_row_warnings(row: dict[str, str]) -> list[str]:
     return warnings
 
 
+def _is_manual_ui_approved(row: dict[str, str]) -> bool:
+    """Entradas aprovadas manualmente pela UI podem não ter betano_team_id/betano_url."""
+    if row.get("match_status") != "MATCH_REGISTRY_APPROVED":
+        return False
+    if not row.get("league") or not row.get("betano_name"):
+        return False
+    source = str(row.get("source", "")).strip()
+    method = str(row.get("match_method", "")).strip()
+    return source == "ui_review" or method in {"registry_review", "manual_override"}
+
+
 def cleanup_invalid_approved_registry(project_root: Path) -> dict[str, Any]:
     registry_path = _full_path(project_root, DEFAULT_REGISTRY_FILE)
     rows, fieldnames = _read_csv(registry_path, APPROVED_COLUMNS)
@@ -140,7 +151,7 @@ def cleanup_invalid_approved_registry(project_root: Path) -> dict[str, Any]:
     invalid: list[dict[str, str]] = []
     now = _now_str()
     for row in rows:
-        if is_valid_betano_team_identity(row.get("betano_name", ""), row.get("betano_team_id", ""), row.get("betano_url", "")):
+        if is_valid_betano_team_identity(row.get("betano_name", ""), row.get("betano_team_id", ""), row.get("betano_url", "")) or _is_manual_ui_approved(row):
             valid.append(row)
         else:
             invalid.append({**row, "quarantine_reason": "invalid_betano_team_identity", "quarantined_at": now})
@@ -163,8 +174,11 @@ def load_pending_registry_reviews(project_root: Path) -> dict[str, Any]:
             continue
         normalized = _normalize_pending_row(row)
         warnings = registry_row_warnings(normalized)
+        # Pipeline funcional não popula betano_team_id/betano_url;
+        # não bloquear aprovação manual por identidade incompleta.
+        warnings = [w for w in warnings if w != "identidade_betano_invalida"]
         normalized["validation_warnings"] = "|".join(warnings)
-        normalized["approval_blocked"] = "true" if any(w in warnings for w in ("identidade_betano_invalida", "cobertura_parcial")) else "false"
+        normalized["approval_blocked"] = "true" if any(w in warnings for w in ("cobertura_parcial",)) else "false"
         normalized["manual_override_required"] = "true" if "score_baixo" in warnings and normalized["approval_blocked"] != "true" else "false"
         items.append(normalized)
     by_league: dict[str, int] = {}
@@ -267,8 +281,9 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         "coverage_status": payload.get("coverage_status") or base.get("coverage_status") or "",
     }
     warnings = registry_row_warnings(validation_base)
-    if "identidade_betano_invalida" in warnings:
-        raise ValueError("alias rejeitado: identidade Betano inválida.")
+    # Aprovação manual via UI pode não ter betano_team_id/betano_url preenchidos
+    # (pipeline funcional não popula esses campos). Remover warning de identidade.
+    warnings = [w for w in warnings if w != "identidade_betano_invalida"]
     if "cobertura_parcial" in warnings:
         raise ValueError("alias rejeitado: linha veio de cobertura parcial/bloqueada.")
     if "score_baixo" in warnings and not (

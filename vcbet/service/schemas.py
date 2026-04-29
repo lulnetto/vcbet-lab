@@ -170,6 +170,15 @@ class TeamRegistryAliasRequest(BaseModel):
     coverage_status: str | None = None
     manual_override: bool = False
     manual_override_reason: str | None = None
+    # FotMob fields (optional, for forward compatibility)
+    fotmob_team_name: str | None = None
+    fotmob_team_id: str | None = None
+    fotmob_short_name: str | None = None
+    xg_provider_preferred: str | None = None
+    canonical_team_name: str | None = None
+    source_name: str | None = None
+    suggestion: str | None = None
+    registry_pending_key: str | None = None
 
 
 class TeamRegistrySyncRequest(BaseModel):

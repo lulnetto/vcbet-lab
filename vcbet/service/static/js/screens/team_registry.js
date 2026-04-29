@@ -138,18 +138,28 @@ function registryPayloadAt(index, useEdited = false) {
   if (!item) return null;
   const selected = document.querySelector(`.registry-candidate-select[data-registry-index="${index}"]`)?.value || '';
   const edited = document.querySelector(`.registry-footy-input[data-registry-index="${index}"]`)?.value || '';
+  const footystats_name = (useEdited ? edited : (selected || item.suggested_footystats_name || edited)).trim();
   return {
     league: item.league || '',
-    betano_name: item.betano_name || '',
+    betano_name: item.betano_name || item.source_name || '',
     betano_team_id: item.betano_team_id || '',
     betano_url: item.betano_url || '',
     suggested_footystats_name: item.suggested_footystats_name || '',
-    footystats_name: (useEdited ? edited : (selected || item.suggested_footystats_name || edited)).trim(),
+    footystats_name: footystats_name,
+    source_name: item.source_name || item.betano_name || '',
+    suggestion: item.suggestion || footystats_name,
+    registry_pending_key: item.registry_pending_key || `${item.league || ''}|${item.betano_name || item.source_name || ''}`,
     top_score: item.top_score || '',
     review_reason: item.review_reason || '',
     ambiguous_options: item.ambiguous_options || '',
     source: item.source || 'ui_review',
     coverage_status: item.coverage_status || '',
+    // FotMob fields (forward compatibility)
+    fotmob_team_name: item.fotmob_team_name || footystats_name,
+    fotmob_team_id: item.fotmob_team_id || '',
+    fotmob_short_name: item.fotmob_short_name || '',
+    xg_provider_preferred: item.xg_provider_preferred || 'fotmob',
+    canonical_team_name: item.canonical_team_name || footystats_name,
   };
 }
 

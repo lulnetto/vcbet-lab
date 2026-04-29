@@ -213,11 +213,21 @@ def safe_write_registry_rows(
     return len(rows)
 
 
+def _is_manual_ui_approved(row: RegistryAlias) -> bool:
+    """Entradas aprovadas manualmente pela UI podem não ter betano_team_id/betano_url."""
+    if row.match_status != "MATCH_REGISTRY_APPROVED":
+        return False
+    if not row.league or not row.betano_name:
+        return False
+    return row.source == "ui_review" or row.match_method in {"registry_review", "manual_override"}
+
+
 def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT_REGISTRY_FILE) -> tuple[int, int]:
     registry_path = Path(path)
     existing = [
         row for row in read_registry(registry_path)
         if is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url)
+        or _is_manual_ui_approved(row)
     ]
     by_key = {
         registry_alias_key(row.league, row.betano_team_id, row.betano_name): row
@@ -226,7 +236,7 @@ def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT
     added = 0
 
     for row in rows:
-        if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
+        if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url) and not _is_manual_ui_approved(row):
             continue
 
         key = registry_alias_key(row.league, row.betano_team_id, row.betano_name)
