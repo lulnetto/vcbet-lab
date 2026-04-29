@@ -103,6 +103,7 @@ def build_quality_report(
     market_scope_counts: Counter,
     normalized_market_type_counts: Counter,
     base_filter_discard_counts: Counter,
+    league_skipped_missing_xg_snapshot: dict[str, int],
     status_counts: dict[str, int],
     pending_rows: list,
     unique_pending_counts: Counter,
@@ -160,6 +161,7 @@ def build_quality_report(
         },
         "data_quality": {
             "snapshot_validation": snapshot_validation,
+            "league_skipped_missing_xg_snapshot": league_skipped_missing_xg_snapshot,
         },
         "source_files": {
             "odds_file": str(odds_path),

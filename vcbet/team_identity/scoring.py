@@ -73,6 +73,11 @@ class RegistryAlias:
     match_method: str
     approved_at: str
     source: str
+    fotmob_team_name: str = ""
+    fotmob_team_id: str = ""
+    fotmob_short_name: str = ""
+    xg_provider_preferred: str = ""
+    canonical_team_name: str = ""
 
 
 @dataclass(frozen=True)

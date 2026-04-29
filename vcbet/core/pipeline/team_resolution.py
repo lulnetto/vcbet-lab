@@ -36,8 +36,36 @@ def resolve_row_teams(
     candidates = df_xg_liga["team_name"].tolist()
     time_casa = str(linha.get("home_team", "")).strip()
     time_fora = str(linha.get("away_team", "")).strip()
-    home_match = match_team_name(time_casa, candidates, alias_cache, league=liga_jogo, high_threshold=high_threshold, review_threshold=review_threshold)
-    away_match = match_team_name(time_fora, candidates, alias_cache, league=liga_jogo, high_threshold=high_threshold, review_threshold=review_threshold)
+
+    xg_source = str(df_xg_liga["source"].iloc[0]) if "source" in df_xg_liga.columns and not df_xg_liga.empty else "footystats"
+    source_team_id_map: dict[str, str] = {}
+    if "source_team_id" in df_xg_liga.columns:
+        source_team_id_map = {
+            str(row["team_name"]): str(row["source_team_id"])
+            for _, row in df_xg_liga.iterrows()
+            if pd.notna(row.get("source_team_id")) and pd.notna(row.get("team_name"))
+        }
+
+    home_match = match_team_name(
+        time_casa,
+        candidates,
+        alias_cache,
+        league=liga_jogo,
+        high_threshold=high_threshold,
+        review_threshold=review_threshold,
+        xg_source=xg_source,
+        source_team_id_map=source_team_id_map,
+    )
+    away_match = match_team_name(
+        time_fora,
+        candidates,
+        alias_cache,
+        league=liga_jogo,
+        high_threshold=high_threshold,
+        review_threshold=review_threshold,
+        xg_source=xg_source,
+        source_team_id_map=source_team_id_map,
+    )
 
     for res, side in ((home_match, "home"), (away_match, "away")):
         status_counts[res.match_status] = status_counts.get(res.match_status, 0) + 1

@@ -64,6 +64,44 @@ def _find_team_row(table_data: list[dict], team_id: int) -> dict | None:
     return None
 
 
+def extract_mls_supporters_shield_xg_table(payload: dict) -> dict:
+    """Extract the Supporters Shield subtable from MLS composite response.
+
+    MLS (leagueId 130) returns multiple subtables under table[0].data.tables.
+    The aggregated table containing all teams is the one whose leagueName
+    equals 'Supporters Shield'. This function returns the inner table dict
+    (which contains xg, home, away, all) so the normal parser can consume it.
+    """
+    tables = payload.get("table", [])
+    if not tables:
+        raise ValueError("fotmob_missing_table: no 'table' key in response")
+
+    table_root = tables[0]
+    if not isinstance(table_root, dict):
+        raise ValueError("fotmob_invalid_table: table[0] is not a dict")
+
+    data = table_root.get("data", {})
+    if not isinstance(data, dict):
+        raise ValueError("fotmob_invalid_table: table[0].data is not a dict")
+
+    subtables = data.get("tables", [])
+    if not isinstance(subtables, list):
+        raise ValueError("fotmob_invalid_table: table[0].data.tables is not a list")
+
+    for sub in subtables:
+        if not isinstance(sub, dict):
+            continue
+        if sub.get("leagueName") == "Supporters Shield":
+            inner_table = sub.get("table", {})
+            if not isinstance(inner_table, dict):
+                raise ValueError("fotmob_invalid_table: Supporters Shield subtable.table is not a dict")
+            if not inner_table.get("xg"):
+                raise ValueError("fotmob_missing_xg_table: Supporters Shield subtable has no xG data")
+            return inner_table
+
+    raise ValueError("fotmob_missing_mls_supporters_shield: no 'Supporters Shield' subtable found")
+
+
 def parse_fotmob_league_xg(
     league_name: str,
     league_id: int,
@@ -79,11 +117,18 @@ def parse_fotmob_league_xg(
     if not tables:
         raise ValueError("fotmob_missing_table: no 'table' key in response")
 
-    table_root = tables[0]
-    if isinstance(table_root, dict):
-        table_data = table_root.get("data", {}).get("table", {})
+    is_mls = (league_id == 130) or (str(league_name).strip().upper() == "MLS")
+    if is_mls:
+        try:
+            table_data = extract_mls_supporters_shield_xg_table(json_data)
+        except ValueError:
+            raise
     else:
-        table_data = {}
+        table_root = tables[0]
+        if isinstance(table_root, dict):
+            table_data = table_root.get("data", {}).get("table", {})
+        else:
+            table_data = {}
 
     xg_table = table_data.get("xg", []) if isinstance(table_data, dict) else []
     home_table = table_data.get("home", []) if isinstance(table_data, dict) else []

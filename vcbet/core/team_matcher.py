@@ -100,6 +100,8 @@ def match_team_name(
     registry_file: str | Path | None = DEFAULT_REGISTRY_FILE,
     high_threshold: int = 90,
     review_threshold: int = 75,
+    xg_source: str = "footystats",
+    source_team_id_map: dict[str, str] | None = None,
 ) -> TeamMatchResult:
     alias_cache = alias_cache or {}
 
@@ -113,7 +115,14 @@ def match_team_name(
         )
 
     if league and registry_file:
-        registry_alias = registry_lookup(league, source_name, candidates, registry_file=registry_file)
+        registry_alias = registry_lookup(
+            league,
+            source_name,
+            candidates,
+            registry_file=registry_file,
+            xg_source=xg_source,
+            source_team_id_map=source_team_id_map,
+        )
         if registry_alias:
             confidence = registry_alias.match_confidence or "1.0000"
             try:

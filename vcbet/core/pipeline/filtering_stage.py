@@ -44,6 +44,20 @@ def build_normalization_filter(df_betano: pd.DataFrame, df_xg: pd.DataFrame, sup
         & (df_betano["market_scope"] == "full_time")
         & (df_betano["market_type"].isin(supported_markets))
     ].copy()
+
+    # Skip leagues that exist in odds but have no xG coverage before pricing
+    ligas_odds = set(df_betano["league"].dropna().unique())
+    ligas_xg = set(df_xg["league"].dropna().unique())
+    ligas_sem_xg = sorted(ligas_odds - ligas_xg)
+    league_skipped_missing_xg_snapshot: dict[str, int] = {}
+    for league in ligas_sem_xg:
+        count = int((df_betano["league"] == league).sum())
+        if count > 0:
+            league_skipped_missing_xg_snapshot[league] = count
+    if ligas_sem_xg:
+        print(f"[ALERTA] Ligas com odds mas sem xG — excluídas antes do pricing: {', '.join(ligas_sem_xg)}")
+        df_alvo = df_alvo[~df_alvo["league"].isin(ligas_sem_xg)].copy()
+
     print("[3] Normalização/Filtro base: " f"{len(df_alvo)} linhas elegíveis de {len(df_betano)} totais")
 
     return {
@@ -52,6 +66,7 @@ def build_normalization_filter(df_betano: pd.DataFrame, df_xg: pd.DataFrame, sup
         "market_scope_counts": market_scope_counts,
         "normalized_market_type_counts": normalized_market_type_counts,
         "base_filter_discard_counts": base_filter_discard_counts,
+        "league_skipped_missing_xg_snapshot": league_skipped_missing_xg_snapshot,
     }
 
 

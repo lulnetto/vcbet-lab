@@ -26,6 +26,19 @@ APPROVED_COLUMNS = [
     "match_method",
     "approved_at",
     "source",
+    "fotmob_team_name",
+    "fotmob_team_id",
+    "fotmob_short_name",
+    "xg_provider_preferred",
+    "canonical_team_name",
+]
+
+_LEGACY_OPTIONAL_COLUMNS = [
+    "fotmob_team_name",
+    "fotmob_team_id",
+    "fotmob_short_name",
+    "xg_provider_preferred",
+    "canonical_team_name",
 ]
 
 
@@ -37,7 +50,13 @@ def read_registry(path: str | Path = DEFAULT_REGISTRY_FILE) -> list[RegistryAlia
         reader = csv.DictReader(fh, delimiter=";")
         rows = []
         for row in reader:
-            rows.append(RegistryAlias(**{col: str(row.get(col, "") or "") for col in APPROVED_COLUMNS}))
+            kwargs: dict[str, str] = {}
+            for col in APPROVED_COLUMNS:
+                if col in _LEGACY_OPTIONAL_COLUMNS and col not in (reader.fieldnames or []):
+                    kwargs[col] = ""
+                else:
+                    kwargs[col] = str(row.get(col, "") or "")
+            rows.append(RegistryAlias(**kwargs))
         return rows
 
 
@@ -47,6 +66,8 @@ def registry_lookup(
     candidates: Iterable[str],
     *,
     registry_file: str | Path = DEFAULT_REGISTRY_FILE,
+    xg_source: str = "footystats",
+    source_team_id_map: dict[str, str] | None = None,
 ) -> RegistryAlias | None:
     candidate_names = {normalize_team_name(name): name for name in candidates}
     betano_norm = normalize_team_name(betano_name)
@@ -55,20 +76,89 @@ def registry_lookup(
             continue
         if normalize_team_name(row.betano_name) != betano_norm:
             continue
-        canonical = candidate_names.get(normalize_team_name(row.footystats_name))
-        if canonical:
-            return RegistryAlias(
-                league=row.league,
-                betano_name=row.betano_name,
-                betano_team_id=row.betano_team_id,
-                betano_url=row.betano_url,
-                footystats_name=canonical,
-                match_status=row.match_status,
-                match_confidence=row.match_confidence,
-                match_method=row.match_method,
-                approved_at=row.approved_at,
-                source=row.source,
-            )
+
+        if xg_source == "fotmob":
+            # 1. fotmob_team_id match (preferred)
+            if row.fotmob_team_id and source_team_id_map:
+                for candidate_name, candidate_id in source_team_id_map.items():
+                    if str(candidate_id) == str(row.fotmob_team_id):
+                        return RegistryAlias(
+                            league=row.league,
+                            betano_name=row.betano_name,
+                            betano_team_id=row.betano_team_id,
+                            betano_url=row.betano_url,
+                            footystats_name=candidate_name,
+                            match_status=row.match_status,
+                            match_confidence=row.match_confidence,
+                            match_method=row.match_method,
+                            approved_at=row.approved_at,
+                            source=row.source,
+                        )
+
+            # 2. fotmob_team_name match
+            if row.fotmob_team_name:
+                canonical = candidate_names.get(normalize_team_name(row.fotmob_team_name))
+                if canonical:
+                    return RegistryAlias(
+                        league=row.league,
+                        betano_name=row.betano_name,
+                        betano_team_id=row.betano_team_id,
+                        betano_url=row.betano_url,
+                        footystats_name=canonical,
+                        match_status=row.match_status,
+                        match_confidence=row.match_confidence,
+                        match_method=row.match_method,
+                        approved_at=row.approved_at,
+                        source=row.source,
+                    )
+
+            # 3. canonical_team_name match
+            if row.canonical_team_name:
+                canonical = candidate_names.get(normalize_team_name(row.canonical_team_name))
+                if canonical:
+                    return RegistryAlias(
+                        league=row.league,
+                        betano_name=row.betano_name,
+                        betano_team_id=row.betano_team_id,
+                        betano_url=row.betano_url,
+                        footystats_name=canonical,
+                        match_status=row.match_status,
+                        match_confidence=row.match_confidence,
+                        match_method=row.match_method,
+                        approved_at=row.approved_at,
+                        source=row.source,
+                    )
+
+            # 4. Fallback to footystats_name for mixed registries
+            canonical = candidate_names.get(normalize_team_name(row.footystats_name))
+            if canonical:
+                return RegistryAlias(
+                    league=row.league,
+                    betano_name=row.betano_name,
+                    betano_team_id=row.betano_team_id,
+                    betano_url=row.betano_url,
+                    footystats_name=canonical,
+                    match_status=row.match_status,
+                    match_confidence=row.match_confidence,
+                    match_method=row.match_method,
+                    approved_at=row.approved_at,
+                    source=row.source,
+                )
+        else:
+            canonical = candidate_names.get(normalize_team_name(row.footystats_name))
+            if canonical:
+                return RegistryAlias(
+                    league=row.league,
+                    betano_name=row.betano_name,
+                    betano_team_id=row.betano_team_id,
+                    betano_url=row.betano_url,
+                    footystats_name=canonical,
+                    match_status=row.match_status,
+                    match_confidence=row.match_confidence,
+                    match_method=row.match_method,
+                    approved_at=row.approved_at,
+                    source=row.source,
+                )
     return None
 
 

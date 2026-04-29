@@ -208,6 +208,7 @@ def processar_pipeline(
 
     normalization = build_normalization_filter(df_betano, df_xg, SUPPORTED_MARKETS)
     resolution_state = prepare_team_resolution_state(alias_file, df_xg)
+    league_skipped_missing_xg_snapshot = normalization.get("league_skipped_missing_xg_snapshot", {})
     pricing = build_priced_candidates(
         df_alvo=normalization["df_alvo"],
         resolution_state=resolution_state,
@@ -284,6 +285,7 @@ def processar_pipeline(
         market_scope_counts=normalization["market_scope_counts"],
         normalized_market_type_counts=normalization["normalized_market_type_counts"],
         base_filter_discard_counts=normalization["base_filter_discard_counts"],
+        league_skipped_missing_xg_snapshot=league_skipped_missing_xg_snapshot,
         status_counts=pricing["status_counts"],
         pending_rows=pricing["pending_rows"],
         unique_pending_counts=pricing["unique_pending_counts"],
