@@ -45,7 +45,7 @@ Approved Betano ↔ FootyStats team aliases live in `configs/team_registry/betan
 
 Runtime registry maintenance artifacts live under `data/team_registry/`, including `alias_review_pending.csv` for ambiguous candidates and `betano_teams_snapshot.json` for the latest sync snapshot. These are generated artifacts and should not be force-added or promoted to source of truth without review.
 
-The official matching order is registry-approved alias, legacy `alias_times.json`, exact match, then fuzzy fallback. Fuzzy matches remain safety-gated for official picks; recurring fuzzy or unresolved cases are registry maintenance signals.
+The official matching order is registry-approved alias, exact match, then fuzzy fallback. Fuzzy matches remain safety-gated for official picks; recurring fuzzy or unresolved cases are registry maintenance signals.
 
 Run-level and replay alias review files are diagnostic evidence from one execution. They can help identify stale registry coverage, but the primary approval workflow is the global registry review in Qualidade de Dados. Replays are hidden from active alias work by default so replay evidence does not look like urgent operational approval work.
 

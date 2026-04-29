@@ -43,7 +43,6 @@ def processar_pipeline(
     xg_file: str,
     run_id: str | None = None,
     output_dir: str = "data/runs",
-    alias_file: str = "alias_times.json",
     ledger_file: str = str(DEFAULT_LEDGER_FILE),
     modo_debug: bool = False,
     config_file: str | None = None,
@@ -101,7 +100,6 @@ def processar_pipeline(
             },
             signal_version=SIGNAL_VERSION,
             pipeline_version=PIPELINE_VERSION,
-            alias_file=alias_file,
             ledger_file=ledger_file,
         )
         quality_report["error"] = {
@@ -174,7 +172,6 @@ def processar_pipeline(
             snapshot_validation=snapshot_validation,
             signal_version=SIGNAL_VERSION,
             pipeline_version=PIPELINE_VERSION,
-            alias_file=alias_file,
             ledger_file=ledger_file,
         )
         quality_report_file = save_run_quality_report(loaded["run_dir"], quality_report)
@@ -208,7 +205,7 @@ def processar_pipeline(
         raise ValueError(f"SnapshotValidator rejected snapshots: {error_codes}")
 
     normalization = build_normalization_filter(df_betano, df_xg, SUPPORTED_MARKETS)
-    resolution_state = prepare_team_resolution_state(alias_file, df_xg)
+    resolution_state = prepare_team_resolution_state(df_xg)
     league_skipped_missing_xg_snapshot = normalization.get("league_skipped_missing_xg_snapshot", {})
     functional_pending_file = None if dry_run else "data/team_registry/alias_review_pending.csv"
     pricing = build_priced_candidates(
@@ -279,7 +276,6 @@ def processar_pipeline(
         snapshot_validation=snapshot_validation,
         signal_version=SIGNAL_VERSION,
         pipeline_version=PIPELINE_VERSION,
-        alias_file=alias_file,
         ledger_file=ledger_file,
         df_betano=df_betano,
         df_xg=df_xg,
@@ -349,7 +345,6 @@ if __name__ == "__main__":
     parser.add_argument("--xg-file", required=True, help="Caminho do xg_snapshot.csv")
     parser.add_argument("--run-id", help="Identificador único da execução")
     parser.add_argument("--output-dir", default="data/runs", help="Diretório base para salvar as runs")
-    parser.add_argument("--alias-file", default="alias_times.json", help="Arquivo JSON com aliases aprovados manualmente")
     parser.add_argument("--ledger-file", default=str(DEFAULT_LEDGER_FILE), help="Caminho do bets_ledger.csv")
     parser.add_argument("--debug", action="store_true", help="Executa normalmente, mas não salva arquivos no final")
     parser.add_argument("--dry-run", action="store_true", help="Não persiste alterações em arquivos funcionais fora do run dir")
@@ -363,7 +358,6 @@ if __name__ == "__main__":
         xg_file=args.xg_file,
         run_id=args.run_id,
         output_dir=args.output_dir,
-        alias_file=args.alias_file,
         ledger_file=args.ledger_file,
         modo_debug=args.debug,
         config_file=args.config_file,

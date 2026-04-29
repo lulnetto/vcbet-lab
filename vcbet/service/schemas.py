@@ -43,7 +43,6 @@ class AnalysisRequest(BaseModel):
     run_id: str | None = None
     odds_file: str | None = None
     xg_file: str | None = None
-    alias_file: str = "alias_times.json"
     ledger_file: str = "data/history/bets_ledger.csv"
     output_dir: str = "data/runs"
     python_bin: str = "python3"
@@ -102,7 +101,6 @@ class DailyRunRequest(BaseModel):
     run_id: str | None = None
     ledger_file: str = "data/history/bets_ledger.csv"
     output_dir: str = "data/runs"
-    alias_file: str = "alias_times.json"
     results_file: str = "data/results/results_auto.csv"
     overrides_file: str | None = None
     python_bin: str = "python3"
@@ -128,7 +126,6 @@ class ReplayRunRequest(BaseModel):
     source_run_dir: str
     configs: list[str] = Field(default_factory=list)
     output_dir: str = "data/replays"
-    alias_file: str = "alias_times.json"
     python_bin: str = "python3"
     evaluate_results: bool = False
     results_source: str | None = None
@@ -146,7 +143,6 @@ class AliasApprovalItem(BaseModel):
 
 class AliasApproveRequest(BaseModel):
     pending_file: str
-    alias_file: str = "alias_times.json"
     approvals: list[AliasApprovalItem] = Field(default_factory=list)
     include_blocked: bool = True
 

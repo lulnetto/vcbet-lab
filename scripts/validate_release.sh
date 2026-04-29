@@ -74,7 +74,7 @@ from pathlib import Path
 import json
 
 root = Path.cwd()
-for path in sorted((root / "configs").glob("*.json")) + [root / "ligas.json", root / "alias_times.json"]:
+for path in sorted((root / "configs").glob("*.json")) + [root / "ligas.json"]:
     with path.open("r", encoding="utf-8") as fh:
         json.load(fh)
 print("json_ok")

@@ -45,7 +45,6 @@ def build_analysis_command(project_root: Path, req: AnalysisRequest) -> CommandS
     if req.xg_file:
         args += ["--xg-file", _resolve(project_root, req.xg_file)]
     args += [
-        "--alias-file", _resolve(project_root, req.alias_file),
         "--ledger-file", _resolve(project_root, req.ledger_file),
         "--output-dir", _resolve(project_root, req.output_dir),
         "--python-bin", req.python_bin,
@@ -164,7 +163,6 @@ def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[Comma
                     mode="full",
                     date=req.date,
                     run_id=req.run_id,
-                    alias_file=req.alias_file,
                     ledger_file=req.ledger_file,
                     output_dir=req.output_dir,
                     python_bin=req.python_bin,
@@ -243,7 +241,6 @@ def build_replay_command(project_root: Path, req: ReplayRunRequest) -> CommandSp
         "vcbet.replay.replay_pipeline",
         "--source-run-dir", _resolve(project_root, req.source_run_dir),
         "--output-dir", output_dir,
-        "--alias-file", _resolve(project_root, req.alias_file),
         "--python-bin", req.python_bin,
     ]
     for config_name in req.configs:

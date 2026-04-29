@@ -94,7 +94,6 @@ def build_quality_report(
     snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
-    alias_file: str,
     ledger_file: str,
     df_betano: pd.DataFrame,
     df_xg: pd.DataFrame,
@@ -166,7 +165,6 @@ def build_quality_report(
         "source_files": {
             "odds_file": str(odds_path),
             "xg_file": str(xg_path),
-            "alias_file": str(alias_file),
             "ledger_file": str(ledger_file),
         },
         "inputs": {
@@ -258,7 +256,6 @@ def build_snapshot_rejection_report(
     snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
-    alias_file: str,
     ledger_file: str,
 ) -> dict[str, object]:
     return {
@@ -302,7 +299,6 @@ def build_snapshot_rejection_report(
         "source_files": {
             "odds_file": str(odds_path),
             "xg_file": str(xg_path),
-            "alias_file": str(alias_file),
             "ledger_file": str(ledger_file),
         },
         "outputs": {

@@ -40,7 +40,7 @@ RETRY_DELAY_BASE = 1.0
 DEFAULT_BETANO_BT = "14"
 
 SUPPORTED_MARKET_TYPE_IDS = {
-    13: "asian_total_or_total_ou",
+    13: "total_goals",
     15: "btts",
     84: "home_team_total_ou",
     85: "away_team_total_ou",

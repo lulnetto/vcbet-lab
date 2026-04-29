@@ -17,8 +17,6 @@ class RouteContext:
     read_csv_rows: Callable[..., Any]
     read_ledger_rows: Callable[..., Any]
     compact_pick_row: Callable[..., Any]
-    load_alias_map: Callable[..., Any]
-    save_alias_map: Callable[..., Any]
     alias_candidate_files: Callable[..., Any]
     normalize_alias_rows: Callable[..., Any]
     registry_approved_keys: Callable[..., Any]

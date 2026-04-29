@@ -42,9 +42,9 @@ async function loadAliasReview() {
     renderAliasReviewTable([]);
     return;
   }
-  const payload = await api(`/aliases/review?${qs({pending_file: pendingFile, alias_file: document.getElementById('aliasFile').value, include_blocked: document.getElementById('aliasIncludeBlocked').checked, include_resolved: state.aliasDiagnostics.includeResolved})}`);
+  const payload = await api(`/aliases/review?${qs({pending_file: pendingFile, include_blocked: document.getElementById('aliasIncludeBlocked').checked, include_resolved: state.aliasDiagnostics.includeResolved})}`);
   state.aliasReview = payload;
-  document.getElementById('aliasSummary').textContent = JSON.stringify({ pending_file: payload.pending_file, alias_file: payload.alias_file, total: payload.total, status_counts: payload.status_counts }, null, 2);
+  document.getElementById('aliasSummary').textContent = JSON.stringify({ pending_file: payload.pending_file, total: payload.total, status_counts: payload.status_counts }, null, 2);
   renderAliasReviewTable(payload.items || []);
 }
 
@@ -86,7 +86,7 @@ async function approveSelectedAliases() {
   if (!approvals.length) return;
   await api('/aliases/approve', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, alias_file: document.getElementById('aliasFile').value, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
+    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
   });
   await loadAliasFiles(true);
 }
@@ -96,7 +96,7 @@ async function approveAllVisibleAliases() {
   if (!approvals.length) return;
   await api('/aliases/approve', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, alias_file: document.getElementById('aliasFile').value, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
+    body: JSON.stringify({ pending_file: state.aliasReview.pending_file, approvals, include_blocked: document.getElementById('aliasIncludeBlocked').checked })
   });
   await loadAliasFiles(true);
 }

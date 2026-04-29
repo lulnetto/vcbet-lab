@@ -44,9 +44,7 @@ def assess_risk_flags(candidate: dict[str, Any]) -> list[str]:
     away_status = candidate.get("match_status_away")
     reliable_statuses = {
         "auto_exact",
-        "manual_approved",
         "MATCH_EXACT",
-        "MATCH_MANUAL_ALIAS",
         "MATCH_REGISTRY_APPROVED",
         "auto_fuzzy_high",
     }

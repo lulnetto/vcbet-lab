@@ -605,7 +605,7 @@ def _normalize_by_family(
         return _normalize_asian_handicap(selection, result, home_team, away_team)
     if family == "asian_total":
         return _normalize_asian_total(selection, selection_slug, result)
-    if family in {"asian_total_or_total_ou", "total_goals", "total_goals_alt"}:
+    if family in {"asian_total", "total_goals", "total_goals_alt"}:
         return _normalize_total_goals(selection, selection_slug, result)
     if family == "home_team_total_ou":
         return _normalize_team_total(selection, selection_slug, result, home_team, away_team, "home")

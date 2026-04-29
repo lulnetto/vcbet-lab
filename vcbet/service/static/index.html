@@ -299,17 +299,11 @@
     <details class="card advanced">
       <summary>Problemas detectados em runs</summary>
       <div class="section-title"><h3>Diagnóstico legado</h3><button class="ghost" onclick="loadAliasFiles(true)">Atualizar diagnósticos</button></div>
-      <p class="muted">Estes arquivos são evidência de execução e diagnóstico. Resolva aliases no Registry de Times sempre que possível; `alias_times.json` continua disponível para compatibilidade legada.</p>
+      <p class="muted">Estes arquivos são evidência de execução e diagnóstico. Resolva aliases no Registry de Times sempre que possível.</p>
       <div class="row">
         <div><label>Pendências encontradas</label><select id="aliasPendingFile"></select></div>
         <div><label>Escopo</label><select id="aliasDiagnosticScope" onchange="loadAliasFiles(true)"><option value="runs_recent">Runs recentes</option><option value="replays">Replays</option><option value="history">Histórico</option></select></div>
       </div>
-      <details class="advanced">
-        <summary>Avançado</summary>
-        <div class="row" style="margin-top:10px;">
-          <div><label>Alias file legado</label><input id="aliasFile" value="alias_times.json"></div>
-        </div>
-      </details>
       <div class="inline" style="margin-top:10px;">
         <label><input type="checkbox" id="aliasIncludeBlocked" checked> incluir blocked</label>
         <label><input type="checkbox" id="aliasIncludeResolved"> mostrar resolvidos/antigos</label>

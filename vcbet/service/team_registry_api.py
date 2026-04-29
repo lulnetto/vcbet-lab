@@ -50,6 +50,20 @@ def _full_path(project_root: Path, path: str | Path) -> Path:
     return candidate.resolve()
 
 
+def latest_daily_xg_snapshot(project_root: Path) -> Path | None:
+    xg_root = project_root / "data" / "xg"
+    candidates: list[tuple[datetime, Path]] = []
+    for path in xg_root.glob("*/xg_snapshot.csv"):
+        try:
+            snapshot_date = datetime.strptime(path.parent.name, "%Y-%m-%d")
+        except ValueError:
+            continue
+        candidates.append((snapshot_date, path.resolve()))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
 def _read_csv(path: Path, fallback_columns: list[str]) -> tuple[list[dict[str, str]], list[str]]:
     if not path.exists():
         return [], list(fallback_columns)
@@ -62,7 +76,9 @@ def _read_csv(path: Path, fallback_columns: list[str]) -> tuple[list[dict[str, s
         return rows, fieldnames
 
 
-def _write_csv_atomic(path: Path, rows: list[dict[str, str]], fieldnames: list[str]) -> None:
+def _write_csv_atomic(path: Path, rows: list[dict[str, str]], fieldnames: list[str], allow_empty=True) -> None:
+    if not rows and not allow_empty:
+        raise ValueError(f"Recusando escrita vazia em {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
     with tmp_path.open("w", newline="", encoding="utf-8") as fh:
@@ -155,8 +171,13 @@ def cleanup_invalid_approved_registry(project_root: Path) -> dict[str, Any]:
             valid.append(row)
         else:
             invalid.append({**row, "quarantine_reason": "invalid_betano_team_identity", "quarantined_at": now})
+    if invalid and not valid:
+        raise ValueError(
+            "cleanup_invalid_approved_registry recusou: todas as linhas seriam removidas. "
+            "Registry não será truncado."
+        )
     if invalid:
-        _write_csv_atomic(registry_path, valid, _approved_fieldnames(fieldnames))
+        _write_csv_atomic(registry_path, valid, _approved_fieldnames(fieldnames), allow_empty=False)
         quarantine_path = _full_path(project_root, QUARANTINE_REGISTRY_FILE)
         existing, quarantine_fields = _read_csv(quarantine_path, [*APPROVED_COLUMNS, "quarantine_reason", "quarantined_at"])
         existing.extend(invalid)
@@ -196,7 +217,7 @@ def load_pending_registry_reviews(project_root: Path) -> dict[str, Any]:
 
 
 def load_approved_registry_aliases(project_root: Path) -> dict[str, Any]:
-    cleanup = cleanup_invalid_approved_registry(project_root)
+    cleanup = {"removed": 0, "skipped": "read_only_endpoint"}
     path = _full_path(project_root, DEFAULT_REGISTRY_FILE)
     items = [_normalize_approved_row(row) for row in read_registry(path)]
     by_league: dict[str, int] = {}
@@ -227,6 +248,96 @@ def _approved_duplicate(existing: list[RegistryAlias], row: dict[str, str]) -> b
     return False
 
 
+def _approved_duplicate_index(existing: list[dict[str, str]], row: dict[str, str]) -> int | None:
+    league = str(row.get("league", "")).strip()
+    team_id = str(row.get("betano_team_id", "")).strip()
+    betano_norm = normalize_team_name(str(row.get("betano_name", "")))
+    for index, item in enumerate(existing):
+        if str(item.get("league", "")).strip() != league:
+            continue
+        existing_team_id = str(item.get("betano_team_id", "")).strip()
+        if team_id and existing_team_id and existing_team_id == team_id:
+            return index
+        if betano_norm and normalize_team_name(str(item.get("betano_name", ""))) == betano_norm:
+            return index
+    return None
+
+
+def _manual_override_enabled(payload: dict[str, Any]) -> bool:
+    return payload.get("manual_override") is True and bool(str(payload.get("manual_override_reason") or "").strip())
+
+
+def _xg_file_from_payload_or_daily(project_root: Path, payload: dict[str, Any]) -> Path | None:
+    raw_xg_file = payload.get("xg_file")
+    if raw_xg_file:
+        return _full_path(project_root, raw_xg_file)
+    return latest_daily_xg_snapshot(project_root)
+
+
+def _fotmob_enrichment_from_xg(
+    project_root: Path,
+    payload: dict[str, Any],
+    base: dict[str, str],
+    footystats_name: str,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    xg_file = _xg_file_from_payload_or_daily(project_root, payload)
+    metadata = {
+        "fotmob_enriched": False,
+        "xg_file_used": str(xg_file) if xg_file else "",
+        "fotmob_enrichment_reason": "xg_file_not_found",
+    }
+    if not xg_file or not xg_file.exists():
+        return {}, metadata
+
+    rows, _ = _read_csv(xg_file, ["league", "team_name", "source", "source_team_id"])
+    league = str(base.get("league", "")).strip()
+    target_name = str(footystats_name or "").strip()
+    exact_match = next(
+        (
+            row for row in rows
+            if str(row.get("league", "")).strip() == league
+            and str(row.get("team_name", "")).strip() == target_name
+        ),
+        None,
+    )
+    normalized_target = normalize_team_name(target_name)
+    matched = exact_match or next(
+        (
+            row for row in rows
+            if str(row.get("league", "")).strip() == league
+            and normalize_team_name(str(row.get("team_name", ""))) == normalized_target
+        ),
+        None,
+    )
+    if not matched:
+        metadata["fotmob_enrichment_reason"] = "team_not_found"
+        return {}, metadata
+
+    if str(matched.get("source", "")).strip().casefold() != "fotmob":
+        metadata["fotmob_enrichment_reason"] = "not_fotmob_source"
+        return {}, metadata
+
+    team_name = str(matched.get("team_name", "") or "").strip()
+    source_team_id = str(matched.get("source_team_id", "") or "").strip()
+    enriched: dict[str, str] = {}
+
+    def fill_if_missing(field: str, value: str) -> None:
+        if not value:
+            return
+        if str(payload.get(field) or base.get(field) or "").strip():
+            return
+        enriched[field] = value
+
+    fill_if_missing("fotmob_team_name", team_name)
+    fill_if_missing("canonical_team_name", team_name)
+    fill_if_missing("xg_provider_preferred", "fotmob")
+    fill_if_missing("fotmob_team_id", source_team_id)
+
+    metadata["fotmob_enriched"] = bool(enriched) or bool(team_name)
+    metadata["fotmob_enrichment_reason"] = "matched" if source_team_id else "missing_source_team_id"
+    return enriched, metadata
+
+
 def _pending_fieldnames(existing: list[str]) -> list[str]:
     merged = list(existing or [])
     for name in [*REVIEW_COLUMNS, *PENDING_OPTIONAL_COLUMNS]:
@@ -248,7 +359,6 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
     registry_path = _full_path(project_root, DEFAULT_REGISTRY_FILE)
     pending_rows, pending_fields = _read_csv(review_path, [*REVIEW_COLUMNS, *PENDING_OPTIONAL_COLUMNS])
     approved_rows, approved_fields = _read_csv(registry_path, APPROVED_COLUMNS)
-    existing = read_registry(registry_path)
 
     match = next((row for row in pending_rows if _matches_identity(row, payload)), None)
     base = dict(match or {})
@@ -264,17 +374,6 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
     ).strip()
     if not base.get("league") or not base.get("betano_name") or not footystats_name:
         raise ValueError("league, betano_name e footystats_name são obrigatórios para aprovar alias.")
-    if not match:
-        for item in existing:
-            item_payload = asdict(item)
-            if _matches_identity(item_payload, base):
-                return {
-                    "added": 0,
-                    "resolved_pending": 0,
-                    "approved_file": str(DEFAULT_REGISTRY_FILE),
-                    "pending_file": str(DEFAULT_REVIEW_FILE),
-                    "alias": item_payload,
-                }
     validation_base = {
         **base,
         "top_score": payload.get("top_score") or base.get("top_score") or payload.get("match_confidence") or "",
@@ -292,11 +391,24 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         raise ValueError("alias de score baixo exige manual_override=true e manual_override_reason.")
 
     now = _now_str()
-    fotmob_team_name = str(payload.get("fotmob_team_name") or base.get("fotmob_team_name") or "").strip()
-    fotmob_team_id = str(payload.get("fotmob_team_id") or base.get("fotmob_team_id") or "").strip()
+    fotmob_enrichment, fotmob_metadata = _fotmob_enrichment_from_xg(project_root, payload, base, footystats_name)
+    fotmob_team_name = str(payload.get("fotmob_team_name") or base.get("fotmob_team_name") or fotmob_enrichment.get("fotmob_team_name") or "").strip()
+    fotmob_team_id = str(payload.get("fotmob_team_id") or base.get("fotmob_team_id") or fotmob_enrichment.get("fotmob_team_id") or "").strip()
     fotmob_short_name = str(payload.get("fotmob_short_name") or base.get("fotmob_short_name") or "").strip()
-    xg_provider_preferred = str(payload.get("xg_provider_preferred") or base.get("xg_provider_preferred") or "").strip()
-    canonical_team_name = str(payload.get("canonical_team_name") or base.get("canonical_team_name") or fotmob_team_name or footystats_name or "").strip()
+    xg_provider_preferred = str(
+        payload.get("xg_provider_preferred")
+        or base.get("xg_provider_preferred")
+        or fotmob_enrichment.get("xg_provider_preferred")
+        or ""
+    ).strip()
+    canonical_team_name = str(
+        payload.get("canonical_team_name")
+        or base.get("canonical_team_name")
+        or fotmob_enrichment.get("canonical_team_name")
+        or fotmob_team_name
+        or footystats_name
+        or ""
+    ).strip()
 
     approved_row = {
         "league": str(base.get("league", "")).strip(),
@@ -317,11 +429,33 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
     }
 
     added = 0
-    if not _approved_duplicate(existing, approved_row):
+    updated_existing = 0
+    duplicate_index = _approved_duplicate_index(approved_rows, approved_row)
+    alias_result = approved_row
+    if duplicate_index is None:
         approved_rows.append(approved_row)
         added = 1
-        approved_rows.sort(key=lambda item: (item.get("league", ""), normalize_team_name(item.get("betano_name", ""))))
-        _write_csv_atomic(registry_path, approved_rows, _approved_fieldnames(approved_fields))
+        _write_csv_atomic(registry_path, approved_rows, _approved_fieldnames(approved_fields), allow_empty=False)
+    elif duplicate_index is not None:
+        duplicate_row = approved_rows[duplicate_index]
+        original_duplicate_row = dict(duplicate_row)
+        override = _manual_override_enabled(payload)
+        for field in (
+            "fotmob_team_name",
+            "fotmob_team_id",
+            "fotmob_short_name",
+            "xg_provider_preferred",
+            "canonical_team_name",
+        ):
+            new_value = str(approved_row.get(field, "") or "").strip()
+            current_value = str(duplicate_row.get(field, "") or "").strip()
+            if new_value and (not current_value or override):
+                duplicate_row[field] = new_value
+        updated_existing = 1 if duplicate_row != original_duplicate_row else 0
+        if updated_existing:
+            approved_rows[duplicate_index] = duplicate_row
+            _write_csv_atomic(registry_path, approved_rows, _approved_fieldnames(approved_fields), allow_empty=False)
+        alias_result = duplicate_row
 
     remaining: list[dict[str, str]] = []
     resolved = 0
@@ -338,10 +472,12 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
 
     return {
         "added": added,
+        "updated_existing": updated_existing,
         "resolved_pending": resolved,
         "approved_file": str(DEFAULT_REGISTRY_FILE),
         "pending_file": str(DEFAULT_REVIEW_FILE),
-        "alias": approved_row,
+        "alias": alias_result,
+        **fotmob_metadata,
     }
 
 
@@ -422,12 +558,13 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
     html_path = str(payload.get("html_path") or "").strip()
     if source == "saved_html" and not html_path:
         raise ValueError("html_path é obrigatório quando source=saved_html.")
+    xg_file = payload.get("xg_file")
     args = Namespace(
         league=league,
         all=False,
         from_html=html_path if source == "saved_html" else None,
         url=None,
-        xg_file=payload.get("xg_file"),
+        xg_file=xg_file,
         dry_run=False,
         threshold=float(payload.get("threshold") or 0.94),
         margin=float(payload.get("margin") or 0.08),
@@ -439,7 +576,7 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
     try:
         summary = sync_league(args, league, root=project_root)
     except Exception as exc:
-        return {"status": "error", "league": league, "error": str(exc)}
+        return {"status": "error", "league": league, "error": str(exc), "xg_file_used": str(xg_file or "")}
 
     coverage = summary.get("coverage") or {}
     missing = len(coverage.get("footystats_without_betano_candidate") or []) + len(coverage.get("betano_without_footystats_candidate") or [])
@@ -462,11 +599,25 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
         "registry_total": int(summary.get("registry_total") or 0),
         "review_written": int(summary.get("review_written") or 0),
         "source": summary.get("source"),
+        "xg_file_used": str(xg_file or ""),
     }
 
 
 def sync_all_registry_leagues(project_root: Path, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
+    xg_file = _xg_file_from_payload_or_daily(project_root, payload)
+    xg_file_used = str(xg_file) if xg_file else ""
+    xg_source_policy = "latest_daily_xg_snapshot"
+    if not payload.get("xg_file") and not xg_file:
+        return {
+            "status": "error",
+            "error": "Nenhum snapshot diário de xG encontrado em data/xg/YYYY-MM-DD/xg_snapshot.csv",
+            "items": [],
+            "failed": [],
+            "total": 0,
+            "xg_file_used": "",
+            "xg_source_policy": xg_source_policy,
+        }
     results = []
     for item in list_registry_leagues(project_root).get("items", []):
         league = str(item.get("name") or item.get("id") or "")
@@ -477,7 +628,15 @@ def sync_all_registry_leagues(project_root: Path, payload: dict[str, Any] | None
             "source": "configured_url",
             "threshold": payload.get("threshold", 0.94),
             "margin": payload.get("margin", 0.08),
+            "xg_file": xg_file_used or None,
         })
         results.append(result)
     failed = [item for item in results if item.get("status") != "ok"]
-    return {"status": "partial" if failed else "ok", "items": results, "failed": failed, "total": len(results)}
+    return {
+        "status": "partial" if failed else "ok",
+        "items": results,
+        "failed": failed,
+        "total": len(results),
+        "xg_file_used": xg_file_used,
+        "xg_source_policy": xg_source_policy,
+    }

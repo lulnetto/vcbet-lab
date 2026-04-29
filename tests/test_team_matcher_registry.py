@@ -193,15 +193,13 @@ class TeamMatcherRegistryTest(unittest.TestCase):
             self.assertEqual(after_content.count("\n"), 1, msg="Dry-run não deve adicionar linhas ao pending funcional")
 
     def test_alias_times_not_used_in_main_flow(self):
-        """match_team_name não deve usar alias_times.json quando alias_cache está vazio."""
+        """match_team_name não deve retornar manual_approved/alias_times (legado removido)."""
         result = match_team_name(
             "Los Angeles Galaxy",
             ["Los Angeles FC", "LA Galaxy"],
-            alias_cache={},
             league="MLS",
             registry_file=None,  # sem registry
         )
-        # Sem registry e sem alias_cache, não deve ser manual_approved/alias_times
         self.assertNotEqual(result.match_status, "manual_approved")
         self.assertNotEqual(result.match_source, "alias_times")
 

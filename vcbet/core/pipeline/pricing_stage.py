@@ -30,7 +30,6 @@ def build_priced_candidates(
     priced_market_counts = Counter()
     approved_market_counts = Counter()
 
-    alias_cache = resolution_state["alias_cache"]
     xg_by_league = resolution_state["xg_by_league"]
     pending_rows = resolution_state["pending_rows"]
     pending_seen = resolution_state["pending_seen"]
@@ -53,7 +52,6 @@ def build_priced_candidates(
         resolved = resolve_row_teams(
             linha=linha,
             df_xg_liga=df_xg_liga,
-            alias_cache=alias_cache,
             run_id=run_id,
             generated_at=generated_at,
             pending_rows=pending_rows,

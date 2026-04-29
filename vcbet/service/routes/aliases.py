@@ -33,7 +33,7 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
         return {"items": items}
 
     @app.get("/aliases/review")
-    def get_alias_review(pending_file: str, alias_file: str = "alias_times.json", include_blocked: bool = True, include_resolved: bool = False):
+    def get_alias_review(pending_file: str, include_blocked: bool = True, include_resolved: bool = False):
         pending_path = ctx.resolve_project_path(pending_file)
         payload = ctx.alias_file_payload(
             pending_path,
@@ -45,20 +45,16 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
         if not payload:
             return {
                 "pending_file": pending_file,
-                "alias_file": alias_file,
                 "status_counts": {"pending_review": 0, "blocked": 0},
                 "items": [],
                 "total": 0,
                 "message": "sem aliases pendentes",
             }
-        payload["alias_file"] = alias_file
-        payload["alias_map_size"] = len(ctx.load_alias_map(ctx.resolve_project_path(alias_file)))
         return payload
 
     @app.post("/aliases/approve")
     def approve_aliases(req: AliasApproveRequest):
         pending_path = ctx.resolve_project_path(req.pending_file)
-        alias_path = ctx.resolve_project_path(req.alias_file)
         rows, delimiter, fieldnames = ctx.read_text_csv(pending_path)
         if not rows:
             if pending_path.exists():
@@ -67,23 +63,16 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
 
         normalized = ctx.normalize_alias_rows(rows)
         approvals_by_id = {item.row_id: item for item in req.approvals}
-        alias_map = ctx.load_alias_map(alias_path)
 
         remaining: list[dict[str, str]] = []
         saved = 0
         for row in normalized:
             approval = approvals_by_id.get(row["row_id"])
             if approval:
-                target = approval.target_name.strip()
-                source = approval.source_name.strip() or row.get("source_name", "").strip()
-                if source and target:
-                    alias_map[source] = target
-                    saved += 1
+                saved += 1
                 continue
             remaining_row = {k: v for k, v in row.items() if k != "row_id"}
             remaining.append(remaining_row)
-
-        ctx.save_alias_map(alias_path, alias_map)
 
         still_visible = [
             row for row in remaining
@@ -96,5 +85,4 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
             "saved": saved,
             "remaining": len(still_visible),
             "deleted_pending_file": deleted,
-            "alias_file": str(alias_path),
         }

@@ -8,14 +8,13 @@ from vcbet.core.team_matcher import PendingAliasRow, match_team_name, write_pend
 from vcbet.team_identity.review_writer import upsert_pending_to_functional_file
 
 
-def prepare_team_resolution_state(alias_file: str, df_xg: pd.DataFrame) -> dict[str, object]:
+def prepare_team_resolution_state(df_xg: pd.DataFrame) -> dict[str, object]:
     return {
-        "alias_cache": {},
         "xg_by_league": {league: league_df.copy() for league, league_df in df_xg.groupby("league")},
         "pending_rows": [],
         "pending_seen": set(),
         "registry_stale_leagues": set(),
-        "status_counts": {key: 0 for key in ["MATCH_REGISTRY_APPROVED", "auto_exact", "auto_fuzzy_high", "manual_approved", "pending_review", "blocked"]},
+        "status_counts": {key: 0 for key in ["MATCH_REGISTRY_APPROVED", "auto_exact", "auto_fuzzy_high", "pending_review", "blocked"]},
     }
 
 
@@ -23,7 +22,6 @@ def resolve_row_teams(
     *,
     linha,
     df_xg_liga: pd.DataFrame,
-    alias_cache: dict[str, str],
     run_id: str,
     generated_at: str,
     pending_rows: list[PendingAliasRow],
@@ -50,7 +48,6 @@ def resolve_row_teams(
     home_match = match_team_name(
         time_casa,
         candidates,
-        alias_cache,
         league=liga_jogo,
         high_threshold=high_threshold,
         review_threshold=review_threshold,
@@ -60,7 +57,6 @@ def resolve_row_teams(
     away_match = match_team_name(
         time_fora,
         candidates,
-        alias_cache,
         league=liga_jogo,
         high_threshold=high_threshold,
         review_threshold=review_threshold,
@@ -125,7 +121,7 @@ def write_and_report_alias_review(
         f"{status_counts['auto_exact']} exatos, "
         f"{status_counts['MATCH_REGISTRY_APPROVED']} registry, "
         f"{status_counts['auto_fuzzy_high']} fuzzy altos, "
-        f"{status_counts['manual_approved']} manuais, "
+
         f"{status_counts['pending_review']} pendentes, "
         f"{status_counts['blocked']} bloqueados"
     )

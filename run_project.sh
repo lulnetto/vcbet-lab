@@ -6,7 +6,6 @@ RUN_ID=""
 TARGET_DATE=""
 ODDS_FILE=""
 XG_FILE=""
-ALIAS_FILE="alias_times.json"
 LEDGER_FILE="data/history/bets_ledger.csv"
 OUTPUT_DIR="data/runs"
 DEBUG=0
@@ -41,7 +40,6 @@ Parâmetros:
   --run-id       Identificador da run. Se omitido, é gerado automaticamente.
   --odds-file    Caminho do CSV de odds (obrigatório no modo legacy)
   --xg-file      Caminho do CSV de xG (obrigatório no modo legacy)
-  --alias-file   Caminho do alias_times.json
   --ledger-file  Caminho do bets_ledger.csv
   --output-dir   Diretório base das runs
   --json         No modo full, também salva JSON de odds
@@ -66,8 +64,6 @@ while [[ $# -gt 0 ]]; do
       ODDS_FILE="$2"; shift 2 ;;
     --xg-file)
       XG_FILE="$2"; shift 2 ;;
-    --alias-file)
-      ALIAS_FILE="$2"; shift 2 ;;
     --ledger-file)
       LEDGER_FILE="$2"; shift 2 ;;
     --output-dir)
@@ -184,7 +180,6 @@ if [[ "$MODE" == "legacy" ]]; then
     --run-id "$RUN_ID"
     --odds-file "$LEGACY_ODDS_SNAPSHOT"
     --xg-file "$LEGACY_XG_SNAPSHOT"
-    --alias-file "$ALIAS_FILE"
     --ledger-file "$LEDGER_FILE"
     --output-dir "$OUTPUT_DIR"
   )
@@ -284,7 +279,6 @@ PIPELINE_ARGS=(
   --run-id "$RUN_ID"
   --odds-file "$ODDS_SNAPSHOT"
   --xg-file "$XG_SNAPSHOT"
-  --alias-file "$ALIAS_FILE"
   --ledger-file "$LEDGER_FILE"
   --output-dir "$OUTPUT_DIR"
 )

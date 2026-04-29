@@ -191,19 +191,6 @@ def _compact_pick_row(row: dict[str, str]) -> dict[str, str | float | None]:
     }
 
 
-def _load_alias_map(alias_file: Path) -> dict[str, str]:
-    if not alias_file.exists():
-        return {}
-    try:
-        return json.loads(alias_file.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save_alias_map(alias_file: Path, payload: dict[str, str]) -> None:
-    alias_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-
-
 def _alias_candidate_files(scope: str = "runs_recent") -> list[Path]:
     candidates: list[Path] = []
     bases = [settings.project_root / "data" / "runs"]
@@ -429,8 +416,6 @@ route_context = RouteContext(
     read_csv_rows=_read_csv_rows,
     read_ledger_rows=_read_ledger_rows,
     compact_pick_row=_compact_pick_row,
-    load_alias_map=_load_alias_map,
-    save_alias_map=_save_alias_map,
     alias_candidate_files=_alias_candidate_files,
     normalize_alias_rows=_normalize_alias_rows,
     registry_approved_keys=_registry_approved_keys,

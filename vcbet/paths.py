@@ -15,7 +15,6 @@ RESULTS_DIR = DATA_DIR / "results"
 SERVICE_DIR = DATA_DIR / "service"
 
 LIGAS_FILE = PROJECT_ROOT / "ligas.json"
-ALIAS_TIMES_FILE = PROJECT_ROOT / "alias_times.json"
 DEFAULT_LEDGER_FILE = HISTORY_DIR / "bets_ledger.csv"
 DEFAULT_RESULTS_FILE = RESULTS_DIR / "results_auto.csv"
 DEFAULT_RESULTS_DEBUG_DIR = RESULTS_DIR / "_debug"

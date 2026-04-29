@@ -41,7 +41,6 @@ def main() -> None:
     parser.add_argument("--source-run-dir", required=True, help="Diretório da run histórica original")
     parser.add_argument("--config", action="append", required=True, dest="configs", help="Preset em ./configs ou caminho para JSON. Pode repetir.")
     parser.add_argument("--output-dir", default=str(DEFAULT_REPLAY_DIR), help="Diretório base para os replays")
-    parser.add_argument("--alias-file", default="alias_times.json", help="Arquivo de aliases")
     parser.add_argument("--python-bin", default="python3", help="Binário Python")
     parser.add_argument("--evaluate-results", action="store_true", help="Após cada replay, coleta resultados e liquida o replay_ledger.")
     parser.add_argument("--results-source", default="auto", choices=["auto", "browser", "api"], help="Fonte usada na coleta de resultados do replay.")
@@ -54,7 +53,6 @@ def main() -> None:
         source_run_dir=Path(args.source_run_dir).resolve(),
         config_refs=args.configs,
         output_dir=Path(args.output_dir).resolve(),
-        alias_file=args.alias_file,
         python_bin=args.python_bin,
         evaluate_results=args.evaluate_results,
         results_source=args.results_source,
