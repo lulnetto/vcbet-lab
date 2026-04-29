@@ -277,6 +277,12 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         raise ValueError("alias de score baixo exige manual_override=true e manual_override_reason.")
 
     now = _now_str()
+    fotmob_team_name = str(payload.get("fotmob_team_name") or base.get("fotmob_team_name") or "").strip()
+    fotmob_team_id = str(payload.get("fotmob_team_id") or base.get("fotmob_team_id") or "").strip()
+    fotmob_short_name = str(payload.get("fotmob_short_name") or base.get("fotmob_short_name") or "").strip()
+    xg_provider_preferred = str(payload.get("xg_provider_preferred") or base.get("xg_provider_preferred") or "").strip()
+    canonical_team_name = str(payload.get("canonical_team_name") or base.get("canonical_team_name") or fotmob_team_name or footystats_name or "").strip()
+
     approved_row = {
         "league": str(base.get("league", "")).strip(),
         "betano_name": str(base.get("betano_name", "")).strip(),
@@ -288,6 +294,11 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         "match_method": str(payload.get("match_method") or "registry_review"),
         "approved_at": now,
         "source": "ui_review",
+        "fotmob_team_name": fotmob_team_name,
+        "fotmob_team_id": fotmob_team_id,
+        "fotmob_short_name": fotmob_short_name,
+        "xg_provider_preferred": xg_provider_preferred,
+        "canonical_team_name": canonical_team_name,
     }
 
     added = 0

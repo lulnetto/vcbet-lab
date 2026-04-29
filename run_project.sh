@@ -250,18 +250,19 @@ fi
 
 echo "[FULL] Ligas detectadas nas odds: $ACTIVE_LEAGUES"
 
-DAILY_XG_DIR="data/xg/$TARGET_DATE"
+SNAPSHOT_DATE="$(date +%F)"
+DAILY_XG_DIR="data/xg/$SNAPSHOT_DATE"
 DAILY_XG_SNAPSHOT="$DAILY_XG_DIR/xg_snapshot.csv"
 
 if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
   echo "[FULL] Reutilizando snapshot xG diário: $DAILY_XG_SNAPSHOT"
   cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
 else
-  echo "[FULL] Coletando snapshot xG diário (fonte: $XG_SOURCE)..."
+  echo "[FULL] Coletando snapshot xG diário (fonte: $XG_SOURCE) para $SNAPSHOT_DATE..."
   "$PYTHON_BIN" -m vcbet.collectors.xg_daily_store \
     --date "$TARGET_DATE" \
     --source "$XG_SOURCE" \
-    --leagues "$ACTIVE_LEAGUES"
+    --snapshot-date "$SNAPSHOT_DATE"
   if [[ -f "$DAILY_XG_SNAPSHOT" ]]; then
     cp "$DAILY_XG_SNAPSHOT" "$XG_SNAPSHOT"
   fi
@@ -278,6 +279,9 @@ PIPELINE_ARGS=(
 
 if [[ "$DEBUG" -eq 1 ]]; then
   PIPELINE_ARGS+=(--debug)
+fi
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  PIPELINE_ARGS+=(--dry-run)
 fi
 
 if [[ -n "$CONFIG_FILE" ]]; then

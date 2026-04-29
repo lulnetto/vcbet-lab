@@ -5,6 +5,7 @@ from collections import Counter
 import pandas as pd
 
 from vcbet.core.team_matcher import PendingAliasRow, load_alias_cache, match_team_name, write_pending_aliases
+from vcbet.team_identity.review_writer import upsert_pending_to_functional_file
 
 
 def prepare_team_resolution_state(alias_file: str, df_xg: pd.DataFrame) -> dict[str, object]:
@@ -107,8 +108,15 @@ def write_and_report_alias_review(
     pending_rows: list[PendingAliasRow],
     alias_pending_file,
     status_counts: dict[str, int],
+    functional_pending_file: str | None = None,
 ) -> dict[str, object]:
     write_pending_aliases(pending_rows, alias_pending_file)
+
+    if functional_pending_file:
+        upserted = upsert_pending_to_functional_file(pending_rows, path=functional_pending_file)
+        print(f" -> Fila funcional de aliases: {functional_pending_file} (+{upserted} upsertados)")
+    else:
+        print(" -> Fila funcional de aliases desabilitada (dry-run)")
 
     unique_pending_counts = Counter(row.match_status for row in pending_rows)
     unique_pending_by_league = Counter(row.league for row in pending_rows)

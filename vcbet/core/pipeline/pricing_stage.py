@@ -21,6 +21,7 @@ def build_priced_candidates(
     alias_pending_file,
     high_match_threshold: int,
     review_match_threshold: int,
+    functional_pending_file: str | None = None,
 ) -> dict[str, object]:
     processing_discard_counts = Counter()
     raw_candidate_rows: list[dict] = []
@@ -124,6 +125,7 @@ def build_priced_candidates(
         pending_rows=pending_rows,
         alias_pending_file=alias_pending_file,
         status_counts=status_counts,
+        functional_pending_file=functional_pending_file,
     )
 
     return {

@@ -49,6 +49,7 @@ def processar_pipeline(
     config_file: str | None = None,
     config_name: str | None = None,
     snapshot_reference_timestamp: str | None = None,
+    dry_run: bool = False,
 ):
     runtime_config = configure_runtime(config_name=config_name, config_file=config_file)
     loaded = load_pipeline_inputs(
@@ -209,6 +210,7 @@ def processar_pipeline(
     normalization = build_normalization_filter(df_betano, df_xg, SUPPORTED_MARKETS)
     resolution_state = prepare_team_resolution_state(alias_file, df_xg)
     league_skipped_missing_xg_snapshot = normalization.get("league_skipped_missing_xg_snapshot", {})
+    functional_pending_file = None if dry_run else "data/team_registry/alias_review_pending.csv"
     pricing = build_priced_candidates(
         df_alvo=normalization["df_alvo"],
         resolution_state=resolution_state,
@@ -219,6 +221,7 @@ def processar_pipeline(
         alias_pending_file=loaded["alias_pending_file"],
         high_match_threshold=HIGH_MATCH_THRESHOLD,
         review_match_threshold=REVIEW_MATCH_THRESHOLD,
+        functional_pending_file=functional_pending_file,
     )
 
     df_candidates = pd.DataFrame(pricing["candidate_rows"])
@@ -349,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--alias-file", default="alias_times.json", help="Arquivo JSON com aliases aprovados manualmente")
     parser.add_argument("--ledger-file", default=str(DEFAULT_LEDGER_FILE), help="Caminho do bets_ledger.csv")
     parser.add_argument("--debug", action="store_true", help="Executa normalmente, mas não salva arquivos no final")
+    parser.add_argument("--dry-run", action="store_true", help="Não persiste alterações em arquivos funcionais fora do run dir")
     parser.add_argument("--config-file", help="Arquivo JSON de configuração de estratégia")
     parser.add_argument("--config-name", help="Nome do preset em ./configs sem .json")
     parser.add_argument("--snapshot-reference-timestamp", help="Timestamp de referência para validação temporal de snapshots, usado por replay histórico")
@@ -365,4 +369,5 @@ if __name__ == "__main__":
         config_file=args.config_file,
         config_name=args.config_name,
         snapshot_reference_timestamp=args.snapshot_reference_timestamp,
+        dry_run=args.dry_run,
     )

@@ -169,9 +169,52 @@ def registry_alias_key(league: str, betano_team_id: str, betano_name: str) -> tu
     return (league, f"name:{normalize_team_name(betano_name)}")
 
 
+def safe_write_registry_rows(
+    rows: list[dict[str, str]],
+    registry_path: str | Path,
+    fieldnames: list[str] | None = None,
+) -> int:
+    """Escreve rows no registry de forma atômica e segura.
+
+    - Recusa lista vazia (não trunca registry acidentalmente).
+    - Escreve primeiro em .tmp.
+    - Valida que o .tmp tem header + pelo menos 1 linha.
+    - Só então substitui o original via Path.replace().
+    """
+    if not rows:
+        raise ValueError("safe_write_registry_rows recusou: rows está vazio. Registry não será truncado.")
+
+    registry_path = Path(registry_path)
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = fieldnames or APPROVED_COLUMNS
+    tmp_path = registry_path.with_suffix(registry_path.suffix + ".tmp")
+
+    with tmp_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=fieldnames,
+            delimiter=";",
+            lineterminator="\n",
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+    # Validar que o .tmp tem conteúdo mínimo (header + 1 linha)
+    with tmp_path.open("r", newline="", encoding="utf-8") as fh:
+        lines = list(fh)
+    if len(lines) < 2:
+        raise ValueError(
+            f"safe_write_registry_rows recusou: arquivo temporário {tmp_path} tem apenas {len(lines)} linha(s). "
+            "Registry não será substituído."
+        )
+
+    tmp_path.replace(registry_path)
+    return len(rows)
+
+
 def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT_REGISTRY_FILE) -> tuple[int, int]:
     registry_path = Path(path)
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
     existing = [
         row for row in read_registry(registry_path)
         if is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url)
@@ -194,9 +237,6 @@ def write_registry_aliases(rows: list[RegistryAlias], path: str | Path = DEFAULT
         added += 1
 
     output = sorted(by_key.values(), key=lambda item: (item.league, normalize_team_name(item.betano_name)))
-    with registry_path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=APPROVED_COLUMNS, delimiter=";")
-        writer.writeheader()
-        for row in output:
-            writer.writerow(asdict(row))
+    dict_rows = [asdict(row) for row in output]
+    safe_write_registry_rows(dict_rows, registry_path, fieldnames=APPROVED_COLUMNS)
     return added, len(output)

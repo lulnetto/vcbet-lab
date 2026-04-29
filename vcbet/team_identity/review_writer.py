@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import csv
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from vcbet.team_identity.registry_repository import DEFAULT_REGISTRY_FILE, read_registry, registry_alias_key
 from vcbet.team_identity.scoring import (
@@ -83,3 +84,30 @@ def write_review_aliases(
             writer.writerow(asdict(row))
 
     return len(incoming)
+
+
+def upsert_pending_to_functional_file(
+    pending_rows: list[Any],
+    path: str | Path = DEFAULT_REVIEW_FILE,
+) -> int:
+    """Converte PendingAliasRow (debug) para ReviewAlias e upserta no arquivo funcional."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    review_aliases: list[ReviewAlias] = []
+    for row in pending_rows:
+        review_aliases.append(
+            ReviewAlias(
+                league=str(row.league),
+                betano_name=str(row.source_name),
+                betano_team_id="",
+                betano_url="",
+                suggested_footystats_name=str(row.suggestion or ""),
+                top_score=str(row.score),
+                review_reason=f"{row.match_status}: {row.registry_reason}",
+                ambiguous_options="",
+                status="pending_review",
+                source="pipeline",
+                created_at=row.created_at or now,
+                updated_at=now,
+            )
+        )
+    return write_review_aliases(review_aliases, path=path)

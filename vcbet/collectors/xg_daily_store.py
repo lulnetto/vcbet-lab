@@ -69,9 +69,11 @@ def construir_banco_dados_unificado(
     target_date: str,
     output_dir: str,
     ligas_alvo: Iterable[str] | None = None,
+    snapshot_date: str | None = None,
 ):
     print(f"================ [ ATUALIZANDO BANCO DE DADOS DE xG (UNIFICADO) | RUN_ID: {run_id} ] ================")
-    run_dir = ensure_run_dir(run_id=run_id, target_date=target_date, base_output_dir=output_dir)
+    snapshot_date = snapshot_date or target_date
+    run_dir = ensure_run_dir(run_id=run_id, target_date=snapshot_date, base_output_dir=output_dir)
 
     mapa_fotmob = carregar_ligas_fotmob(ligas_nomes=ligas_alvo)
     mapa_footystats = carregar_ligas_footystats(ligas_nomes=ligas_alvo)
@@ -169,8 +171,10 @@ def get_or_build_daily_xg(
     source: str,
     leagues: str | None = None,
     output_dir: str = "data/xg",
+    snapshot_date: str | None = None,
 ):
-    daily_dir = Path(output_dir) / target_date
+    snapshot_date = snapshot_date or pd.Timestamp.now().strftime("%Y-%m-%d")
+    daily_dir = Path(output_dir) / snapshot_date
     daily_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = daily_dir / "xg_snapshot.csv"
 
@@ -187,9 +191,10 @@ def get_or_build_daily_xg(
         target_date=target_date,
         output_dir=output_dir,
         ligas_alvo=ligas_alvo,
+        snapshot_date=snapshot_date,
     )
 
-    src = ensure_run_dir(run_id=run_id, target_date=target_date, base_output_dir=output_dir) / "xg_snapshot.csv"
+    src = ensure_run_dir(run_id=run_id, target_date=snapshot_date, base_output_dir=output_dir) / "xg_snapshot.csv"
     if not src.exists():
         raise FileNotFoundError(f"xG snapshot não gerado em {src}")
 
@@ -202,12 +207,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cache/snapshot diário de xG")
     parser.add_argument("--date", required=True, help="Data alvo YYYY-MM-DD")
     parser.add_argument("--source", default="fotmob", choices=["fotmob", "footystats"])
-    parser.add_argument("--leagues", default="", help="Ligas separadas por vírgula")
+    parser.add_argument("--leagues", default="Premier League,Championship,La Liga,Segunda División,Ligue 1,Bundesliga,2. Bundesliga,Serie A,Serie B,Liga NOS,MLS,Brasileirão Série A,Liga dos Campeões,Liga Europa,Liga Conferência", help="Ligas separadas por vírgula")
     parser.add_argument("--output-dir", default="data/xg")
+    parser.add_argument("--snapshot-date", default=None, help="Data do snapshot YYYY-MM-DD (padrão: hoje)")
     args = parser.parse_args()
     get_or_build_daily_xg(
         target_date=args.date,
         source=args.source,
         leagues=args.leagues or None,
         output_dir=args.output_dir,
+        snapshot_date=args.snapshot_date,
     )
