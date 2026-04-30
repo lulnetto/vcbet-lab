@@ -40,6 +40,7 @@ RETRY_DELAY_BASE = 1.0
 DEFAULT_BETANO_BT = "14"
 
 SUPPORTED_MARKET_TYPE_IDS = {
+    10: "draw_no_bet",
     13: "total_goals",
     15: "btts",
     84: "home_team_total_ou",
@@ -50,6 +51,119 @@ SUPPORTED_MARKET_TYPE_IDS = {
     104: "total_goals_alt",
     503: "total_goals_alt",
 }
+
+PRE_SNAPSHOT_DISCARDS_FILENAME = "odds_discarded_pre_snapshot.csv"
+PRE_SNAPSHOT_DISCARD_FIELDNAMES = [
+    "run_id",
+    "collected_at",
+    "league",
+    "match_name",
+    "event_url",
+    "market_raw",
+    "selection_raw",
+    "odd_raw",
+    "betano_market_type_id",
+    "betano_market_name",
+    "betano_market_family",
+    "discard_stage",
+    "discard_reason",
+    "unsupported_reason",
+    "market_scope",
+    "home_team",
+    "away_team",
+]
+PRE_SNAPSHOT_DISCARD_SAMPLE_FIELDS = [
+    "league",
+    "match_name",
+    "market_raw",
+    "selection_raw",
+    "odd_raw",
+    "betano_market_type_id",
+    "event_url",
+]
+
+
+def _empty_event_diag() -> Dict[str, Any]:
+    return {
+        "success": False,
+        "raw_markets_seen": 0,
+        "raw_selections_seen": 0,
+        "supported_market_rows_seen": 0,
+        "supported_market_rows_with_valid_odd": 0,
+        "normalized_ok_rows": 0,
+        "normalized_non_ok_rows": 0,
+        "collected_supported_rows": 0,
+        "skipped_unsupported_type_id": 0,
+        "skipped_unparseable_selection": 0,
+        "skipped_unsupported_scope": 0,
+        "skipped_unsupported_market_shape": 0,
+        "markets_seen_by_name": {},
+        "markets_seen_by_type_id": {},
+        "supported_market_type_ids_seen": [],
+        "supported_market_families_seen": [],
+        "failure_reason": None,
+        "declared_total_markets": 0,
+        "market_completeness_ratio": 0.0,
+        "missing_supported_market_type_ids": [],
+        "pre_snapshot_discards": [],
+    }
+
+
+def _reason_part(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip()
+    return text if text else "none"
+
+
+def _discard_reason_for_contract(contract: dict) -> str:
+    status = _reason_part(contract.get("normalized_status"))
+    unsupported_reason = _reason_part(contract.get("unsupported_reason"))
+    if status == "unknown_market":
+        return "unknown_market"
+    return f"{status}:{unsupported_reason}"
+
+
+def _record_pre_snapshot_discard(
+    discards: list[dict],
+    *,
+    run_id: str,
+    collected_at: str,
+    league_name: str,
+    match_name: str,
+    event_url: str,
+    market: dict,
+    selection: dict | None,
+    market_type_id: int | None,
+    discard_reason: str,
+    unsupported_reason: Any = None,
+    market_scope: Any = None,
+    betano_market_family: Any = None,
+    home_team: str,
+    away_team: str,
+) -> None:
+    market_name = market.get("name", "")
+    discards.append(
+        {
+            "run_id": run_id,
+            "collected_at": collected_at,
+            "league": league_name,
+            "match_name": match_name,
+            "event_url": event_url,
+            "market_raw": market_name,
+            "selection_raw": selection.get("name") if selection else "",
+            "odd_raw": selection.get("price") if selection else "",
+            "betano_market_type_id": market_type_id if market_type_id is not None else market.get("typeId"),
+            "betano_market_name": market_name,
+            "betano_market_family": betano_market_family,
+            "discard_stage": "pre_snapshot",
+            "discard_reason": discard_reason,
+            "unsupported_reason": unsupported_reason if unsupported_reason is not None else "",
+            "market_scope": market_scope if market_scope is not None else "",
+            "home_team": home_team,
+            "away_team": away_team,
+        }
+    )
 
 
 def extract_initial_state_json(html: str) -> dict:
@@ -298,28 +412,7 @@ class BetanoExtractor:
 
     def _parse_event_odds(self, state: dict, league_name: str, run_id: str, event_url: str) -> Tuple[List[Dict], Dict[str, Any]]:
         rows: List[Dict] = []
-        diag: Dict[str, Any] = {
-            "success": False,
-            "raw_markets_seen": 0,
-            "raw_selections_seen": 0,
-            "supported_market_rows_seen": 0,
-            "supported_market_rows_with_valid_odd": 0,
-            "normalized_ok_rows": 0,
-            "normalized_non_ok_rows": 0,
-            "collected_supported_rows": 0,
-            "skipped_unsupported_type_id": 0,
-            "skipped_unparseable_selection": 0,
-            "skipped_unsupported_scope": 0,
-            "skipped_unsupported_market_shape": 0,
-            "markets_seen_by_name": {},
-            "markets_seen_by_type_id": {},
-            "supported_market_type_ids_seen": [],
-            "supported_market_families_seen": [],
-            "failure_reason": None,
-            "declared_total_markets": 0,
-            "market_completeness_ratio": 0.0,
-            "missing_supported_market_type_ids": [],
-        }
+        diag: Dict[str, Any] = _empty_event_diag()
         try:
             event_data = state["data"]["event"]
             match_name = event_data.get("name", "")
@@ -358,6 +451,38 @@ class BetanoExtractor:
 
                 if market_type_id not in SUPPORTED_MARKET_TYPE_IDS:
                     diag["skipped_unsupported_type_id"] += 1
+                    unsupported_selections = list(_iter_selections(market))
+                    if unsupported_selections:
+                        for sel, _meta in unsupported_selections:
+                            _record_pre_snapshot_discard(
+                                diag["pre_snapshot_discards"],
+                                run_id=run_id,
+                                collected_at=collected_at,
+                                league_name=league_name,
+                                match_name=match_name,
+                                event_url=event_url,
+                                market=market,
+                                selection=sel,
+                                market_type_id=market_type_id,
+                                discard_reason=f"unsupported_type_id:{_reason_part(raw_type_id)}",
+                                home_team=home_team,
+                                away_team=away_team,
+                            )
+                    else:
+                        _record_pre_snapshot_discard(
+                            diag["pre_snapshot_discards"],
+                            run_id=run_id,
+                            collected_at=collected_at,
+                            league_name=league_name,
+                            match_name=match_name,
+                            event_url=event_url,
+                            market=market,
+                            selection=None,
+                            market_type_id=market_type_id,
+                            discard_reason=f"unsupported_type_id:{_reason_part(raw_type_id)}",
+                            home_team=home_team,
+                            away_team=away_team,
+                        )
                     continue
 
                 seen_type_ids.add(market_type_id)
@@ -369,11 +494,59 @@ class BetanoExtractor:
                     odd_value = sel.get("price")
                     try:
                         if odd_value is None:
+                            _record_pre_snapshot_discard(
+                                diag["pre_snapshot_discards"],
+                                run_id=run_id,
+                                collected_at=collected_at,
+                                league_name=league_name,
+                                match_name=match_name,
+                                event_url=event_url,
+                                market=market,
+                                selection=sel,
+                                market_type_id=market_type_id,
+                                discard_reason="invalid_odd:none",
+                                unsupported_reason="none",
+                                betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
+                                home_team=home_team,
+                                away_team=away_team,
+                            )
                             continue
                         odd_float = float(odd_value)
                         if odd_float <= 0:
+                            _record_pre_snapshot_discard(
+                                diag["pre_snapshot_discards"],
+                                run_id=run_id,
+                                collected_at=collected_at,
+                                league_name=league_name,
+                                match_name=match_name,
+                                event_url=event_url,
+                                market=market,
+                                selection=sel,
+                                market_type_id=market_type_id,
+                                discard_reason="invalid_odd:non_positive",
+                                unsupported_reason="non_positive",
+                                betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
+                                home_team=home_team,
+                                away_team=away_team,
+                            )
                             continue
                     except (ValueError, TypeError):
+                        _record_pre_snapshot_discard(
+                            diag["pre_snapshot_discards"],
+                            run_id=run_id,
+                            collected_at=collected_at,
+                            league_name=league_name,
+                            match_name=match_name,
+                            event_url=event_url,
+                            market=market,
+                            selection=sel,
+                            market_type_id=market_type_id,
+                            discard_reason="invalid_odd:parse_error",
+                            unsupported_reason="parse_error",
+                            betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
+                            home_team=home_team,
+                            away_team=away_team,
+                        )
                         continue
 
                     contract = normalize_betano_market_contract(
@@ -386,6 +559,21 @@ class BetanoExtractor:
                     if contract is None:
                         diag["skipped_unsupported_type_id"] += 1
                         diag["normalized_non_ok_rows"] += 1
+                        _record_pre_snapshot_discard(
+                            diag["pre_snapshot_discards"],
+                            run_id=run_id,
+                            collected_at=collected_at,
+                            league_name=league_name,
+                            match_name=match_name,
+                            event_url=event_url,
+                            market=market,
+                            selection=sel,
+                            market_type_id=market_type_id,
+                            discard_reason="normalizer_no_contract",
+                            betano_market_family=SUPPORTED_MARKET_TYPE_IDS.get(market_type_id),
+                            home_team=home_team,
+                            away_team=away_team,
+                        )
                         continue
 
                     if contract["normalized_status"] != "ok":
@@ -396,6 +584,23 @@ class BetanoExtractor:
                         elif contract["normalized_status"] == "unsupported_market_shape":
                             diag["skipped_unsupported_market_shape"] += 1
                         diag["normalized_non_ok_rows"] += 1
+                        _record_pre_snapshot_discard(
+                            diag["pre_snapshot_discards"],
+                            run_id=run_id,
+                            collected_at=collected_at,
+                            league_name=league_name,
+                            match_name=match_name,
+                            event_url=event_url,
+                            market=market,
+                            selection=sel,
+                            market_type_id=market_type_id,
+                            discard_reason=_discard_reason_for_contract(contract),
+                            unsupported_reason=contract.get("unsupported_reason"),
+                            market_scope=contract.get("market_scope"),
+                            betano_market_family=contract.get("betano_market_family"),
+                            home_team=home_team,
+                            away_team=away_team,
+                        )
                         continue
 
                     diag["supported_market_rows_with_valid_odd"] += 1
@@ -474,28 +679,7 @@ class BetanoExtractor:
     def _extract_from_html_fallback(self, match_path: str, league_name: str, run_id: str) -> Tuple[List[Dict], Dict[str, Any]]:
         event_url = f"{self.base_url}{match_path}" if match_path.startswith("/") else match_path
         url = force_bt_url(event_url, DEFAULT_BETANO_BT)
-        last_diag: Dict[str, Any] = {
-            "success": False,
-            "raw_markets_seen": 0,
-            "raw_selections_seen": 0,
-            "supported_market_rows_seen": 0,
-            "supported_market_rows_with_valid_odd": 0,
-            "normalized_ok_rows": 0,
-            "normalized_non_ok_rows": 0,
-            "collected_supported_rows": 0,
-            "skipped_unsupported_type_id": 0,
-            "skipped_unparseable_selection": 0,
-            "skipped_unsupported_scope": 0,
-            "skipped_unsupported_market_shape": 0,
-            "markets_seen_by_name": {},
-            "markets_seen_by_type_id": {},
-            "supported_market_type_ids_seen": [],
-            "supported_market_families_seen": [],
-            "failure_reason": None,
-            "declared_total_markets": 0,
-            "market_completeness_ratio": 0.0,
-            "missing_supported_market_type_ids": [],
-        }
+        last_diag: Dict[str, Any] = _empty_event_diag()
 
         try:
             response = self._fetch(url, description=f"event_html_fallback {url}", max_retries=1)
@@ -519,28 +703,7 @@ class BetanoExtractor:
         event_url = f"{self.base_url}{match_path}" if match_path.startswith("/") else match_path
         api_url = build_betano_api_odds_url(event_url, self.base_url, DEFAULT_BETANO_BT)
 
-        last_diag: Dict[str, Any] = {
-            "success": False,
-            "raw_markets_seen": 0,
-            "raw_selections_seen": 0,
-            "supported_market_rows_seen": 0,
-            "supported_market_rows_with_valid_odd": 0,
-            "normalized_ok_rows": 0,
-            "normalized_non_ok_rows": 0,
-            "collected_supported_rows": 0,
-            "skipped_unsupported_type_id": 0,
-            "skipped_unparseable_selection": 0,
-            "skipped_unsupported_scope": 0,
-            "skipped_unsupported_market_shape": 0,
-            "markets_seen_by_name": {},
-            "markets_seen_by_type_id": {},
-            "supported_market_type_ids_seen": [],
-            "supported_market_families_seen": [],
-            "failure_reason": None,
-            "declared_total_markets": 0,
-            "market_completeness_ratio": 0.0,
-            "missing_supported_market_type_ids": [],
-        }
+        last_diag: Dict[str, Any] = _empty_event_diag()
 
         for attempt in range(1, EVENT_FETCH_RETRIES + 1):
             try:
@@ -596,6 +759,26 @@ def save_to_csv(data: List[Dict], filename: str | Path, fieldnames: List[str] | 
         if data:
             writer.writerows(data)
     logging.info(f"Arquivo salvo com sucesso: {filename}")
+
+
+def save_pre_snapshot_discards(data: List[Dict], filename: str | Path):
+    with open(filename, "w", newline="", encoding="utf-8") as arquivo:
+        writer = csv.DictWriter(arquivo, fieldnames=PRE_SNAPSHOT_DISCARD_FIELDNAMES, delimiter=";")
+        writer.writeheader()
+        for row in data:
+            writer.writerow({field: row.get(field, "") for field in PRE_SNAPSHOT_DISCARD_FIELDNAMES})
+    logging.info(f"Arquivo de descartes pré-snapshot salvo com sucesso: {filename}")
+
+
+def top_discarded_samples(data: List[Dict], limit_per_reason: int = 20) -> dict[str, list[dict]]:
+    samples: dict[str, list[dict]] = {}
+    for row in data:
+        reason = str(row.get("discard_reason") or "missing")
+        bucket = samples.setdefault(reason, [])
+        if len(bucket) >= limit_per_reason:
+            continue
+        bucket.append({field: row.get(field, "") for field in PRE_SNAPSHOT_DISCARD_SAMPLE_FIELDS})
+    return samples
 
 
 def save_to_json_tree(data: List[Dict], filename: str | Path):
@@ -661,6 +844,8 @@ def build_odds_manifest(
     failure_reasons: list,
     warnings: list,
     output_file: str | None,
+    pre_snapshot_discarded_file: str | None = None,
+    top_discarded_samples_payload: dict[str, list[dict]] | None = None,
 ) -> dict:
     return {
         "run_id": run_id,
@@ -697,6 +882,8 @@ def build_odds_manifest(
         "failure_reasons": failure_reasons,
         "warnings": warnings,
         "output_file": output_file,
+        "pre_snapshot_discarded_file": pre_snapshot_discarded_file,
+        "top_discarded_samples": top_discarded_samples_payload or {},
         "temporal_contract_version": TEMPORAL_CONTRACT_VERSION,
     }
 
@@ -747,6 +934,7 @@ def main():
 
         crawler = BetanoExtractor()
         all_odds_data: List[Dict] = []
+        all_pre_snapshot_discards: List[Dict] = []
         league_stats: Dict[str, Dict[str, Any]] = {}
         total_stats = {
             "events_found": 0,
@@ -815,26 +1003,12 @@ def main():
                     match_odds, event_diag = crawler.extract_all_odds(match_url, league_name=league_name, run_id=run_id)
                 except Exception as exc:
                     logging.error(f"Event fetch failed for {match_url}: {exc}")
-                    event_diag = {
-                        "success": False,
-                        "raw_markets_seen": 0,
-                        "raw_selections_seen": 0,
-                        "supported_market_rows_seen": 0,
-                        "supported_market_rows_with_valid_odd": 0,
-                        "normalized_ok_rows": 0,
-                        "normalized_non_ok_rows": 0,
-                        "collected_supported_rows": 0,
-                        "skipped_unsupported_type_id": 0,
-                        "skipped_unparseable_selection": 0,
-                        "skipped_unsupported_scope": 0,
-                        "skipped_unsupported_market_shape": 0,
-                        "markets_seen_by_name": {},
-                        "markets_seen_by_type_id": {},
-                        "failure_reason": str(exc),
-                    }
+                    event_diag = _empty_event_diag()
+                    event_diag["failure_reason"] = str(exc)
                     match_odds = []
 
                 all_odds_data.extend(match_odds)
+                all_pre_snapshot_discards.extend(event_diag.get("pre_snapshot_discards", []))
 
                 if event_diag.get("success"):
                     total_stats["events_success"] += 1
@@ -873,6 +1047,10 @@ def main():
             league_stats[league_name] = league_diag
             time.sleep(random.uniform(2.0, 4.0))
 
+        pre_snapshot_discarded_path = run_dir / PRE_SNAPSHOT_DISCARDS_FILENAME
+        if not args.debug:
+            save_pre_snapshot_discards(all_pre_snapshot_discards, pre_snapshot_discarded_path)
+
         health_ok, health_reasons, health_warnings = evaluate_collection_health(total_stats, len(all_odds_data))
 
         odds_manifest = build_odds_manifest(
@@ -884,6 +1062,8 @@ def main():
             failure_reasons=health_reasons,
             warnings=health_warnings,
             output_file=str(run_dir / "odds_snapshot.csv") if (health_ok and all_odds_data) else None,
+            pre_snapshot_discarded_file=str(pre_snapshot_discarded_path) if not args.debug else None,
+            top_discarded_samples_payload=top_discarded_samples(all_pre_snapshot_discards),
         )
         odds_manifest_path = run_dir / "odds_collection_manifest.json"
         with open(odds_manifest_path, "w", encoding="utf-8") as f:
@@ -904,6 +1084,7 @@ def main():
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="failed",
                 odds_collection_manifest_file=str(odds_manifest_path),
+                odds_discarded_pre_snapshot_file=str(pre_snapshot_discarded_path) if not args.debug else None,
                 odds_failure_reasons=health_reasons,
             )
             sys.exit(1)
@@ -940,6 +1121,7 @@ def main():
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="completed",
                 odds_collection_manifest_file=str(odds_manifest_path),
+                odds_discarded_pre_snapshot_file=str(pre_snapshot_discarded_path) if not args.debug else None,
             )
             logging.info(f"Extração total concluída. {len(all_odds_data)} odds registradas.")
         else:
@@ -956,6 +1138,7 @@ def main():
                 odds_normalized_non_ok_rows=total_stats["normalized_non_ok_rows"],
                 odds_collection_status="empty",
                 odds_collection_manifest_file=str(odds_manifest_path),
+                odds_discarded_pre_snapshot_file=str(pre_snapshot_discarded_path) if not args.debug else None,
             )
             logging.error("Processamento encerrado. Nenhuma odd atendeu aos critérios nas ligas selecionadas.")
 

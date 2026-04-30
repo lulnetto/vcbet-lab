@@ -38,6 +38,7 @@ LINE_PATTERN = re.compile(r"([-+]?\d+(?:[\.,]\d+)?)")
 LINE_SUFFIX_PATTERN = re.compile(r"^(?P<label>.*?)\s+(?P<line>[-+]?\d+(?:[\.,]\d+)?)\s*$")
 
 SUPPORTED_MARKET_TYPE_IDS = {
+    10: "draw_no_bet",
     13: "total_goals",
     15: "btts",
     84: "home_team_total_ou",
@@ -199,6 +200,40 @@ def normalize_betano_market_contract(
 
     selection_name = str(selection.get("name") or "")
     selection_slug = slug_text(selection_name)
+
+    # --- Draw No Bet / Empate Anula (typeId 10) ---
+    if type_id == 10:
+        if compare_team_name(selection_name, home_team):
+            target_role = "home"
+            canonical_name = home_team
+        elif compare_team_name(selection_name, away_team):
+            target_role = "away"
+            canonical_name = away_team
+        else:
+            return {
+                "betano_market_type_id": type_id,
+                "betano_market_family": "draw_no_bet",
+                "market_type": None,
+                "market_scope": "full_time",
+                "side": None,
+                "line": None,
+                "target_team_role": None,
+                "target_team_name": None,
+                "normalized_status": "unparseable_selection",
+                "unsupported_reason": "dnb_team_not_matched",
+            }
+        return {
+            "betano_market_type_id": type_id,
+            "betano_market_family": "draw_no_bet",
+            "market_type": "draw_no_bet",
+            "market_scope": "full_time",
+            "side": target_role,
+            "line": 0.0,
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+            "unsupported_reason": None,
+        }
 
     # --- BTTS ---
     if type_id == 15:
@@ -503,6 +538,32 @@ def _normalize_asian_handicap(
     return result
 
 
+def _normalize_draw_no_bet(
+    selection: str, result: Dict[str, Any], home_team: str, away_team: str
+) -> Dict[str, Any]:
+    if compare_team_name(selection, home_team):
+        target_role = "home"
+        canonical_name = home_team
+    elif compare_team_name(selection, away_team):
+        target_role = "away"
+        canonical_name = away_team
+    else:
+        result["normalized_status"] = "unparseable_selection"
+        return result
+
+    result.update(
+        {
+            "market_type": "draw_no_bet",
+            "side": target_role,
+            "line": 0.0,
+            "target_team_role": target_role,
+            "target_team_name": canonical_name,
+            "normalized_status": "ok",
+        }
+    )
+    return result
+
+
 def _normalize_total_goals(selection: str, selection_slug: str, result: Dict[str, Any]) -> Dict[str, Any]:
     line = parse_numeric_line(selection)
     if line is None:
@@ -601,6 +662,8 @@ def _normalize_by_family(
 ) -> Dict[str, Any] | None:
     if family == "btts":
         return _normalize_btts(selection, selection_slug, result)
+    if family == "draw_no_bet":
+        return _normalize_draw_no_bet(selection, result, home_team, away_team)
     if family == "asian_handicap":
         return _normalize_asian_handicap(selection, result, home_team, away_team)
     if family == "asian_total":

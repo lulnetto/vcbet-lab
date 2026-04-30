@@ -33,6 +33,7 @@ SUPPORTED_MARKETS = {
     "btts",
     "asian_total",
     "asian_handicap",
+    "draw_no_bet",
 }
 SIGNAL_VERSION = "ev_pipeline_v1"
 PIPELINE_VERSION = "pipeline_ev_phase3_provenance"

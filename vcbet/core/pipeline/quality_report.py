@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import csv
 from collections import Counter
+from pathlib import Path
 
 import pandas as pd
 
 from vcbet.core.run_utils import save_quality_report
 from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
+
+
+PRE_SNAPSHOT_DISCARDS_FILENAME = "odds_discarded_pre_snapshot.csv"
+PRE_SNAPSHOT_DISCARD_SAMPLE_FIELDS = [
+    "league",
+    "match_name",
+    "market_raw",
+    "selection_raw",
+    "odd_raw",
+    "betano_market_type_id",
+]
 
 
 def to_sorted_dict(counter_like) -> dict:
@@ -16,6 +29,40 @@ def to_sorted_dict(counter_like) -> dict:
     else:
         items = counter_like
     return {str(k): int(v) for k, v in sorted(items, key=lambda item: str(item[0]))}
+
+
+def _resolve_pre_snapshot_discard_path(path) -> Path:
+    candidate = Path(path)
+    if candidate.is_dir():
+        return candidate / PRE_SNAPSHOT_DISCARDS_FILENAME
+    if candidate.name == PRE_SNAPSHOT_DISCARDS_FILENAME:
+        return candidate
+    return candidate.parent / PRE_SNAPSHOT_DISCARDS_FILENAME
+
+
+def build_pre_snapshot_discard_summary(path, sample_limit_per_reason: int = 20) -> dict[str, object]:
+    discard_path = _resolve_pre_snapshot_discard_path(path)
+    if not discard_path.exists():
+        return {
+            "pre_snapshot_discard_counts": {},
+            "pre_snapshot_discard_samples": {},
+        }
+
+    counts: Counter = Counter()
+    samples: dict[str, list[dict]] = {}
+    with open(discard_path, "r", newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh, delimiter=";")
+        for row in reader:
+            reason = str(row.get("discard_reason") or "missing")
+            counts[reason] += 1
+            bucket = samples.setdefault(reason, [])
+            if len(bucket) < sample_limit_per_reason:
+                bucket.append({field: row.get(field, "") for field in PRE_SNAPSHOT_DISCARD_SAMPLE_FIELDS})
+
+    return {
+        "pre_snapshot_discard_counts": to_sorted_dict(counts),
+        "pre_snapshot_discard_samples": samples,
+    }
 
 
 def print_pricing_summary(
@@ -129,9 +176,12 @@ def build_quality_report(
     portfolio_rejected_file,
     picks_file,
 ) -> dict[str, object]:
+    pre_snapshot_summary = build_pre_snapshot_discard_summary(odds_path)
     return {
         "run_id": run_id,
         "target_date": target_date,
+        "pre_snapshot_discard_counts": pre_snapshot_summary["pre_snapshot_discard_counts"],
+        "pre_snapshot_discard_samples": pre_snapshot_summary["pre_snapshot_discard_samples"],
         "strategy_config": {
             "name": runtime_config.name,
             "label": runtime_config.label,
@@ -258,10 +308,13 @@ def build_snapshot_rejection_report(
     pipeline_version: str,
     ledger_file: str,
 ) -> dict[str, object]:
+    pre_snapshot_summary = build_pre_snapshot_discard_summary(odds_path)
     return {
         "run_id": run_id,
         "target_date": target_date,
         "quality_status": "rejected",
+        "pre_snapshot_discard_counts": pre_snapshot_summary["pre_snapshot_discard_counts"],
+        "pre_snapshot_discard_samples": pre_snapshot_summary["pre_snapshot_discard_samples"],
         "error": {
             "code": "snapshot_validation_failed",
             "message": "SnapshotValidator rejected odds/xG inputs before pricing.",

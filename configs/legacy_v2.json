@@ -12,7 +12,8 @@
     "total_goals": 2,
     "asian_handicap": 3,
     "btts": 4,
-    "team_total": 6
+    "team_total": 6,
+    "draw_no_bet": 7
   },
   "markets": {
     "team_total": {
@@ -39,6 +40,15 @@
       "edge_strong": 0.09,
       "edge_premium_extended": 0.105,
       "is_primary_market": true
+    },
+    "draw_no_bet": {
+      "odd_min": 1.70,
+      "standard_max": 2.60,
+      "extended_max": 3.00,
+      "edge_min": 0.07,
+      "edge_strong": 0.10,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": false
     }
   },
   "rules": {

@@ -207,6 +207,58 @@ def _asian_handicap_probs(lambda_home: float, lambda_away: float, side: str, lin
     return probs
 
 
+def _match_result_probs(lambda_home: float, lambda_away: float, max_goals: int | None = None) -> dict[str, float]:
+    max_lambda = max(lambda_home, lambda_away)
+    max_goals = max_goals or int(max(10, math.ceil(max_lambda + 8 * math.sqrt(max_lambda + 1))))
+    probs = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
+
+    for goals_home in range(max_goals + 1):
+        p_home = poisson.pmf(goals_home, lambda_home)
+        for goals_away in range(max_goals + 1):
+            probability = p_home * poisson.pmf(goals_away, lambda_away)
+            if goals_home > goals_away:
+                probs["home_win"] += probability
+            elif goals_home < goals_away:
+                probs["away_win"] += probability
+            else:
+                probs["draw"] += probability
+
+    total = sum(probs.values())
+    if total > 0:
+        probs = {key: value / total for key, value in probs.items()}
+    return probs
+
+
+def price_draw_no_bet(lambda_home: float, lambda_away: float, side: str) -> dict[str, Any] | None:
+    if side not in {"home", "away"}:
+        return None
+
+    result_probs = _match_result_probs(lambda_home, lambda_away)
+    if side == "home":
+        win = result_probs["home_win"]
+        loss = result_probs["away_win"]
+    else:
+        win = result_probs["away_win"]
+        loss = result_probs["home_win"]
+
+    if win <= 0:
+        return None
+
+    probs = {
+        "win": win,
+        "half_win": 0.0,
+        "push": result_probs["draw"],
+        "half_loss": 0.0,
+        "loss": loss,
+    }
+    return {
+        "probs": probs,
+        "mu_target": None,
+        "mu_total": lambda_home + lambda_away,
+        "match_result_probs": result_probs,
+    }
+
+
 def price_market_selection(
     *,
     market_type: str,
@@ -257,6 +309,9 @@ def price_market_selection(
         if probs is None:
             return None
         return {"probs": probs, "mu_target": None, "mu_total": mu_total}
+
+    if market_type == "draw_no_bet":
+        return price_draw_no_bet(lambda_home, lambda_away, side)
 
     return None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import sys
 import tempfile
@@ -9,11 +10,13 @@ from unittest.mock import MagicMock, patch
 
 from vcbet.collectors.odds_collector import (
     BetanoExtractor,
+    PRE_SNAPSHOT_DISCARD_FIELDNAMES,
     SUPPORTED_MARKET_TYPE_IDS,
     build_betano_api_odds_url,
     build_odds_manifest,
     evaluate_collection_health,
     extract_initial_state_json,
+    save_pre_snapshot_discards,
     save_to_csv,
 )
 from vcbet.core.market_normalizer import normalize_betano_market_contract
@@ -275,6 +278,153 @@ class BetanoExtractorFetchTest(unittest.TestCase):
         self.assertEqual(rows[0]["betano_group_name"], "Group1")
         self.assertEqual(rows[0]["betano_selection_id"], "s4")
 
+    def test_pre_snapshot_discard_csv_records_unsupported_type_id(self) -> None:
+        extractor = BetanoExtractor()
+        state = {
+            "data": {
+                "event": {
+                    "id": "evt1",
+                    "leagueId": "lig1",
+                    "name": "Team A - Team B",
+                    "startTime": 1714309200000,
+                    "marketsCount": 2,
+                    "totalMarketsAvailable": 2,
+                    "markets": [
+                        {
+                            "id": "m_unsupported",
+                            "name": "Resultado Final",
+                            "type": "1X2",
+                            "typeId": 1,
+                            "selections": [
+                                {"id": "s_home", "name": "Team A", "price": 2.1},
+                                {"id": "s_draw", "name": "Empate", "price": 3.2},
+                            ],
+                        },
+                        {
+                            "id": "m_supported",
+                            "name": "Total de Gols Mais/Menos",
+                            "type": "Total de Gols Mais/Menos",
+                            "typeId": 13,
+                            "handicap": 2.5,
+                            "selections": [
+                                {"id": "s_over", "name": "Mais de 2.5", "price": 2.0, "handicap": 2.5},
+                                {"id": "s_under", "name": "Menos de 2.5", "price": 1.8, "handicap": 2.5},
+                            ],
+                        },
+                    ],
+                }
+            }
+        }
+        rows, diag = extractor._parse_event_odds(state, "Liga Test", "run_1", "http://event")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            discard_path = run_dir / "odds_discarded_pre_snapshot.csv"
+            snapshot_path = run_dir / "odds_snapshot.csv"
+            save_pre_snapshot_discards(diag["pre_snapshot_discards"], discard_path)
+            save_to_csv(rows, snapshot_path)
+
+            with open(discard_path, "r", newline="", encoding="utf-8") as fh:
+                discard_rows = list(csv.DictReader(fh, delimiter=";"))
+
+            self.assertTrue(discard_path.exists())
+            self.assertTrue(discard_rows)
+            self.assertEqual(PRE_SNAPSHOT_DISCARD_FIELDNAMES, list(discard_rows[0].keys()))
+            self.assertTrue(any(row["discard_reason"].startswith("unsupported_type_id:1") for row in discard_rows))
+            self.assertEqual(discard_rows[0]["market_raw"], "Resultado Final")
+            self.assertIn(discard_rows[0]["selection_raw"], {"Team A", "Empate"})
+            self.assertEqual(discard_rows[0]["betano_market_type_id"], "1")
+
+            with open(snapshot_path, "r", newline="", encoding="utf-8-sig") as fh:
+                snapshot_rows = list(csv.DictReader(fh, delimiter=";"))
+            self.assertTrue(snapshot_rows)
+            self.assertNotIn("Resultado Final", {row["market_raw"] for row in snapshot_rows})
+            self.assertNotIn("Empate", {row["selection_raw"] for row in snapshot_rows})
+
+    def test_pre_snapshot_discard_csv_records_invalid_odd(self) -> None:
+        extractor = BetanoExtractor()
+        state = {
+            "data": {
+                "event": {
+                    "id": "evt1",
+                    "leagueId": "lig1",
+                    "name": "Team A - Team B",
+                    "startTime": 1714309200000,
+                    "marketsCount": 1,
+                    "totalMarketsAvailable": 1,
+                    "markets": [
+                        {
+                            "id": "m_supported",
+                            "name": "Total de Gols Mais/Menos",
+                            "type": "Total de Gols Mais/Menos",
+                            "typeId": 13,
+                            "handicap": 2.5,
+                            "selections": [
+                                {"id": "s_none", "name": "Mais de 1.5", "price": None, "handicap": 1.5},
+                                {"id": "s_zero", "name": "Menos de 1.5", "price": 0, "handicap": 1.5},
+                                {"id": "s_over", "name": "Mais de 2.5", "price": 2.0, "handicap": 2.5},
+                                {"id": "s_under", "name": "Menos de 2.5", "price": 1.8, "handicap": 2.5},
+                            ],
+                        },
+                    ],
+                }
+            }
+        }
+        rows, diag = extractor._parse_event_odds(state, "Liga Test", "run_1", "http://event")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            discard_path = Path(tmpdir) / "odds_discarded_pre_snapshot.csv"
+            save_pre_snapshot_discards(diag["pre_snapshot_discards"], discard_path)
+            with open(discard_path, "r", newline="", encoding="utf-8") as fh:
+                discard_rows = list(csv.DictReader(fh, delimiter=";"))
+
+        self.assertTrue(rows)
+        reasons = {row["discard_reason"] for row in discard_rows}
+        self.assertIn("invalid_odd:none", reasons)
+        self.assertIn("invalid_odd:non_positive", reasons)
+        self.assertEqual({row["market_raw"] for row in discard_rows}, {"Total de Gols Mais/Menos"})
+
+    def test_typeid_10_draw_no_bet_enters_snapshot_not_unsupported_discard(self) -> None:
+        extractor = BetanoExtractor()
+        state = {
+            "data": {
+                "event": {
+                    "id": "evt1",
+                    "leagueId": "lig1",
+                    "name": "Leeds United - Burnley",
+                    "startTime": 1714309200000,
+                    "marketsCount": 1,
+                    "totalMarketsAvailable": 1,
+                    "markets": [
+                        {
+                            "id": "m_dnb",
+                            "name": "Empate Anula",
+                            "type": "Draw No Bet",
+                            "typeId": 10,
+                            "selections": [
+                                {"id": "s_home", "name": "Leeds United", "price": 1.70},
+                                {"id": "s_away", "name": "Burnley", "price": 2.10},
+                            ],
+                        },
+                    ],
+                }
+            }
+        }
+
+        rows, diag = extractor._parse_event_odds(state, "Liga Test", "run_1", "http://event")
+
+        self.assertTrue(diag["success"])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["market_type"] for row in rows}, {"draw_no_bet"})
+        self.assertEqual({row["side"] for row in rows}, {"home", "away"})
+        self.assertEqual({row["line"] for row in rows}, {0.0})
+        self.assertEqual(diag["supported_market_type_ids_seen"], [10])
+        self.assertEqual(diag["supported_market_families_seen"], ["draw_no_bet"])
+        self.assertFalse(
+            any(
+                str(row.get("discard_reason", "")).startswith("unsupported_type_id:10")
+                for row in diag["pre_snapshot_discards"]
+            )
+        )
+
 
 class CollectorMainBlockTest(unittest.TestCase):
     def _run_collector(self, mock_ligas: list, mock_extract_side_effect: list, extra_args: list | None = None):
@@ -362,6 +512,63 @@ class CollectorMainBlockTest(unittest.TestCase):
         self.assertEqual(m["totals"]["events_found"], 1)
         self.assertEqual(m["totals"]["events_success"], 1)
         self.assertEqual(m["leagues"]["Liga Test"]["events_success"], 1)
+        self.assertTrue((run_dir / "odds_discarded_pre_snapshot.csv").exists())
+
+    def test_collector_manifest_limits_pre_snapshot_discard_samples(self) -> None:
+        rows = [
+            {
+                "run_id": "run1", "collected_at": "2026-04-28 10:00:00", "source": "betano",
+                "league": "Liga Test", "match_datetime": "2026-04-28 15:00", "home_team": "A", "away_team": "B",
+                "match_name": "A - B", "market_raw": "Total de Gols Mais/Menos", "selection_raw": "Mais de 2.5",
+                "odd": 2.0, "event_url": "http://example.com",
+                "market_type": "total_goals", "market_scope": "full_time", "side": "over",
+                "line": 2.5, "target_team_role": "geral", "target_team_name": "geral", "normalized_status": "ok",
+            }
+        ]
+        discards = [
+            {
+                "run_id": "run1",
+                "collected_at": "2026-04-28 10:00:00",
+                "league": "Liga Test",
+                "match_name": "A - B",
+                "event_url": "http://example.com",
+                "market_raw": "Resultado Final",
+                "selection_raw": f"Selection {idx}",
+                "odd_raw": "2.0",
+                "betano_market_type_id": 1,
+                "betano_market_name": "Resultado Final",
+                "betano_market_family": "",
+                "discard_stage": "pre_snapshot",
+                "discard_reason": "unsupported_type_id:1",
+                "unsupported_reason": "",
+                "market_scope": "",
+                "home_team": "A",
+                "away_team": "B",
+            }
+            for idx in range(25)
+        ]
+        diag = {
+            "success": True,
+            "raw_markets_seen": 5,
+            "raw_selections_seen": 20,
+            "supported_market_rows_seen": 10,
+            "supported_market_rows_with_valid_odd": 5,
+            "normalized_ok_rows": 5,
+            "normalized_non_ok_rows": 0,
+            "markets_seen_by_name": {"Total de Gols Mais/Menos": 1},
+            "markets_seen_by_type_id": {13: 1},
+            "failure_reason": None,
+            "pre_snapshot_discards": discards,
+        }
+        run_dir, exit_code = self._run_collector(
+            mock_ligas=[{"nome": "Liga Test", "path": "/liga/test"}],
+            mock_extract_side_effect=[(rows, diag)],
+        )
+        self.assertIsNone(exit_code)
+        with open(run_dir / "odds_collection_manifest.json", "r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        self.assertEqual(len(manifest["top_discarded_samples"]["unsupported_type_id:1"]), 20)
+        self.assertEqual(manifest["top_discarded_samples"]["unsupported_type_id:1"][0]["market_raw"], "Resultado Final")
 
     def test_manifest_written_with_totals_and_per_league_diagnostics(self) -> None:
         rows = [

@@ -66,6 +66,15 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
             "edge_premium_extended": 0.12,
             "is_primary_market": True,
         },
+        "draw_no_bet": {
+            "odd_min": 1.70,
+            "standard_max": 2.60,
+            "extended_max": 3.00,
+            "edge_min": 0.07,
+            "edge_strong": 0.10,
+            "edge_premium_extended": 0.12,
+            "is_primary_market": False,
+        },
     },
     "market_priority": {
         "total_goals": 1,
@@ -73,6 +82,7 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
         "asian_handicap": 3,
         "btts": 4,
         "team_total": 5,
+        "draw_no_bet": 6,
     },
     "critical_flags": ["MATCH_DUVIDOSO", "DADO_INCOMPLETO_LIGA"],
     "confidence_caps": {
