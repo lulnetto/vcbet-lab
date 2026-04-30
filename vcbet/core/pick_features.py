@@ -79,4 +79,8 @@ def build_candidate_row(
         "registry_file_away": away_registry_file,
         "xg_fallback_home": is_xg_fallback(home_xg_row),
         "xg_fallback_away": is_xg_fallback(away_xg_row),
+        "xg_source_home": str(home_xg_row.get("source", "")).strip() if hasattr(home_xg_row, "get") else "",
+        "xg_source_away": str(away_xg_row.get("source", "")).strip() if hasattr(away_xg_row, "get") else "",
+        "xg_split_method_home": str(home_xg_row.get("xg_split_method", "")).strip() if hasattr(home_xg_row, "get") else "",
+        "xg_split_method_away": str(away_xg_row.get("xg_split_method", "")).strip() if hasattr(away_xg_row, "get") else "",
     }

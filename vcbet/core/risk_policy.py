@@ -19,6 +19,19 @@ def is_xg_fallback(xg_row: Any) -> bool:
         return True
 
 
+def resolve_xg_fallback_flag(source: Any, xg_split_method: Any) -> str | None:
+    source_str = str(source or "").strip().lower()
+    split_str = str(xg_split_method or "").strip().lower()
+
+    if source_str == "fotmob" or split_str == "fotmob_global_duplicated":
+        return "FOTMOB_GLOBAL_XG"
+
+    if "global" in split_str and "duplicated" in split_str:
+        return "FALLBACK_XG_GLOBAL"
+
+    return None
+
+
 def _line_extreme(market_type: str, line: float | None) -> bool:
     if line is None:
         return False
@@ -56,10 +69,37 @@ def assess_risk_flags(candidate: dict[str, Any]) -> list[str]:
     elif home_status == "auto_fuzzy_high" or away_status == "auto_fuzzy_high":
         flags.append("MATCH_FUZZY")
 
-    if candidate.get("xg_fallback_home") or candidate.get("xg_fallback_away"):
-        flags.append("FALLBACK_XG_GLOBAL")
-        if market_type in {"team_total", "asian_handicap"}:
-            flags.append("DADO_INCOMPLETO_LIGA")
+    home_fallback = bool(candidate.get("xg_fallback_home"))
+    away_fallback = bool(candidate.get("xg_fallback_away"))
+
+    if home_fallback or away_fallback:
+        home_flag = resolve_xg_fallback_flag(
+            candidate.get("xg_source_home"), candidate.get("xg_split_method_home")
+        )
+        away_flag = resolve_xg_fallback_flag(
+            candidate.get("xg_source_away"), candidate.get("xg_split_method_away")
+        )
+
+        real_fallback = False
+        fotmob_global = False
+
+        if home_fallback:
+            if home_flag == "FALLBACK_XG_GLOBAL":
+                real_fallback = True
+            elif home_flag == "FOTMOB_GLOBAL_XG":
+                fotmob_global = True
+        if away_fallback:
+            if away_flag == "FALLBACK_XG_GLOBAL":
+                real_fallback = True
+            elif away_flag == "FOTMOB_GLOBAL_XG":
+                fotmob_global = True
+
+        if fotmob_global:
+            flags.append("FOTMOB_GLOBAL_XG")
+        if real_fallback:
+            flags.append("FALLBACK_XG_GLOBAL")
+            if market_type in {"team_total", "asian_handicap"}:
+                flags.append("DADO_INCOMPLETO_LIGA")
 
     if liga_eh_caotica(str(candidate.get("league", ""))):
         flags.append("LIGA_VOLATIL")
