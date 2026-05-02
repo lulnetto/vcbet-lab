@@ -4,8 +4,12 @@ from collections import Counter
 
 import pandas as pd
 
+from vcbet.core.team_registry import DEFAULT_REGISTRY_FILE
 from vcbet.core.team_matcher import PendingAliasRow, match_team_name, write_pending_aliases
 from vcbet.team_identity.review_writer import upsert_pending_to_functional_file
+
+
+FUZZY_HIGH_REVIEW_REASON = "MATCH_FUZZY_HIGH_CONFIDENCE"
 
 
 def prepare_team_resolution_state(df_xg: pd.DataFrame) -> dict[str, object]:
@@ -30,13 +34,14 @@ def resolve_row_teams(
     status_counts: dict[str, int],
     high_threshold: int,
     review_threshold: int,
+    registry_file=DEFAULT_REGISTRY_FILE,
 ) -> dict[str, object] | None:
     liga_jogo = linha["league"]
     candidates = df_xg_liga["team_name"].tolist()
     time_casa = str(linha.get("home_team", "")).strip()
     time_fora = str(linha.get("away_team", "")).strip()
 
-    xg_source = str(df_xg_liga["source"].iloc[0]) if "source" in df_xg_liga.columns and not df_xg_liga.empty else "footystats"
+    xg_source = str(df_xg_liga["source"].iloc[0]).strip().casefold() if "source" in df_xg_liga.columns and not df_xg_liga.empty else "footystats"
     source_team_id_map: dict[str, str] = {}
     if "source_team_id" in df_xg_liga.columns:
         source_team_id_map = {
@@ -53,6 +58,7 @@ def resolve_row_teams(
         review_threshold=review_threshold,
         xg_source=xg_source,
         source_team_id_map=source_team_id_map,
+        registry_file=registry_file,
     )
     away_match = match_team_name(
         time_fora,
@@ -62,15 +68,26 @@ def resolve_row_teams(
         review_threshold=review_threshold,
         xg_source=xg_source,
         source_team_id_map=source_team_id_map,
+        registry_file=registry_file,
     )
 
     for res, side in ((home_match, "home"), (away_match, "away")):
         status_counts[res.match_status] = status_counts.get(res.match_status, 0) + 1
         if res.match_status in {"auto_fuzzy_high", "pending_review", "blocked"}:
             registry_stale_leagues.add(str(liga_jogo))
-        if res.match_status in {"pending_review", "blocked"}:
-            key = (liga_jogo, res.source_name, side)
+        if res.match_status in {"auto_fuzzy_high", "pending_review", "blocked"}:
+            suggested_name = str(res.suggestion or "")
+            key = (liga_jogo, res.source_name, suggested_name)
             if key not in pending_seen:
+                is_fuzzy_high = res.match_status == "auto_fuzzy_high"
+                registry_reason = (
+                    "match_fuzzy_high_confidence"
+                    if is_fuzzy_high
+                    else ("match_requires_registry_review" if res.match_status == "pending_review" else "unresolved_or_blocked_team_match")
+                )
+                match_confidence = f"{res.score / 100:.4f}" if res.score else ""
+                suggested_fotmob_name = suggested_name if xg_source == "fotmob" else ""
+                suggested_fotmob_team_id = source_team_id_map.get(suggested_name, "") if xg_source == "fotmob" else ""
                 pending_seen.add(key)
                 pending_rows.append(PendingAliasRow(
                     run_id=run_id,
@@ -82,10 +99,18 @@ def resolve_row_teams(
                     suggestion=res.suggestion,
                     score=res.score,
                     match_status=res.match_status,
-                    registry_status="registry_pending" if res.match_status == "pending_review" else "registry_stale",
-                    registry_reason="match_requires_registry_review" if res.match_status == "pending_review" else "unresolved_or_blocked_team_match",
-                    registry_pending_key=f"{liga_jogo}|{res.source_name}",
+                    registry_status="registry_pending" if res.match_status in {"auto_fuzzy_high", "pending_review"} else "registry_stale",
+                    registry_reason=registry_reason,
+                    registry_pending_key=f"{liga_jogo}|{res.source_name}|{suggested_name}",
                     recommended_action="sync_team_registry",
+                    suggested_fotmob_name=suggested_fotmob_name,
+                    suggested_fotmob_team_id=suggested_fotmob_team_id,
+                    match_confidence=match_confidence,
+                    match_method="auto_fuzzy_high" if is_fuzzy_high else res.match_status,
+                    review_reason=FUZZY_HIGH_REVIEW_REASON if is_fuzzy_high else "",
+                    source="run_pipeline",
+                    event_url=str(linha.get("event_url", "") or ""),
+                    updated_at=generated_at,
                 ))
 
     if not home_match.matched_name or not away_match.matched_name:
@@ -128,6 +153,7 @@ def write_and_report_alias_review(
     print(
         " -> Aliases únicos: "
         f"{len(pending_rows)} total | "
+        f"{unique_pending_counts.get('auto_fuzzy_high', 0)} fuzzy altos | "
         f"{unique_pending_counts.get('pending_review', 0)} pendentes | "
         f"{unique_pending_counts.get('blocked', 0)} bloqueados"
     )

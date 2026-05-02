@@ -21,7 +21,7 @@ async function loadAliasFiles(forceReload = false) {
     state.aliasFiles.forEach(item => {
       const opt = document.createElement('option');
       opt.value = item.pending_file;
-      opt.textContent = `${item.pending_file} | pend=${item.status_counts.pending_review} | blocked=${item.status_counts.blocked}`;
+      opt.textContent = `${item.pending_file} | pend=${item.status_counts.pending_review} | fuzzy=${item.status_counts.auto_fuzzy_high || 0} | blocked=${item.status_counts.blocked}`;
       select.appendChild(opt);
     });
     if ([...select.options].some(o => o.value === current)) select.value = current;

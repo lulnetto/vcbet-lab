@@ -220,6 +220,7 @@ def processar_pipeline(
         high_match_threshold=HIGH_MATCH_THRESHOLD,
         review_match_threshold=REVIEW_MATCH_THRESHOLD,
         functional_pending_file=functional_pending_file,
+        runtime_config=runtime_config,
     )
 
     df_candidates = pd.DataFrame(pricing["candidate_rows"])

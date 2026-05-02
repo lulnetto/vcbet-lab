@@ -68,6 +68,8 @@ app = FastAPI(title="VCBet Service", version="0.5.0")
 static_dir = settings.project_root / "vcbet" / "service" / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+ALIAS_REVIEW_ACTIVE_STATUSES = {"pending_review", "auto_fuzzy_high"}
+
 
 def _resource_key(project_root: Path, ledger_file: str | None) -> str | None:
     if not ledger_file:
@@ -221,6 +223,11 @@ def _normalize_alias_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return normalized
 
 
+def _alias_review_is_active(row: dict[str, str], include_blocked: bool = True) -> bool:
+    status = str(row.get("match_status") or "").strip()
+    return status in ALIAS_REVIEW_ACTIVE_STATUSES or (include_blocked and status == "blocked")
+
+
 def _registry_approved_keys() -> set[tuple[str, str]]:
     approved = load_approved_registry_aliases(settings.project_root)
     return {
@@ -246,19 +253,19 @@ def _alias_file_payload(
     visible = []
     covered = 0
     for row in normalized:
-        is_active = row.get("match_status") == "pending_review" or (include_blocked and row.get("match_status") == "blocked")
         if approved_keys and (row.get("league", ""), row.get("source_name", "").casefold()) in approved_keys:
             covered += 1
             if include_resolved:
                 visible.append({**row, "diagnostic_status": "covered_by_registry"})
             continue
-        if is_active:
+        if _alias_review_is_active(row, include_blocked=include_blocked):
             visible.append(row)
     counts = {
         "pending_review": sum(1 for row in normalized if row.get("match_status") == "pending_review"),
+        "auto_fuzzy_high": sum(1 for row in normalized if row.get("match_status") == "auto_fuzzy_high"),
         "blocked": sum(1 for row in normalized if row.get("match_status") == "blocked"),
     }
-    if counts["pending_review"] == 0 and counts["blocked"] == 0:
+    if counts["pending_review"] == 0 and counts["auto_fuzzy_high"] == 0 and counts["blocked"] == 0:
         if cleanup_empty and path.exists():
             path.unlink()
         return None

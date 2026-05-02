@@ -94,6 +94,12 @@ class ReviewAlias:
     source: str = "sync_team_aliases"
     created_at: str = ""
     updated_at: str = ""
+    suggested_fotmob_name: str = ""
+    suggested_fotmob_team_id: str = ""
+    match_confidence: str = ""
+    match_method: str = ""
+    run_id: str = ""
+    event_url: str = ""
 
 
 @dataclass(frozen=True)

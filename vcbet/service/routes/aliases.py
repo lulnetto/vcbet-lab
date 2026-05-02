@@ -7,6 +7,11 @@ from vcbet.service.schemas import AliasApproveRequest
 from . import RouteContext
 
 
+def _alias_review_is_active(row: dict[str, str], include_blocked: bool = True) -> bool:
+    status = str(row.get("match_status") or "").strip()
+    return status in {"pending_review", "auto_fuzzy_high"} or (include_blocked and status == "blocked")
+
+
 def register_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.get("/aliases/files")
     def list_alias_files(include_blocked: bool = True, scope: str = "runs_recent", include_resolved: bool = False):
@@ -45,7 +50,7 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
         if not payload:
             return {
                 "pending_file": pending_file,
-                "status_counts": {"pending_review": 0, "blocked": 0},
+                "status_counts": {"pending_review": 0, "auto_fuzzy_high": 0, "blocked": 0},
                 "items": [],
                 "total": 0,
                 "message": "sem aliases pendentes",
@@ -76,7 +81,7 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
 
         still_visible = [
             row for row in remaining
-            if row.get("match_status") == "pending_review" or (req.include_blocked and row.get("match_status") == "blocked")
+            if _alias_review_is_active(row, include_blocked=req.include_blocked)
         ]
         deleted = not still_visible
         ctx.write_text_csv(pending_path, remaining if still_visible else [], fieldnames, delimiter)

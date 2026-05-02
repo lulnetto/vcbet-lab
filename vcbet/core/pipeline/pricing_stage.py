@@ -6,8 +6,10 @@ import pandas as pd
 
 from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
 from vcbet.core.pick_features import build_candidate_row
-from vcbet.core.pricing_engine import calculate_lambdas, price_market_selection
+from vcbet.core.pricing_engine import price_market_selection
 from vcbet.core.pipeline.team_resolution import resolve_row_teams, write_and_report_alias_review
+from vcbet.core.strategy_config import get_runtime_config
+from vcbet.core.xg_residuals import build_xg_residual_pricing_setup
 
 
 def build_priced_candidates(
@@ -22,7 +24,9 @@ def build_priced_candidates(
     high_match_threshold: int,
     review_match_threshold: int,
     functional_pending_file: str | None = None,
+    runtime_config=None,
 ) -> dict[str, object]:
+    runtime_config = runtime_config or get_runtime_config()
     processing_discard_counts = Counter()
     raw_candidate_rows: list[dict] = []
     blocked_candidate_rows: list[dict] = []
@@ -70,21 +74,33 @@ def build_priced_candidates(
         home_xg_row = resolved["home_xg_row"]
         away_xg_row = resolved["away_xg_row"]
 
-        lambda_bundle = calculate_lambdas(
-            home_xg_row["xg_home"],
-            home_xg_row["xga_home"] if "xga_home" in home_xg_row.index else home_xg_row["xga"],
-            away_xg_row["xg_away"],
-            away_xg_row["xga_away"] if "xga_away" in away_xg_row.index else away_xg_row["xga"],
+        pricing_setup = build_xg_residual_pricing_setup(
+            home_xg_row=home_xg_row,
+            away_xg_row=away_xg_row,
+            market_type=linha["market_type"],
+            runtime_config=runtime_config,
         )
+        base_lambda_bundle = pricing_setup["base_lambda_bundle"]
+        adjusted_lambda_bundle = pricing_setup["adjusted_lambda_bundle"]
+        lambda_bundle = pricing_setup["official_lambda_bundle"]
 
-        pricing_result = price_market_selection(
+        base_pricing_result = price_market_selection(
             market_type=linha["market_type"],
             side=str(linha.get("side")),
             line=None if pd.isna(linha.get("line")) else float(linha.get("line")),
             target_team_role=str(linha.get("target_team_role") or "geral"),
-            lambda_home=lambda_bundle["lambda_home"],
-            lambda_away=lambda_bundle["lambda_away"],
+            lambda_home=base_lambda_bundle["lambda_home"],
+            lambda_away=base_lambda_bundle["lambda_away"],
         )
+        adjusted_pricing_result = price_market_selection(
+            market_type=linha["market_type"],
+            side=str(linha.get("side")),
+            line=None if pd.isna(linha.get("line")) else float(linha.get("line")),
+            target_team_role=str(linha.get("target_team_role") or "geral"),
+            lambda_home=adjusted_lambda_bundle["lambda_home"],
+            lambda_away=adjusted_lambda_bundle["lambda_away"],
+        )
+        pricing_result = adjusted_pricing_result if pricing_setup["diagnostics"]["xg_residual_adjustment_enabled"] else base_pricing_result
         if not pricing_result:
             processing_discard_counts["pricing_unavailable"] += 1
             continue
@@ -106,6 +122,9 @@ def build_priced_candidates(
             away_registry_file=away_match.registry_file,
             lambda_bundle=lambda_bundle,
             pricing_result=pricing_result,
+            base_pricing_result=base_pricing_result,
+            adjusted_pricing_result=adjusted_pricing_result,
+            pricing_diagnostics=pricing_setup["diagnostics"],
             home_xg_row=home_xg_row,
             away_xg_row=away_xg_row,
         )

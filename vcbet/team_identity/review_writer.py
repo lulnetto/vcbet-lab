@@ -22,14 +22,32 @@ REVIEW_COLUMNS = [
     "betano_team_id",
     "betano_url",
     "suggested_footystats_name",
+    "suggested_fotmob_name",
+    "suggested_fotmob_team_id",
     "top_score",
+    "match_confidence",
+    "match_method",
     "review_reason",
     "ambiguous_options",
     "status",
     "source",
+    "run_id",
+    "event_url",
     "created_at",
     "updated_at",
 ]
+
+
+def _is_approved_registry_row(row: Any) -> bool:
+    if row.match_status != "MATCH_REGISTRY_APPROVED":
+        return False
+    if is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
+        return True
+    return bool(
+        row.league
+        and row.betano_name
+        and (row.source == "ui_review" or row.match_method in {"registry_review", "manual_override"})
+    )
 
 
 def write_review_aliases(
@@ -48,9 +66,7 @@ def write_review_aliases(
     approved_file = Path(approved_path)
     if approved_file.exists():
         for row in read_registry(approved_file):
-            if row.match_status != "MATCH_REGISTRY_APPROVED":
-                continue
-            if not is_valid_betano_team_identity(row.betano_name, row.betano_team_id, row.betano_url):
+            if not _is_approved_registry_row(row):
                 continue
             approved_keys.add(registry_alias_key(row.league, row.betano_team_id, row.betano_name))
 
@@ -94,6 +110,18 @@ def upsert_pending_to_functional_file(
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     review_aliases: list[ReviewAlias] = []
     for row in pending_rows:
+        score = str(getattr(row, "score", "") or "")
+        match_confidence = str(getattr(row, "match_confidence", "") or "")
+        if not match_confidence and score:
+            try:
+                match_confidence = f"{float(score) / 100:.4f}"
+            except ValueError:
+                match_confidence = ""
+        match_status = str(getattr(row, "match_status", "") or "")
+        registry_reason = str(getattr(row, "registry_reason", "") or "")
+        review_reason = str(getattr(row, "review_reason", "") or "")
+        if not review_reason:
+            review_reason = f"{match_status}: {registry_reason}".strip(": ")
         review_aliases.append(
             ReviewAlias(
                 league=str(row.league),
@@ -101,13 +129,19 @@ def upsert_pending_to_functional_file(
                 betano_team_id="",
                 betano_url="",
                 suggested_footystats_name=str(row.suggestion or ""),
-                top_score=str(row.score),
-                review_reason=f"{row.match_status}: {row.registry_reason}",
+                suggested_fotmob_name=str(getattr(row, "suggested_fotmob_name", "") or ""),
+                suggested_fotmob_team_id=str(getattr(row, "suggested_fotmob_team_id", "") or ""),
+                top_score=score,
+                match_confidence=match_confidence,
+                match_method=str(getattr(row, "match_method", "") or match_status),
+                review_reason=review_reason,
                 ambiguous_options="",
                 status="pending_review",
-                source="pipeline",
+                source=str(getattr(row, "source", "") or "run_pipeline"),
+                run_id=str(getattr(row, "run_id", "") or ""),
+                event_url=str(getattr(row, "event_url", "") or ""),
                 created_at=row.created_at or now,
-                updated_at=now,
+                updated_at=str(getattr(row, "updated_at", "") or now),
             )
         )
     return write_review_aliases(review_aliases, path=path)

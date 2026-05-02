@@ -96,6 +96,7 @@ async function syncAllTeamRegistryLeagues() {
     if (statusEl) statusEl.textContent = JSON.stringify({
       status: result.status,
       total: result.total,
+      standings_diagnostics: result.standings_diagnostics || [],
       failed: failed.map(item => ({league: item.league, coverage_status: item.coverage_status, debug_reason: item.debug_reason || item.error || '', debug_artifact: item.debug_artifact || ''})),
       items: result.items,
     }, null, 2);
@@ -150,16 +151,17 @@ function registryPayloadAt(index, useEdited = false) {
     suggestion: item.suggestion || footystats_name,
     registry_pending_key: item.registry_pending_key || `${item.league || ''}|${item.betano_name || item.source_name || ''}`,
     top_score: item.top_score || '',
+    match_confidence: item.match_confidence || '',
     review_reason: item.review_reason || '',
     ambiguous_options: item.ambiguous_options || '',
     source: item.source || 'ui_review',
     coverage_status: item.coverage_status || '',
     // FotMob fields (forward compatibility)
-    fotmob_team_name: item.fotmob_team_name || footystats_name,
-    fotmob_team_id: item.fotmob_team_id || '',
+    fotmob_team_name: item.fotmob_team_name || item.suggested_fotmob_name || footystats_name,
+    fotmob_team_id: item.fotmob_team_id || item.suggested_fotmob_team_id || '',
     fotmob_short_name: item.fotmob_short_name || '',
     xg_provider_preferred: item.xg_provider_preferred || 'fotmob',
-    canonical_team_name: item.canonical_team_name || footystats_name,
+    canonical_team_name: item.canonical_team_name || item.suggested_fotmob_name || footystats_name,
   };
 }
 

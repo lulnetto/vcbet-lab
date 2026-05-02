@@ -22,6 +22,33 @@ CONFIDENCE_SCORE_TYPE = "heuristic_operational"
 CONFIDENCE_SCORE_SCALE = "0-5"
 
 
+def _split_flag_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text or text == "SEM_FLAG" or text.lower() in {"nan", "none", "<na>"}:
+        return []
+    return [part for part in text.split("|") if part]
+
+
+def _risk_flags_with_observational(flags: list[str], candidate: dict[str, Any]) -> str:
+    merged = set(flags)
+    merged.update(_split_flag_text(candidate.get("xg_observational_flags")))
+    return "|".join(sorted(merged)) if merged else "SEM_FLAG"
+
+
+def _round_diagnostic_pricing_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    for field in ("odd_justa_base", "odd_justa_adjusted"):
+        value = payload.get(field)
+        if value is not None and str(value).strip().lower() not in {"", "nan", "none", "<na>"}:
+            payload[field] = round(float(value), 2)
+    for field in ("ev_percent_base", "ev_percent_adjusted"):
+        value = payload.get(field)
+        if value is not None and str(value).strip().lower() not in {"", "nan", "none", "<na>"}:
+            payload[field] = round(float(value), 2)
+    return payload
+
+
 def _normalize_identity_part(value: Any) -> str:
     if value is None:
         return ""
@@ -147,7 +174,7 @@ def _rejected_candidate_payload(
 ) -> dict[str, Any]:
     safety_gate_flags = safety_gate_flags or []
     flags = flags or []
-    return {
+    return _round_diagnostic_pricing_fields({
         **candidate,
         "bet_id": _candidate_identity(candidate),
         "pricing_signal_type": PRICING_SIGNAL_TYPE,
@@ -155,14 +182,14 @@ def _rejected_candidate_payload(
         "confidence_score_type": CONFIDENCE_SCORE_TYPE,
         "confidence_score_scale": CONFIDENCE_SCORE_SCALE,
         "confidence_cap": confidence_cap,
-        "risk_flags": "|".join(flags) if flags else "SEM_FLAG",
+        "risk_flags": _risk_flags_with_observational(flags, candidate),
         "pick_safety_status": "blocked" if safety_gate_flags else "rejected",
         "candidate_stage": "blocked_unsafe_candidate" if safety_gate_flags else "rejected_candidate",
         "decision_policy_status": "blocked_by_risk_policy" if safety_gate_flags else "rejected",
         "decision_reject_reason": reject_reason,
         "safety_gate_reason": "|".join(safety_gate_flags),
         "safety_reject_reason": reject_reason,
-    }
+    })
 
 
 def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None]:
@@ -238,7 +265,7 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
     fair_odd = round(float(fair_odd), 2) if fair_odd else None
 
     market_priority = get_market_priority()
-    return {
+    return _round_diagnostic_pricing_fields({
         **candidate,
         "bet_id": _candidate_identity(candidate),
         "odd_justa": fair_odd,
@@ -250,7 +277,7 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
         "confidence_cap": cap_value,
         "stake_units": stake_units,
         "entry_reason": "|".join(reasons[:4]) if reasons else "SEM_MOTIVO",
-        "risk_flags": "|".join(flags) if flags else "SEM_FLAG",
+        "risk_flags": _risk_flags_with_observational(flags, candidate),
         "pick_safety_status": "safe",
         "candidate_stage": "eligible_pick",
         "decision_policy_status": "eligible",
@@ -259,7 +286,7 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
         "market_priority": market_priority.get(market_type, 99),
         "strategy_config_name": runtime.name,
         "strategy_config_fingerprint": runtime.fingerprint,
-    }, None, None
+    }), None, None
 
 
 def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:

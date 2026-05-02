@@ -6,6 +6,18 @@ from vcbet.core.pricing_engine import effective_model_probability, expected_valu
 from vcbet.core.risk_policy import is_xg_fallback
 
 
+def _pricing_metrics(pricing_result: dict | None, odd: float) -> dict[str, float | None]:
+    if not pricing_result:
+        return {"prob_model": None, "odd_justa": None, "ev_percent": None}
+    probs = pricing_result["probs"]
+    fair_odd = fair_odd_from_probs(probs)
+    return {
+        "prob_model": round(effective_model_probability(probs), 6),
+        "odd_justa": fair_odd,
+        "ev_percent": expected_value_decimal(probs, odd) * 100,
+    }
+
+
 def _display_selection(row: pd.Series) -> str:
     """Seleção legível e identificável para relatórios, comparison e ledger."""
     selection = str(row.get("selection_raw", "")).strip()
@@ -34,12 +46,18 @@ def build_candidate_row(
     pricing_result: dict,
     home_xg_row: pd.Series,
     away_xg_row: pd.Series,
+    base_pricing_result: dict | None = None,
+    adjusted_pricing_result: dict | None = None,
+    pricing_diagnostics: dict | None = None,
 ) -> dict:
     probs = pricing_result["probs"]
     fair_odd = fair_odd_from_probs(probs)
-    ev_decimal = expected_value_decimal(probs, float(row["odd"]))
+    odd = float(row["odd"])
+    ev_decimal = expected_value_decimal(probs, odd)
+    base_metrics = _pricing_metrics(base_pricing_result or pricing_result, odd)
+    adjusted_metrics = _pricing_metrics(adjusted_pricing_result or pricing_result, odd)
 
-    return {
+    candidate = {
         "run_id": run_id,
         "odds_source_run_id": odds_run_id,
         "xg_source_run_id": xg_run_id,
@@ -61,11 +79,17 @@ def build_candidate_row(
         "target_team_role": row.get("target_team_role"),
         "target_team_name": row.get("target_team_name"),
         "event_url": row.get("event_url"),
-        "odd": float(row["odd"]),
-        "odd_entrada": float(row["odd"]),
+        "odd": odd,
+        "odd_entrada": odd,
         "prob_model": round(effective_model_probability(probs), 6),
         "odd_justa": fair_odd,
         "ev_decimal": ev_decimal,
+        "prob_model_base": base_metrics["prob_model"],
+        "odd_justa_base": base_metrics["odd_justa"],
+        "ev_percent_base": base_metrics["ev_percent"],
+        "prob_model_adjusted": adjusted_metrics["prob_model"],
+        "odd_justa_adjusted": adjusted_metrics["odd_justa"],
+        "ev_percent_adjusted": adjusted_metrics["ev_percent"],
         "mu_total": lambda_bundle["mu_total"],
         "lambda_home": lambda_bundle["lambda_home"],
         "lambda_away": lambda_bundle["lambda_away"],
@@ -84,3 +108,6 @@ def build_candidate_row(
         "xg_split_method_home": str(home_xg_row.get("xg_split_method", "")).strip() if hasattr(home_xg_row, "get") else "",
         "xg_split_method_away": str(away_xg_row.get("xg_split_method", "")).strip() if hasattr(away_xg_row, "get") else "",
     }
+    if pricing_diagnostics:
+        candidate.update(pricing_diagnostics)
+    return candidate

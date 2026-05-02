@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from vcbet.core.line_selector import market_family
+from vcbet.core.selection.correlation import HARD_CORRELATION_STRENGTHS, classify_correlation_detail
 from vcbet.paths import DEFAULT_LEDGER_FILE
 
 
@@ -13,6 +14,9 @@ OFFICIAL_LEDGER_REASONS = {
     "duplicate": "LEDGER_DUPLICATE_OPEN_PICK",
     "correlated": "LEDGER_CORRELATED_OPEN_PICK",
     "contradictory": "LEDGER_CONTRADICTORY_OPEN_PICK",
+    "equivalent_market": "EQUIVALENT_MARKET_ALREADY_IN_LEDGER",
+    "high_correlation": "HIGH_CORRELATION_ALREADY_IN_LEDGER",
+    "correlation_contradictory": "CONTRADICTORY_WITH_LEDGER_PICK",
 }
 
 
@@ -95,6 +99,14 @@ def _is_contradictory(candidate: dict[str, Any], existing: dict[str, Any]) -> bo
     return False
 
 
+def _ledger_reason_for_correlation(strength: str) -> str:
+    if strength in {"equivalent", "near_duplicate"}:
+        return OFFICIAL_LEDGER_REASONS["equivalent_market"]
+    if strength == "contradictory":
+        return OFFICIAL_LEDGER_REASONS["correlation_contradictory"]
+    return OFFICIAL_LEDGER_REASONS["high_correlation"]
+
+
 def check_against_open_ledger(candidate: dict[str, Any], ledger_rows: pd.DataFrame) -> dict[str, Any]:
     """Return ledger-level portfolio gate status for one candidate.
 
@@ -124,20 +136,17 @@ def check_against_open_ledger(candidate: dict[str, Any], ledger_rows: pd.DataFra
                 "details": f"family={candidate_family}|existing_line={existing.get('line')}|existing_run={existing.get('run_id')}|existing_config={existing.get('config_name')}",
             }
 
-        if _is_contradictory(candidate, existing):
+        correlation = classify_correlation_detail(candidate, existing)
+        if correlation["strength"] in HARD_CORRELATION_STRENGTHS:
             return {
                 "status": "blocked",
-                "reason": OFFICIAL_LEDGER_REASONS["contradictory"],
+                "reason": _ledger_reason_for_correlation(correlation["strength"]),
                 "related_bet_id": related,
-                "details": f"family={candidate_family}|existing_side={existing.get('side')}|existing_line={existing.get('line')}|existing_run={existing.get('run_id')}|existing_config={existing.get('config_name')}",
-            }
-
-        if candidate_family in {"goals_total", "team_goals", "btts"} and existing_family in {"goals_total", "team_goals", "btts"}:
-            return {
-                "status": "blocked",
-                "reason": OFFICIAL_LEDGER_REASONS["correlated"],
-                "related_bet_id": related,
-                "details": f"candidate_family={candidate_family}|existing_family={existing_family}|existing_run={existing.get('run_id')}|existing_config={existing.get('config_name')}",
+                "details": (
+                    f"candidate_family={candidate_family}|existing_family={existing_family}|"
+                    f"correlation_strength={correlation['strength']}|correlation_reason={correlation['reason']}|"
+                    f"existing_run={existing.get('run_id')}|existing_config={existing.get('config_name')}"
+                ),
             }
 
     return {"status": "passed", "reason": "", "related_bet_id": "", "details": ""}

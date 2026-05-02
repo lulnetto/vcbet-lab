@@ -95,7 +95,12 @@ def _same_target(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 
 from vcbet.core.selection.asian_ladder import _apply_asian_total_line_ladder
-from vcbet.core.selection.correlation import classify_correlation
+from vcbet.core.selection.correlation import (
+    classify_correlation,
+    classify_correlation_detail,
+    correlation_cluster_key,
+    portfolio_selection_score,
+)
 from vcbet.core.selection.dedupe import _is_contradictory_line, _is_duplicate_or_near_duplicate
 from vcbet.core.selection.exposure import _exposure_rejection, _record_exposure
 from vcbet.core.selection.line_selection import select_top_picks
@@ -115,5 +120,8 @@ __all__ = [
     "_record_exposure",
     "_apply_asian_total_line_ladder",
     "classify_correlation",
+    "classify_correlation_detail",
+    "correlation_cluster_key",
+    "portfolio_selection_score",
     "select_top_picks",
 ]

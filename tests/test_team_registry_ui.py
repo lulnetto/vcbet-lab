@@ -95,6 +95,42 @@ class TeamRegistryUiTest(unittest.TestCase):
             self.assertEqual(rows[0]["xg_provider_preferred"], "fotmob")
             self.assertEqual(rows[0]["canonical_team_name"], "Inter")
 
+    def test_fuzzy_high_pending_is_visible_in_registry_api(self):
+        from vcbet.service.team_registry_api import load_pending_registry_reviews
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pending_path = tmp_path / "data" / "team_registry" / "alias_review_pending.csv"
+            self._write_pending_rows(pending_path, [
+                self._make_pending_row(
+                    league="Liga Europa",
+                    betano_name="SC Braga",
+                    suggested_footystats_name="Braga",
+                    suggested_fotmob_name="Braga",
+                    suggested_fotmob_team_id="10264",
+                    top_score="100",
+                    match_confidence="1.0000",
+                    match_method="auto_fuzzy_high",
+                    review_reason="MATCH_FUZZY_HIGH_CONFIDENCE",
+                    source="run_pipeline",
+                    run_id="run_fuzzy",
+                    event_url="https://example.test/event",
+                ),
+            ])
+
+            payload = load_pending_registry_reviews(tmp_path)
+
+            self.assertEqual(payload["total"], 1)
+            self.assertEqual(payload["by_league"], {"Liga Europa": 1})
+            item = payload["items"][0]
+            self.assertEqual(item["betano_name"], "SC Braga")
+            self.assertEqual(item["suggested_footystats_name"], "Braga")
+            self.assertEqual(item["suggested_fotmob_name"], "Braga")
+            self.assertEqual(item["suggested_fotmob_team_id"], "10264")
+            self.assertEqual(item["review_reason"], "MATCH_FUZZY_HIGH_CONFIDENCE")
+            self.assertEqual(item["match_method"], "auto_fuzzy_high")
+            self.assertEqual(item["source"], "run_pipeline")
+
     def test_approve_duplicate_updates_empty_fotmob_fields(self):
         from vcbet.service.team_registry_api import approve_registry_alias
 
@@ -183,6 +219,32 @@ class TeamRegistryUiTest(unittest.TestCase):
             self.assertEqual(result["xg_source_policy"], "latest_daily_xg_snapshot")
             self.assertEqual(result["items"][0]["xg_file_used"], expected)
             self.assertNotIn("data/runs", captured_payloads[0]["xg_file"])
+
+    def test_sync_all_registry_leagues_reports_european_standings_diagnostic(self):
+        from vcbet.service.team_registry_api import sync_all_registry_leagues
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            xg_path = tmp_path / "data" / "xg" / "2026-04-29" / "xg_snapshot.csv"
+            xg_path.parent.mkdir(parents=True, exist_ok=True)
+            xg_path.write_text("league;team_name;source;source_team_id\n", encoding="utf-8")
+
+            def fake_sync_registry_league(project_root, payload):
+                return {
+                    "status": "blocked",
+                    "league": payload["league"],
+                    "coverage_status": "phase_standings_not_found",
+                    "debug_reason": "phase_standings_not_found",
+                }
+
+            with patch("vcbet.service.team_registry_api.list_registry_leagues", return_value={"items": [{"name": "Liga Europa"}]}), \
+                    patch("vcbet.service.team_registry_api.sync_registry_league", side_effect=fake_sync_registry_league):
+                result = sync_all_registry_leagues(tmp_path, {})
+
+            self.assertEqual(result["status"], "partial")
+            self.assertEqual(len(result["standings_diagnostics"]), 1)
+            self.assertEqual(result["standings_diagnostics"][0]["league"], "Liga Europa")
+            self.assertIn("pendências geradas por run", result["standings_diagnostics"][0]["message"])
 
     def test_backend_approves_pending_and_updates_registry(self):
         import subprocess

@@ -20,6 +20,10 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
         "label": "Champion Strict",
         "description": "Configuração atual mais restritiva, voltada a qualidade e controle de risco.",
     },
+    "pricing_variant": "xg_only",
+    "xg_residual_adjustment": {
+        "enabled": False,
+    },
     "markets": {
         "total_goals": {
             "odd_min": 1.65,
@@ -149,13 +153,51 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
         },
         "portfolio": {
             "max_picks_per_match": 2,
-            "max_picks_per_league": 3,
-            "max_stake_per_league": 2.0,
-            "max_picks_per_market_family": 4,
-            "max_stake_per_market_family": 3.0,
+            "max_picks_per_league": None,
+            "max_stake_per_league": None,
+            "max_picks_per_market_family": None,
+            "max_stake_per_market_family": None,
             "near_duplicate_line_tolerance": 0.25,
             "contradictory_line_tolerance": 0.25,
             "medium_correlation_policy": "downgrade",
+            "correlation_selection": {
+                "enabled": True,
+                "max_picks_per_high_correlation_cluster": 1,
+                "ev_gap_override_pp": 2.0,
+                "ev_gap_override_by_relation": {
+                    "DNB_EQUALS_AH_0": 0.0,
+                    "DNB_AH_PLUS_0_25": 4.0,
+                    "DNB_AH_PLUS_0_5": 6.0,
+                    "DNB_AH_MINUS_0_25": 2.0,
+                    "AH_NEAR_DUPLICATE_LINE": 2.0,
+                    "BTTS_YES_TEAM_TOTAL_OVER_0_5": 5.0,
+                    "TOTAL_EQUALS_ASIAN_TOTAL": 0.0,
+                },
+                "total_line_ev_gap_override_by_distance": {
+                    "0.25": 3.0,
+                    "0.5": 5.0,
+                    "0.75": 6.0,
+                    "1.0": 7.0,
+                },
+                "total_line_default_ev_gap_override_pp": 5.0,
+                "score_weights": {
+                    "ev_percent": 1.0,
+                    "confidence_score": 0.75,
+                    "entry_quality_score": 0.15,
+                    "market_priority": 0.75,
+                    "selection_safety": 0.75,
+                    "odds_quality": 0.25,
+                    "risk_penalty": 1.0,
+                },
+                "market_priority": {
+                    "draw_no_bet": 5,
+                    "asian_handicap": 5,
+                    "asian_total": 4,
+                    "total_goals": 4,
+                    "team_total": 3,
+                    "btts": 3,
+                },
+            },
             "asian_total_line_ladder": {
                 "enabled": False,
                 "target_gap": 0.75,
@@ -205,6 +247,15 @@ class RuntimeConfig:
     @property
     def description(self) -> str:
         return str(self.payload.get("metadata", {}).get("description") or "")
+
+    @property
+    def pricing_variant(self) -> str:
+        return str(self.payload.get("pricing_variant") or "xg_only")
+
+    @property
+    def xg_residual_adjustment(self) -> dict[str, Any]:
+        value = self.payload.get("xg_residual_adjustment", {})
+        return dict(value) if isinstance(value, dict) else {"enabled": False}
 
     @property
     def allowed_markets(self) -> set[str]:

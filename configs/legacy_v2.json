@@ -4,6 +4,10 @@
     "label": "Legacy v2",
     "description": "Preset baseado no intermediate_balanced, mas com preferência por asian_total e ladder de linhas para aproximar a carteira lucrativa de 22/04."
   },
+  "pricing_variant": "xg_only",
+  "xg_residual_adjustment": {
+    "enabled": false
+  },
   "data_quality": {
     "max_snapshot_age_hours": 36
   },
@@ -66,6 +70,48 @@
     },
     "portfolio": {
       "max_picks_per_match": 2,
+      "max_picks_per_league": null,
+      "max_stake_per_league": null,
+      "max_picks_per_market_family": null,
+      "max_stake_per_market_family": null,
+      "correlation_selection": {
+        "enabled": true,
+        "max_picks_per_high_correlation_cluster": 1,
+        "ev_gap_override_pp": 2.0,
+        "ev_gap_override_by_relation": {
+          "DNB_EQUALS_AH_0": 0.0,
+          "DNB_AH_PLUS_0_25": 4.0,
+          "DNB_AH_PLUS_0_5": 6.0,
+          "DNB_AH_MINUS_0_25": 2.0,
+          "AH_NEAR_DUPLICATE_LINE": 2.0,
+          "BTTS_YES_TEAM_TOTAL_OVER_0_5": 5.0,
+          "TOTAL_EQUALS_ASIAN_TOTAL": 0.0
+        },
+        "total_line_ev_gap_override_by_distance": {
+          "0.25": 3.0,
+          "0.5": 5.0,
+          "0.75": 6.0,
+          "1.0": 7.0
+        },
+        "total_line_default_ev_gap_override_pp": 5.0,
+        "score_weights": {
+          "ev_percent": 1.0,
+          "confidence_score": 0.75,
+          "entry_quality_score": 0.15,
+          "market_priority": 0.75,
+          "selection_safety": 0.75,
+          "odds_quality": 0.25,
+          "risk_penalty": 1.0
+        },
+        "market_priority": {
+          "draw_no_bet": 5,
+          "asian_handicap": 5,
+          "asian_total": 4,
+          "total_goals": 4,
+          "team_total": 3,
+          "btts": 3
+        }
+      },
       "asian_total_line_ladder": {
         "enabled": true,
         "target_gap": 0.75,

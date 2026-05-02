@@ -8,6 +8,10 @@ import pandas as pd
 
 from vcbet.core.run_utils import save_quality_report
 from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
+from vcbet.core.xg_residuals import (
+    pricing_variant_from_payload,
+    quality_xg_residual_adjustment_payload,
+)
 
 
 PRE_SNAPSHOT_DISCARDS_FILENAME = "odds_discarded_pre_snapshot.csv"
@@ -62,6 +66,87 @@ def build_pre_snapshot_discard_summary(path, sample_limit_per_reason: int = 20) 
     return {
         "pre_snapshot_discard_counts": to_sorted_dict(counts),
         "pre_snapshot_discard_samples": samples,
+    }
+
+
+def _numeric_candidate_series(df: pd.DataFrame, column: str) -> pd.Series:
+    if df.empty or column not in df.columns:
+        return pd.Series(0.0, index=df.index, dtype=float)
+    return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+
+
+def build_xg_residual_summary(df_candidates: pd.DataFrame) -> dict[str, object]:
+    if df_candidates.empty:
+        return {
+            "candidates_with_adjustment": 0,
+            "avg_abs_lambda_home_adjustment_pct": 0.0,
+            "avg_abs_lambda_away_adjustment_pct": 0.0,
+            "max_abs_lambda_adjustment_pct": 0.0,
+        }
+    home_abs = _numeric_candidate_series(df_candidates, "lambda_home_adjustment_pct").abs()
+    away_abs = _numeric_candidate_series(df_candidates, "lambda_away_adjustment_pct").abs()
+    adjusted_mask = (home_abs > 1e-12) | (away_abs > 1e-12)
+    max_abs = max(float(home_abs.max()) if not home_abs.empty else 0.0, float(away_abs.max()) if not away_abs.empty else 0.0)
+    return {
+        "candidates_with_adjustment": int(adjusted_mask.sum()),
+        "avg_abs_lambda_home_adjustment_pct": round(float(home_abs.mean()) if not home_abs.empty else 0.0, 6),
+        "avg_abs_lambda_away_adjustment_pct": round(float(away_abs.mean()) if not away_abs.empty else 0.0, 6),
+        "max_abs_lambda_adjustment_pct": round(max_abs, 6),
+    }
+
+
+def build_portfolio_correlation_summary(df_final: pd.DataFrame, df_portfolio_rejected: pd.DataFrame) -> dict[str, object]:
+    frames = []
+    for df in (df_final, df_portfolio_rejected):
+        if not df.empty and "correlation_cluster_key" in df.columns:
+            frames.append(df.copy())
+    if frames:
+        combined = pd.concat(frames, ignore_index=True)
+        cluster_keys = combined.get("correlation_cluster_key", pd.Series(dtype=object)).fillna("").astype(str)
+        clustered = combined[cluster_keys.str.strip() != ""].copy()
+        if not clustered.empty:
+            cluster_sizes = clustered.groupby("correlation_cluster_key").size()
+            clusters_with_multiple = int((cluster_sizes > 1).sum())
+            clusters_total = clusters_with_multiple
+        else:
+            clusters_total = 0
+            clusters_with_multiple = 0
+    else:
+        clusters_total = 0
+        clusters_with_multiple = 0
+
+    reject_reasons = (
+        Counter(df_portfolio_rejected.get("portfolio_reject_reason", pd.Series(dtype=object)).fillna("missing"))
+        if not df_portfolio_rejected.empty
+        else Counter()
+    )
+    return {
+        "clusters_total": clusters_total,
+        "clusters_with_multiple_candidates": clusters_with_multiple,
+        "rejected_equivalent": int(reject_reasons.get("EQUIVALENT_MARKET_LOWER_SCORE", 0)),
+        "rejected_high_correlation": int(reject_reasons.get("HIGH_CORRELATION_LOWER_SCORE", 0)),
+        "rejected_contradictory": int(reject_reasons.get("CONTRADICTORY_WITH_SELECTED", 0)),
+    }
+
+
+def _avg_numeric_column(df: pd.DataFrame, column: str) -> float:
+    if df.empty or column not in df.columns:
+        return 0.0
+    values = pd.to_numeric(df[column], errors="coerce").dropna()
+    if values.empty:
+        return 0.0
+    return round(float(values.mean()), 6)
+
+
+def build_entry_quality_summary(df_final: pd.DataFrame, df_portfolio_rejected: pd.DataFrame) -> dict[str, object]:
+    if not df_final.empty and "entry_quality_tier" in df_final.columns:
+        tiers = Counter(df_final["entry_quality_tier"].fillna("missing"))
+    else:
+        tiers = Counter()
+    return {
+        "avg_entry_quality_score": _avg_numeric_column(df_final, "entry_quality_score"),
+        "picks_by_quality_tier": {tier: int(tiers.get(tier, 0)) for tier in ("A", "B", "C", "D")},
+        "portfolio_rejected_avg_quality_score": _avg_numeric_column(df_portfolio_rejected, "entry_quality_score"),
     }
 
 
@@ -180,6 +265,11 @@ def build_quality_report(
     return {
         "run_id": run_id,
         "target_date": target_date,
+        "pricing_variant": pricing_variant_from_payload(runtime_config.payload),
+        "xg_residual_adjustment": quality_xg_residual_adjustment_payload(runtime_config.payload),
+        "xg_residual_summary": build_xg_residual_summary(df_raw_candidates),
+        "portfolio_correlation_summary": build_portfolio_correlation_summary(df_final, df_portfolio_rejected),
+        "entry_quality_summary": build_entry_quality_summary(df_final, df_portfolio_rejected),
         "pre_snapshot_discard_counts": pre_snapshot_summary["pre_snapshot_discard_counts"],
         "pre_snapshot_discard_samples": pre_snapshot_summary["pre_snapshot_discard_samples"],
         "strategy_config": {
@@ -244,7 +334,11 @@ def build_quality_report(
                 or processing_discard_counts.get("unresolved_team_match", 0)
             ),
             "registry_stale_leagues": sorted(registry_stale_leagues),
-            "registry_pending": bool(unique_pending_counts.get("pending_review", 0) or unique_pending_counts.get("blocked", 0)),
+            "registry_pending": bool(
+                unique_pending_counts.get("auto_fuzzy_high", 0)
+                or unique_pending_counts.get("pending_review", 0)
+                or unique_pending_counts.get("blocked", 0)
+            ),
             "registry_issue_counts_by_league": to_sorted_dict(unique_pending_by_league),
             "registry_recommendation": "Rode python3 scripts/sync_team_aliases.py --league '<liga>' para ligas com MATCH_FUZZY ou unresolved_team_match.",
             "registry_recommended_commands": [
@@ -264,6 +358,7 @@ def build_quality_report(
             "safety_gate_blocked_by_flag": to_sorted_dict(Counter("|".join(df_blocked_candidates.get("safety_gate_reason", pd.Series(dtype=object)).fillna("")).split("|"))) if not df_blocked_candidates.empty else {},
             "portfolio_rejected_total": int(len(df_portfolio_rejected)),
             "portfolio_rejected_by_reason": to_sorted_dict(Counter(df_portfolio_rejected.get("portfolio_reject_reason", pd.Series(dtype=object)).fillna("missing"))) if not df_portfolio_rejected.empty else {},
+            "portfolio_correlation_summary": build_portfolio_correlation_summary(df_final, df_portfolio_rejected),
             "discard_reason_counts": to_sorted_dict(processing_discard_counts),
         },
         "safety": {
@@ -313,6 +408,10 @@ def build_snapshot_rejection_report(
         "run_id": run_id,
         "target_date": target_date,
         "quality_status": "rejected",
+        "pricing_variant": pricing_variant_from_payload(runtime_config.payload),
+        "xg_residual_adjustment": quality_xg_residual_adjustment_payload(runtime_config.payload),
+        "xg_residual_summary": build_xg_residual_summary(pd.DataFrame()),
+        "entry_quality_summary": build_entry_quality_summary(pd.DataFrame(), pd.DataFrame()),
         "pre_snapshot_discard_counts": pre_snapshot_summary["pre_snapshot_discard_counts"],
         "pre_snapshot_discard_samples": pre_snapshot_summary["pre_snapshot_discard_samples"],
         "error": {

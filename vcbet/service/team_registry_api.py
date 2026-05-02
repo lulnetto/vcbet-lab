@@ -37,6 +37,12 @@ PENDING_OPTIONAL_COLUMNS = []
 REJECTED_REVIEW_FILE = DEFAULT_REVIEW_FILE.with_name("alias_review_rejected.csv")
 QUARANTINE_REGISTRY_FILE = DEFAULT_REGISTRY_FILE.with_name("betano_footystats_aliases_quarantine.csv")
 LOW_CONFIDENCE_THRESHOLD = 0.75
+EUROPEAN_STANDINGS_DIAGNOSTIC_LEAGUES = {"Liga Europa", "Liga Conferência"}
+STANDINGS_FAILURE_TOKENS = {
+    "phase_standings_not_found",
+    "standings_not_found_or_not_rendered",
+    "missing_team_universe",
+}
 
 
 def _now_str() -> str:
@@ -369,6 +375,8 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
     footystats_name = str(
         payload.get("footystats_name")
         or payload.get("suggested_footystats_name")
+        or payload.get("suggested_fotmob_name")
+        or base.get("suggested_fotmob_name")
         or base.get("suggested_footystats_name")
         or ""
     ).strip()
@@ -376,7 +384,7 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         raise ValueError("league, betano_name e footystats_name são obrigatórios para aprovar alias.")
     validation_base = {
         **base,
-        "top_score": payload.get("top_score") or base.get("top_score") or payload.get("match_confidence") or "",
+        "top_score": payload.get("top_score") or base.get("top_score") or payload.get("match_confidence") or base.get("match_confidence") or "",
         "coverage_status": payload.get("coverage_status") or base.get("coverage_status") or "",
     }
     warnings = registry_row_warnings(validation_base)
@@ -417,7 +425,7 @@ def approve_registry_alias(project_root: Path, payload: dict[str, Any]) -> dict[
         "betano_url": str(base.get("betano_url", "")).strip(),
         "footystats_name": footystats_name,
         "match_status": "MATCH_REGISTRY_APPROVED",
-        "match_confidence": str(payload.get("match_confidence") or base.get("top_score") or "1.0000"),
+        "match_confidence": str(payload.get("match_confidence") or base.get("match_confidence") or base.get("top_score") or "1.0000"),
         "match_method": str(payload.get("match_method") or "registry_review"),
         "approved_at": now,
         "source": "ui_review",
@@ -576,13 +584,17 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
     try:
         summary = sync_league(args, league, root=project_root)
     except Exception as exc:
-        return {"status": "error", "league": league, "error": str(exc), "xg_file_used": str(xg_file or "")}
+        result = {"status": "error", "league": league, "error": str(exc), "xg_file_used": str(xg_file or "")}
+        diagnostic = _standings_fetch_diagnostic(result)
+        if diagnostic:
+            result["standings_diagnostic"] = diagnostic
+        return result
 
     coverage = summary.get("coverage") or {}
     missing = len(coverage.get("footystats_without_betano_candidate") or []) + len(coverage.get("betano_without_footystats_candidate") or [])
     sync_status = str(summary.get("status") or "ok")
     coverage_status = str(summary.get("coverage_status") or ("pending_review" if int(summary.get("review_count") or 0) else ("incomplete" if missing else "ok")))
-    return {
+    result = {
         "status": sync_status,
         "league": league,
         "phase_id": (summary.get("parse_diagnostics") or {}).get("phase_id", ""),
@@ -600,6 +612,29 @@ def sync_registry_league(project_root: Path, payload: dict[str, Any]) -> dict[st
         "review_written": int(summary.get("review_written") or 0),
         "source": summary.get("source"),
         "xg_file_used": str(xg_file or ""),
+    }
+    diagnostic = _standings_fetch_diagnostic(result)
+    if diagnostic:
+        result["standings_diagnostic"] = diagnostic
+    return result
+
+
+def _standings_fetch_diagnostic(result: dict[str, Any]) -> dict[str, str] | None:
+    league = str(result.get("league") or "")
+    if league not in EUROPEAN_STANDINGS_DIAGNOSTIC_LEAGUES:
+        return None
+    status_blob = " ".join(
+        str(result.get(key) or "")
+        for key in ("status", "coverage_status", "debug_reason", "error")
+    )
+    if not any(token in status_blob for token in STANDINGS_FAILURE_TOKENS):
+        return None
+    return {
+        "league": league,
+        "status": str(result.get("status") or ""),
+        "coverage_status": str(result.get("coverage_status") or ""),
+        "reason": str(result.get("debug_reason") or result.get("error") or result.get("coverage_status") or ""),
+        "message": "sync-all não conseguiu buscar standings; pendências geradas por run continuam independentes do sync.",
     }
 
 
@@ -632,10 +667,17 @@ def sync_all_registry_leagues(project_root: Path, payload: dict[str, Any] | None
         })
         results.append(result)
     failed = [item for item in results if item.get("status") != "ok"]
+    standings_diagnostics = [
+        diagnostic
+        for item in results
+        for diagnostic in [_standings_fetch_diagnostic(item)]
+        if diagnostic
+    ]
     return {
         "status": "partial" if failed else "ok",
         "items": results,
         "failed": failed,
+        "standings_diagnostics": standings_diagnostics,
         "total": len(results),
         "xg_file_used": xg_file_used,
         "xg_source_policy": xg_source_policy,

@@ -38,6 +38,14 @@ class PendingAliasRow:
     registry_reason: str = ""
     registry_pending_key: str = ""
     recommended_action: str = "sync_team_registry"
+    suggested_fotmob_name: str = ""
+    suggested_fotmob_team_id: str = ""
+    match_confidence: str = ""
+    match_method: str = ""
+    review_reason: str = ""
+    source: str = "run_pipeline"
+    event_url: str = ""
+    updated_at: str = ""
 
 
 def now_str() -> str:
@@ -174,6 +182,14 @@ PENDING_ALIAS_COLUMNS = [
     "registry_reason",
     "registry_pending_key",
     "recommended_action",
+    "suggested_fotmob_name",
+    "suggested_fotmob_team_id",
+    "match_confidence",
+    "match_method",
+    "review_reason",
+    "source",
+    "event_url",
+    "updated_at",
 ]
 
 
@@ -184,7 +200,7 @@ def write_pending_aliases(rows: list[PendingAliasRow], output_file: str | Path) 
     unique_rows = []
     seen = set()
     for row in rows:
-        key = (row.league, row.source_name, row.side)
+        key = (row.league, row.source_name, row.suggestion or row.suggested_fotmob_name or "")
         if key in seen:
             continue
         seen.add(key)

@@ -4,8 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
+from vcbet.core.pipeline.team_resolution import resolve_row_teams
 from vcbet.core.team_matcher import match_team_name
 from vcbet.team_identity.registry_repository import APPROVED_COLUMNS, safe_write_registry_rows
+from vcbet.team_identity.review_writer import upsert_pending_to_functional_file
 
 
 class TeamMatcherRegistryTest(unittest.TestCase):
@@ -115,6 +119,128 @@ class TeamMatcherRegistryTest(unittest.TestCase):
             )
             # Não deve ser MATCH_REGISTRY_APPROVED porque o footystats_name não bate
             self.assertNotEqual(result.match_status, "MATCH_REGISTRY_APPROVED")
+
+    def test_auto_fuzzy_high_creates_functional_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            df_xg_liga = pd.DataFrame([
+                {"league": "Liga Europa", "team_name": "Braga", "source": "fotmob", "source_team_id": "10264"},
+                {"league": "Liga Europa", "team_name": "Freiburg", "source": "fotmob", "source_team_id": "8358"},
+            ])
+            pending_rows = []
+            resolved = resolve_row_teams(
+                linha=pd.Series({
+                    "league": "Liga Europa",
+                    "home_team": "SC Braga",
+                    "away_team": "Freiburg",
+                    "match_name": "SC Braga - Freiburg",
+                    "event_url": "https://example.test/event",
+                }),
+                df_xg_liga=df_xg_liga,
+                run_id="run_fuzzy",
+                generated_at="2026-04-30 12:00:00",
+                pending_rows=pending_rows,
+                pending_seen=set(),
+                registry_stale_leagues=set(),
+                status_counts={},
+                high_threshold=90,
+                review_threshold=75,
+                registry_file=tmp_path / "empty_registry.csv",
+            )
+
+            self.assertIsNotNone(resolved)
+            self.assertEqual(len(pending_rows), 1)
+            self.assertEqual(pending_rows[0].match_status, "auto_fuzzy_high")
+            self.assertEqual(pending_rows[0].review_reason, "MATCH_FUZZY_HIGH_CONFIDENCE")
+
+            functional_pending = tmp_path / "team_registry" / "alias_review_pending.csv"
+            upsert_pending_to_functional_file(pending_rows, path=functional_pending)
+
+            with functional_pending.open("r", newline="", encoding="utf-8-sig") as fh:
+                rows = list(csv.DictReader(fh, delimiter=";"))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["league"], "Liga Europa")
+            self.assertEqual(rows[0]["betano_name"], "SC Braga")
+            self.assertEqual(rows[0]["suggested_footystats_name"], "Braga")
+            self.assertEqual(rows[0]["suggested_fotmob_name"], "Braga")
+            self.assertEqual(rows[0]["suggested_fotmob_team_id"], "10264")
+            self.assertEqual(rows[0]["review_reason"], "MATCH_FUZZY_HIGH_CONFIDENCE")
+            self.assertEqual(rows[0]["match_method"], "auto_fuzzy_high")
+            self.assertEqual(rows[0]["source"], "run_pipeline")
+            self.assertEqual(rows[0]["run_id"], "run_fuzzy")
+            self.assertEqual(rows[0]["event_url"], "https://example.test/event")
+
+    def test_exact_match_does_not_create_pending(self):
+        df_xg_liga = pd.DataFrame([
+            {"league": "Liga Europa", "team_name": "Freiburg", "source": "fotmob", "source_team_id": "8358"},
+            {"league": "Liga Europa", "team_name": "Braga", "source": "fotmob", "source_team_id": "10264"},
+        ])
+        pending_rows = []
+        resolved = resolve_row_teams(
+            linha=pd.Series({
+                "league": "Liga Europa",
+                "home_team": "Freiburg",
+                "away_team": "Braga",
+                "match_name": "Freiburg - Braga",
+                "event_url": "",
+            }),
+            df_xg_liga=df_xg_liga,
+            run_id="run_exact",
+            generated_at="2026-04-30 12:00:00",
+            pending_rows=pending_rows,
+            pending_seen=set(),
+            registry_stale_leagues=set(),
+            status_counts={},
+            high_threshold=90,
+            review_threshold=75,
+            registry_file=Path("missing_registry.csv"),
+        )
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(pending_rows, [])
+
+    def test_registry_approved_does_not_create_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            registry_path = tmp_path / "registry.csv"
+            safe_write_registry_rows([
+                self._make_registry_row(
+                    league="Liga Europa",
+                    betano_name="SC Braga",
+                    footystats_name="Braga",
+                    fotmob_team_name="Braga",
+                    fotmob_team_id="10264",
+                ),
+            ], registry_path, fieldnames=APPROVED_COLUMNS)
+
+            df_xg_liga = pd.DataFrame([
+                {"league": "Liga Europa", "team_name": "Braga", "source": "fotmob", "source_team_id": "10264"},
+                {"league": "Liga Europa", "team_name": "Freiburg", "source": "fotmob", "source_team_id": "8358"},
+            ])
+            pending_rows = []
+            resolved = resolve_row_teams(
+                linha=pd.Series({
+                    "league": "Liga Europa",
+                    "home_team": "SC Braga",
+                    "away_team": "Freiburg",
+                    "match_name": "SC Braga - Freiburg",
+                    "event_url": "",
+                }),
+                df_xg_liga=df_xg_liga,
+                run_id="run_registry",
+                generated_at="2026-04-30 12:00:00",
+                pending_rows=pending_rows,
+                pending_seen=set(),
+                registry_stale_leagues=set(),
+                status_counts={},
+                high_threshold=90,
+                review_threshold=75,
+                registry_file=registry_path,
+            )
+
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved["home_match"].match_status, "MATCH_REGISTRY_APPROVED")
+            self.assertEqual(pending_rows, [])
 
     def test_dry_run_does_not_write_functional_pending(self):
         import subprocess

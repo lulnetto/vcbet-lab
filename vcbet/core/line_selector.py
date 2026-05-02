@@ -15,7 +15,10 @@ from vcbet.core.selection import (
     _record_exposure,
     _same_target,
     classify_correlation,
+    classify_correlation_detail,
+    correlation_cluster_key,
     market_family,
+    portfolio_selection_score,
 )
 from vcbet.core.selection.line_selection import select_top_picks as _select_top_picks
 
@@ -52,5 +55,8 @@ __all__ = [
     "_record_exposure",
     "_apply_asian_total_line_ladder",
     "classify_correlation",
+    "classify_correlation_detail",
+    "correlation_cluster_key",
+    "portfolio_selection_score",
     "select_top_picks",
 ]
