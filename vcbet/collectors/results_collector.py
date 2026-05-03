@@ -412,8 +412,10 @@ def event_status_to_bet_status(event: dict, home_goals: int | None, away_goals: 
     description = str(status.get("description") or "").strip()
     raw = f"{status_type}|{description}" if description else status_type
 
-    if status_type in {"finished", "afterpenalties", "aet"}:
+    if status_type in {"finished", "afterpenalties", "aet"} and home_goals is not None and away_goals is not None:
         return "settled", "high", "placar final coletado automaticamente via Sofascore", raw
+    if status_type in {"finished", "afterpenalties", "aet"}:
+        return "open", "low", "status final confirmado mas placar não foi coletado", raw
     if status_type in {"postponed"}:
         return "postponed", "medium", "partida adiada", raw
     if status_type in {"cancelled", "interrupted", "abandoned"}:
@@ -421,7 +423,7 @@ def event_status_to_bet_status(event: dict, home_goals: int | None, away_goals: 
     if status_type in {"notstarted", "inprogress"}:
         return "open", "medium", "partida ainda não finalizada", raw
     if home_goals is not None and away_goals is not None:
-        return "settled", "medium", "placar coletado; status não padronizado", raw
+        return "open", "low", "placar coletado mas status final não confirmado", raw
     return "open", "low", "não foi possível confirmar placar final", raw
 
 
@@ -479,14 +481,16 @@ def build_candidate_from_event(league: str, event: dict, source_url: str, settle
     home_goals = get_score_value(event.get("homeScore"))
     away_goals = get_score_value(event.get("awayScore"))
     bet_status, confidence, note, raw = event_status_to_bet_status(event, home_goals, away_goals)
+    final_home_goals = home_goals if bet_status == "settled" else None
+    final_away_goals = away_goals if bet_status == "settled" else None
 
     return MatchResult(
         league=league,
         match_name=f"{home_name} - {away_name}",
         home_team=home_name,
         away_team=away_name,
-        home_goals=home_goals,
-        away_goals=away_goals,
+        home_goals=final_home_goals,
+        away_goals=final_away_goals,
         bet_status=bet_status,
         settlement_source=settlement_source,
         settlement_confidence=confidence,

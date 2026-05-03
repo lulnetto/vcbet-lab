@@ -12,6 +12,9 @@ from vcbet.core.run_utils import now_str
 from vcbet.paths import DEFAULT_OVERRIDES_FILE
 RESULTS_REQUIRED_COLUMNS = {"match_name", "home_goals", "away_goals"}
 OVERRIDES_REQUIRED_COLUMNS = {"bet_id"}
+TERMINAL_STATUS_RAW_TYPES = {"finished", "afterpenalties", "aet"}
+NON_FINAL_NOTE_FRAGMENT = "ainda n\u00e3o finalizada"
+NON_FINAL_SETTLEMENT_ERROR = "Refusing to settle non-final match result"
 
 TEXT_COLUMNS = [
     "settlement_source",
@@ -23,6 +26,7 @@ TEXT_COLUMNS = [
     "override_updated_at",
     "auto_bet_status",
     "auto_settlement_status",
+    "auto_status_raw",
     "manual_bet_status",
     "manual_settlement_status",
     "final_bet_status",
@@ -64,6 +68,12 @@ def _is_missing(value) -> bool:
     return pd.isna(value) or value == ""
 
 
+def _clean_status(value) -> str:
+    if _is_missing(value):
+        return ""
+    return str(value).strip().lower()
+
+
 def _safe_float(value):
     if _is_missing(value):
         return None
@@ -87,6 +97,65 @@ def _first_present(*values, default=None):
         if not _is_missing(value):
             return value
     return default
+
+
+def _status_raw_type(value) -> str:
+    text = _clean_status(value)
+    return text.split("|", 1)[0].strip() if text else ""
+
+
+def _is_terminal_status_raw(value) -> bool:
+    return _status_raw_type(value) in TERMINAL_STATUS_RAW_TYPES
+
+
+def _auto_result_is_settleable(row: pd.Series) -> bool:
+    return (
+        _clean_status(row.get("auto_bet_status")) == "settled"
+        and _clean_status(row.get("settlement_confidence")) == "high"
+        and _is_terminal_status_raw(row.get("auto_status_raw"))
+        and _safe_int(row.get("auto_home_goals")) is not None
+        and _safe_int(row.get("auto_away_goals")) is not None
+    )
+
+
+def _result_row_is_settleable(result_row: pd.Series) -> bool:
+    return (
+        _clean_status(result_row.get("bet_status")) == "settled"
+        and _clean_status(result_row.get("settlement_confidence")) == "high"
+        and _is_terminal_status_raw(result_row.get("status_raw"))
+        and _safe_int(result_row.get("home_goals")) is not None
+        and _safe_int(result_row.get("away_goals")) is not None
+    )
+
+
+def validate_no_non_final_settlements(df: pd.DataFrame) -> None:
+    if df.empty or "final_bet_status" not in df.columns:
+        return
+
+    final_status = df["final_bet_status"].fillna("").astype(str).str.strip().str.lower()
+    settled = final_status.eq("settled")
+    if not settled.any():
+        return
+
+    if "settlement_note" in df.columns:
+        note = df["settlement_note"].fillna("").astype(str).str.lower()
+        invalid_note = settled & note.str.contains(NON_FINAL_NOTE_FRAGMENT, na=False, regex=False)
+    else:
+        invalid_note = pd.Series(False, index=df.index)
+
+    if "auto_bet_status" in df.columns:
+        auto_status = df["auto_bet_status"].fillna("").astype(str).str.strip().str.lower()
+        invalid_auto_status = settled & auto_status.ne("settled")
+    else:
+        invalid_auto_status = settled
+
+    invalid = invalid_note | invalid_auto_status
+    if invalid.any():
+        bet_ids = []
+        if "bet_id" in df.columns:
+            bet_ids = [str(value) for value in df.loc[invalid, "bet_id"].head(5).tolist()]
+        suffix = f" | bet_id(s): {', '.join(bet_ids)}" if bet_ids else ""
+        raise RuntimeError(f"{NON_FINAL_SETTLEMENT_ERROR}{suffix}")
 
 
 def settle_total_like(side: str, line: float, value: int) -> str:
@@ -313,21 +382,29 @@ def apply_results_file(ledger_df: pd.DataFrame, results_file: str | Path) -> pd.
             continue
 
         result_row = results_df.loc[best_idx]
-        auto_bet_status = result_row.get("bet_status", "settled")
-        updated.at[idx, "auto_home_goals"] = result_row.get("home_goals")
-        updated.at[idx, "auto_away_goals"] = result_row.get("away_goals")
-        updated.at[idx, "auto_bet_status"] = auto_bet_status
-        updated.at[idx, "auto_settlement_status"] = _infer_auto_settlement_status(
+        auto_bet_status = result_row.get("bet_status", "open")
+        auto_result_settleable = _result_row_is_settleable(result_row)
+        auto_settlement_status = _infer_auto_settlement_status(
             str(auto_bet_status),
             result_row.get("settlement_status"),
         )
+        if not auto_result_settleable and _clean_status(auto_bet_status) not in {"cancelled", "voided", "unmatched"}:
+            auto_settlement_status = "pending"
+        updated.at[idx, "auto_home_goals"] = _safe_int(result_row.get("home_goals")) if auto_result_settleable else pd.NA
+        updated.at[idx, "auto_away_goals"] = _safe_int(result_row.get("away_goals")) if auto_result_settleable else pd.NA
+        updated.at[idx, "auto_bet_status"] = auto_bet_status
+        updated.at[idx, "auto_settlement_status"] = auto_settlement_status
         updated.at[idx, "settlement_source"] = result_row.get("settlement_source", "results_file")
-        updated.at[idx, "settlement_confidence"] = result_row.get("settlement_confidence", "auto")
+        updated.at[idx, "settlement_confidence"] = result_row.get("settlement_confidence", "low")
+        updated.at[idx, "auto_status_raw"] = result_row.get("status_raw", pd.NA)
 
         note_parts = []
         base_note = result_row.get("settlement_note", pd.NA)
         if not _is_missing(base_note):
             note_parts.append(str(base_note))
+        status_raw = result_row.get("status_raw", pd.NA)
+        if not _is_missing(status_raw):
+            note_parts.append(f"status_raw={status_raw}")
         matched_via = result_row.get("matched_via", pd.NA)
         if not _is_missing(matched_via):
             note_parts.append(f"matched_via={matched_via}")
@@ -390,27 +467,48 @@ def apply_overrides_file(ledger_df: pd.DataFrame, overrides_file: str | Path) ->
 def resolve_final_fields(ledger_df: pd.DataFrame) -> pd.DataFrame:
     updated = _prepare_ledger_dtypes(ledger_df)
     for idx, row in updated.iterrows():
-        final_home_goals = _first_present(row.get("manual_home_goals"), row.get("auto_home_goals"))
-        final_away_goals = _first_present(row.get("manual_away_goals"), row.get("auto_away_goals"))
-        final_bet_status = _first_present(row.get("manual_bet_status"), row.get("auto_bet_status"), row.get("final_bet_status"), default="open")
-        final_settlement_status = _first_present(
-            row.get("manual_settlement_status"),
-            row.get("auto_settlement_status"),
-            row.get("final_settlement_status"),
-            default="pending",
+        auto_result_settleable = _auto_result_is_settleable(row)
+        preserve_existing_settled = (
+            not auto_result_settleable
+            and _clean_status(row.get("final_bet_status")) == "settled"
+            and _clean_status(row.get("auto_bet_status")) == "settled"
+            and _is_missing(row.get("auto_status_raw"))
         )
+        if preserve_existing_settled:
+            final_home_goals = row.get("final_home_goals")
+            final_away_goals = row.get("final_away_goals")
+        elif auto_result_settleable:
+            final_home_goals = _first_present(row.get("manual_home_goals"), row.get("auto_home_goals"))
+            final_away_goals = _first_present(row.get("manual_away_goals"), row.get("auto_away_goals"))
+        else:
+            final_home_goals = pd.NA
+            final_away_goals = pd.NA
+        if preserve_existing_settled:
+            final_bet_status = row.get("final_bet_status")
+            final_settlement_status = row.get("final_settlement_status")
+        else:
+            final_bet_status = _first_present(row.get("manual_bet_status"), row.get("auto_bet_status"), row.get("final_bet_status"), default="open")
+            final_settlement_status = _first_present(
+                row.get("manual_settlement_status"),
+                row.get("auto_settlement_status"),
+                row.get("final_settlement_status"),
+                default="pending",
+            )
         final_odd_fechamento = _first_present(row.get("manual_odd_fechamento"), row.get("auto_odd_fechamento"), row.get("final_odd_fechamento"))
 
         home_goals = _safe_int(final_home_goals)
         away_goals = _safe_int(final_away_goals)
+        normalized_final_bet_status = _clean_status(final_bet_status)
 
-        if final_bet_status in {"voided", "cancelled"}:
+        if preserve_existing_settled:
+            pass
+        elif normalized_final_bet_status in {"voided", "cancelled"}:
             final_settlement_status = "void"
-        elif final_bet_status == "postponed":
+        elif normalized_final_bet_status == "postponed":
             final_settlement_status = "pending"
-        elif final_bet_status == "unmatched":
+        elif normalized_final_bet_status == "unmatched":
             final_settlement_status = "unmatched"
-        elif home_goals is not None and away_goals is not None and str(final_bet_status) not in {"open", "error", "postponed", "unmatched"}:
+        elif auto_result_settleable and home_goals is not None and away_goals is not None:
             final_settlement_status = settle_bet(
                 market_type=str(row["market_type"]),
                 side=str(row["side"]),
@@ -420,16 +518,12 @@ def resolve_final_fields(ledger_df: pd.DataFrame) -> pd.DataFrame:
                 away_goals=away_goals,
             )
             final_bet_status = "settled"
-        elif home_goals is not None and away_goals is not None and str(final_bet_status) == "open":
-            final_settlement_status = settle_bet(
-                market_type=str(row["market_type"]),
-                side=str(row["side"]),
-                line=_safe_float(row.get("line")),
-                target_team_role=str(row.get("target_team_role", "geral")),
-                home_goals=home_goals,
-                away_goals=away_goals,
-            )
-            final_bet_status = "settled"
+        else:
+            if normalized_final_bet_status == "settled":
+                final_bet_status = "open"
+            final_settlement_status = "pending"
+            home_goals = None
+            away_goals = None
 
         updated.at[idx, "final_home_goals"] = home_goals if home_goals is not None else pd.NA
         updated.at[idx, "final_away_goals"] = away_goals if away_goals is not None else pd.NA
@@ -462,6 +556,7 @@ def settle_ledger(
 ) -> tuple[Path, int]:
     def mutate(ledger_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
         updated = _prepare_ledger_dtypes(ledger_df)
+        validate_no_non_final_settlements(updated)
         if results_file:
             updated = apply_results_file(updated, results_file)
         if overrides_file:
@@ -469,6 +564,7 @@ def settle_ledger(
             if override_path.exists() and override_path.stat().st_size > 0:
                 updated = apply_overrides_file(updated, override_path)
         updated = resolve_final_fields(updated)
+        validate_no_non_final_settlements(updated)
         settled_count = int((updated["final_bet_status"].astype(str) == "settled").sum())
         return updated, settled_count
 
