@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,13 +10,14 @@ from pathlib import Path
 import pandas as pd
 
 from vcbet.core.pick_features import build_candidate_row
+from vcbet.core.decision_policy import evaluate_pick_candidate_with_details
 from vcbet.core.pipeline.output_writer import EXPORT_COLS, candidate_artifact_paths, write_candidate_artifacts
 from vcbet.core.pipeline.pricing_stage import build_priced_candidates
 from vcbet.core.pipeline.quality_report import build_pre_snapshot_discard_summary
 from vcbet.core.pipeline.team_resolution import prepare_team_resolution_state
 from vcbet.core.risk_policy import assess_risk_flags, safety_gate_flags
 from vcbet.core.market_thresholds import get_critical_flags
-from vcbet.core.strategy_config import configure_runtime
+from vcbet.core.strategy_config import DEFAULT_CONFIG_PAYLOAD, configure_runtime
 
 
 class PipelineAuditArtifactsTest(unittest.TestCase):
@@ -98,6 +101,35 @@ class PipelineAuditArtifactsTest(unittest.TestCase):
             },
         ]
 
+    def _configure_inline_payload(self, payload: dict) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "strategy.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            configure_runtime(config_file=path)
+
+    def _decision_candidate(self, market_type: str = "asian_total", odd: float = 1.8, league: str = "Liga Test") -> dict:
+        return {
+            "match_datetime": "2026-05-01 15:00",
+            "league": league,
+            "home_team": "Home FC",
+            "away_team": "Away FC",
+            "market_type": market_type,
+            "market_scope": "full_time",
+            "selection_raw": "Mais de 2.5",
+            "side": "over",
+            "line": 2.5,
+            "target_team_role": "geral",
+            "target_team_name": "geral",
+            "odd_entrada": odd,
+            "odd_justa": 1.55,
+            "ev_decimal": 0.15,
+            "mu_total": 2.8,
+            "match_status_home": "auto_exact",
+            "match_status_away": "auto_exact",
+            "xg_fallback_home": False,
+            "xg_fallback_away": False,
+        }
+
     def test_legacy_v2_keeps_xg_only_pricing(self) -> None:
         pricing = self._pricing_fixture("legacy_v2", self._xg_rows_with_residuals())
         raw = pricing["raw_candidate_rows"][0]
@@ -136,6 +168,53 @@ class PipelineAuditArtifactsTest(unittest.TestCase):
 
         self.assertEqual(safety_gate_flags(sorted(gd_flags)), [])
         self.assertFalse(gd_flags.intersection(get_critical_flags()))
+
+    def test_enabled_markets_blocks_disabled_market_in_pick_filter(self) -> None:
+        payload = deepcopy(DEFAULT_CONFIG_PAYLOAD)
+        payload["enabled_markets"] = ["asian_total"]
+        self._configure_inline_payload(payload)
+
+        evaluated, reason, rejected = evaluate_pick_candidate_with_details(self._decision_candidate(market_type="btts"))
+
+        self.assertIsNone(evaluated)
+        self.assertEqual(reason, "market_disabled_by_config")
+        self.assertEqual(rejected["safety_reject_reason"], "market_disabled_by_config")
+
+    def test_allowed_odd_ranges_gate_candidates(self) -> None:
+        payload = deepcopy(DEFAULT_CONFIG_PAYLOAD)
+        payload["allowed_odd_ranges"] = [{"min": 1.5, "max": 2.0}, {"min": 2.5, "max": 3.0}]
+        payload["markets"]["asian_total"]["standard_max"] = 3.0
+        payload["markets"]["asian_total"]["extended_max"] = 3.2
+        self._configure_inline_payload(payload)
+
+        blocked, blocked_reason, _ = evaluate_pick_candidate_with_details(self._decision_candidate(odd=2.2))
+        low_range, low_reason, _ = evaluate_pick_candidate_with_details(self._decision_candidate(odd=1.8))
+        high_range, high_reason, _ = evaluate_pick_candidate_with_details(self._decision_candidate(odd=2.7))
+
+        self.assertIsNone(blocked)
+        self.assertEqual(blocked_reason, "odd_outside_allowed_ranges")
+        self.assertIsNotNone(low_range)
+        self.assertIsNone(low_reason)
+        self.assertIsNotNone(high_range)
+        self.assertIsNone(high_reason)
+
+    def test_league_filter_allowlist_blocks_unlisted_league(self) -> None:
+        payload = deepcopy(DEFAULT_CONFIG_PAYLOAD)
+        payload["league_filter"] = {
+            "enabled": True,
+            "mode": "allowlist",
+            "allowed_leagues": ["Liga Permitida"],
+            "blocked_leagues": [],
+        }
+        self._configure_inline_payload(payload)
+
+        blocked, blocked_reason, _ = evaluate_pick_candidate_with_details(self._decision_candidate(league="Liga Test"))
+        allowed, allowed_reason, _ = evaluate_pick_candidate_with_details(self._decision_candidate(league="Liga Permitida"))
+
+        self.assertIsNone(blocked)
+        self.assertEqual(blocked_reason, "league_disabled_by_config")
+        self.assertIsNotNone(allowed)
+        self.assertIsNone(allowed_reason)
 
     def test_match_fuzzy_still_blocks_safety_gate(self) -> None:
         configure_runtime(config_name="legacy_v2")

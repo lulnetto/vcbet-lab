@@ -1,10 +1,94 @@
 {
   "metadata": {
     "name": "champion_strict",
-    "label": "Champion Strict",
+    "label": "Default",
     "description": "Configuração atual, mais restritiva e focada em controle de risco."
   },
   "data_quality": {
     "max_snapshot_age_hours": 36
+  },
+  "pricing_variant": "xg_only",
+  "enabled_markets": [
+    "asian_total",
+    "total_goals",
+    "asian_handicap",
+    "draw_no_bet",
+    "team_total",
+    "btts"
+  ],
+  "markets": {
+    "asian_total": {
+      "odd_min": 1.7,
+      "standard_max": 2.6,
+      "extended_max": 3,
+      "edge_min": 0.06,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "total_goals": {
+      "odd_min": 1.65,
+      "standard_max": 2.6,
+      "extended_max": 3.2,
+      "edge_min": 0.06,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "asian_handicap": {
+      "odd_min": 1.7,
+      "standard_max": 2.6,
+      "extended_max": 3,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "draw_no_bet": {
+      "odd_min": 1.7,
+      "standard_max": 2.6,
+      "extended_max": 3,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": false
+    },
+    "team_total": {
+      "odd_min": 1.7,
+      "standard_max": 2.6,
+      "extended_max": 3,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": false
+    },
+    "btts": {
+      "odd_min": 1.7,
+      "standard_max": 2.4,
+      "extended_max": 2.8,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": false
+    }
+  },
+  "league_filter": {
+    "enabled": false,
+    "mode": "disabled",
+    "allowed_leagues": [],
+    "blocked_leagues": []
+  },
+  "xg_residual_adjustment": {
+    "enabled": false,
+    "markets": []
+  },
+  "rules": {
+    "portfolio": {
+      "max_picks_per_match": 2,
+      "correlation_selection": {
+        "enabled": true,
+        "ev_gap_override_pp": 2
+      }
+    }
   }
 }

@@ -23,6 +23,7 @@
     <button class="tab-btn active" data-tab="operacao">Hoje</button>
     <button class="tab-btn" data-tab="dashboard">Carteira</button>
     <button class="tab-btn" data-tab="replay">Replay Lab</button>
+    <button class="tab-btn" data-tab="configs">Configs</button>
     <button class="tab-btn" data-tab="aliases">Qualidade de Dados</button>
     <button class="tab-btn" data-tab="jobs">Monitor</button>
   </div>
@@ -315,6 +316,44 @@
     </details>
   </section>
 
+  <section id="tab-configs" class="tab">
+    <div class="config-presets-layout">
+      <div class="card">
+        <div class="section-title">
+          <h2>Configs</h2>
+          <button class="ghost" onclick="loadConfigPresets(true)">Atualizar</button>
+        </div>
+        <div class="table-wrap"><table id="tableConfigPresets"></table></div>
+      </div>
+
+      <div class="card">
+        <h2>Novo preset</h2>
+        <div class="row">
+          <div><label>Origem</label><select id="configPresetCreateSource"></select></div>
+          <div><label>Nome técnico</label><input id="configPresetCreateName" placeholder="gd_safe_odds_v1"></div>
+          <div><label>Label</label><input id="configPresetCreateLabel" placeholder="GD Safe Odds v1"></div>
+        </div>
+        <div style="margin-top:10px;"><label>Description</label><textarea id="configPresetCreateDescription"></textarea></div>
+        <div class="inline" style="margin-top:10px;">
+          <button class="green" onclick="createConfigPresetFromForm()">Criar preset</button>
+          <span class="muted" id="configPresetCreateHint">Nomes usam apenas letras minúsculas, números e underscore.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <h2>Editor</h2>
+        <div class="inline">
+          <button class="ghost small" onclick="validateCurrentConfigPreset()">Validar</button>
+          <button class="green small" onclick="saveCurrentConfigPreset()">Salvar</button>
+        </div>
+      </div>
+      <div id="configPresetMessage" class="muted">Selecione uma config para editar.</div>
+      <div id="configPresetEditor" class="state-box" style="margin-top:12px;"><strong>Nenhuma config selecionada.</strong>Use a lista acima para abrir um preset.</div>
+    </div>
+  </section>
+
   <section id="tab-jobs" class="tab">
     <div class="jobs-grid">
       <div class="card">
@@ -341,6 +380,7 @@
 <script src="/static/js/screens/dashboard.js"></script>
 <script src="/static/js/screens/jobs.js"></script>
 <script src="/static/js/screens/replay.js"></script>
+<script src="/static/js/screens/config_presets.js"></script>
 <script src="/static/js/screens/team_registry.js"></script>
 <script src="/static/js/screens/aliases.js"></script>
 <script src="/static/js/screens/cockpit.js"></script>

@@ -112,6 +112,7 @@ check_url "/static/js/api.js"
 check_url "/static/js/state.js"
 check_url "/static/js/components.js"
 check_url "/static/js/screens.js"
+check_url "/static/js/screens/config_presets.js"
 check_url "/static/js/app.js"
 
 NODE_BIN="$(find_node || true)"
@@ -125,6 +126,7 @@ for js_file in \
   vcbet/service/static/js/state.js \
   vcbet/service/static/js/components.js \
   vcbet/service/static/js/screens.js \
+  vcbet/service/static/js/screens/config_presets.js \
   vcbet/service/static/js/app.js
 do
   "$NODE_BIN" --check "$js_file" >/dev/null

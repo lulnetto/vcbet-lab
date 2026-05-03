@@ -14,6 +14,21 @@ class ConfigResolutionError(FileNotFoundError):
     pass
 
 
+AVAILABLE_MARKETS: tuple[str, ...] = (
+    "asian_total",
+    "total_goals",
+    "asian_handicap",
+    "draw_no_bet",
+    "team_total",
+    "btts",
+)
+
+AVAILABLE_PRICING_VARIANTS: tuple[str, ...] = (
+    "xg_only",
+    "xg_residual_adjusted_v1",
+)
+
+
 DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
     "metadata": {
         "name": "champion_strict",
@@ -212,6 +227,15 @@ DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
 
 
 @dataclass(frozen=True)
+class OddRange:
+    min: float
+    max: float
+
+    def contains(self, value: float) -> bool:
+        return self.min <= value <= self.max
+
+
+@dataclass(frozen=True)
 class MarketThreshold:
     market_type: str
     odd_min: float
@@ -221,12 +245,26 @@ class MarketThreshold:
     edge_strong: float
     edge_premium_extended: float
     is_primary_market: bool = False
+    allowed_odd_ranges: tuple[OddRange, ...] = ()
+
+
+@dataclass(frozen=True)
+class ConfigValidationIssue:
+    severity: str
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"severity": self.severity, "path": self.path, "message": self.message}
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
     payload: dict[str, Any]
     markets: dict[str, MarketThreshold]
+    enabled_markets: set[str] | None
+    allowed_odd_ranges: tuple[OddRange, ...]
+    league_filter: dict[str, Any]
     market_priority: dict[str, int]
     critical_flags: set[str]
     confidence_caps: dict[str, int]
@@ -259,11 +297,33 @@ class RuntimeConfig:
 
     @property
     def allowed_markets(self) -> set[str]:
+        if self.enabled_markets is not None:
+            return set(self.enabled_markets)
         return set(self.markets.keys())
 
     @property
     def primary_markets(self) -> set[str]:
-        return {name for name, cfg in self.markets.items() if cfg.is_primary_market}
+        return {name for name, cfg in self.markets.items() if cfg.is_primary_market and name in self.allowed_markets}
+
+    def allowed_odd_ranges_for_market(self, market_type: str) -> tuple[OddRange, ...]:
+        market = self.markets.get(market_type)
+        if market and market.allowed_odd_ranges:
+            return market.allowed_odd_ranges
+        return self.allowed_odd_ranges
+
+    def is_league_allowed(self, league: str) -> bool:
+        cfg = self.league_filter if isinstance(self.league_filter, dict) else {}
+        mode = str(cfg.get("mode") or "disabled").strip().lower()
+        if not cfg.get("enabled", mode != "disabled") or mode == "disabled":
+            return True
+        league_key = str(league or "").strip().casefold()
+        allowed = {str(item).strip().casefold() for item in cfg.get("allowed_leagues", []) if str(item).strip()}
+        blocked = {str(item).strip().casefold() for item in cfg.get("blocked_leagues", []) if str(item).strip()}
+        if mode == "allowlist":
+            return bool(league_key and league_key in allowed)
+        if mode == "blocklist":
+            return not (league_key and league_key in blocked)
+        return True
 
     @property
     def max_snapshot_age_hours(self) -> float:
@@ -292,6 +352,30 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
+def _normalize_odd_ranges(value: Any) -> tuple[OddRange, ...]:
+    if not value:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("allowed_odd_ranges must be a list")
+    ranges: list[OddRange] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("allowed_odd_ranges items must be objects")
+        ranges.append(OddRange(min=float(item["min"]), max=float(item["max"])))
+    return tuple(ranges)
+
+
+def resolve_strategy_config_payload(payload: dict[str, Any], config_name: str | None = None) -> dict[str, Any]:
+    merged = _deep_merge(DEFAULT_CONFIG_PAYLOAD, payload)
+    metadata = merged.setdefault("metadata", {})
+    raw_metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+    if config_name and not raw_metadata.get("name"):
+        metadata["name"] = config_name
+    metadata.setdefault("name", config_name or "default")
+    metadata.setdefault("label", metadata["name"])
+    return merged
+
+
 def _build_runtime_config(payload: dict[str, Any], source_path: str | None = None) -> RuntimeConfig:
     normalized = deepcopy(payload)
     metadata = normalized.setdefault("metadata", {})
@@ -309,12 +393,25 @@ def _build_runtime_config(payload: dict[str, Any], source_path: str | None = Non
             edge_strong=float(cfg["edge_strong"]),
             edge_premium_extended=float(cfg["edge_premium_extended"]),
             is_primary_market=bool(cfg.get("is_primary_market", False)),
+            allowed_odd_ranges=_normalize_odd_ranges(cfg.get("allowed_odd_ranges")),
         )
         for market_type, cfg in normalized.get("markets", {}).items()
     }
+    enabled_value = normalized.get("enabled_markets")
+    enabled_markets = (
+        {str(item) for item in enabled_value}
+        if isinstance(enabled_value, list)
+        else None
+    )
+    league_filter = normalized.get("league_filter", {})
+    if not isinstance(league_filter, dict):
+        league_filter = {}
     return RuntimeConfig(
         payload=normalized,
         markets=markets,
+        enabled_markets=enabled_markets,
+        allowed_odd_ranges=_normalize_odd_ranges(normalized.get("allowed_odd_ranges")),
+        league_filter=dict(league_filter),
         market_priority={k: int(v) for k, v in normalized.get("market_priority", {}).items()},
         critical_flags=set(normalized.get("critical_flags", [])),
         confidence_caps={k: int(v) for k, v in normalized.get("confidence_caps", {}).items()},
@@ -346,17 +443,22 @@ def resolve_config_file(config_name: str | None = None, config_file: str | Path 
     return None
 
 
+def load_raw_config_payload(config_name: str | None = None, config_file: str | Path | None = None) -> tuple[dict[str, Any], str | None]:
+    explicit_request = config_name is not None or config_file is not None
+    path = resolve_config_file(config_name=config_name, config_file=config_file, strict=explicit_request)
+    if path is None:
+        return deepcopy(DEFAULT_CONFIG_PAYLOAD), None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload, str(path)
+
+
 def load_config_payload(config_name: str | None = None, config_file: str | Path | None = None) -> tuple[dict[str, Any], str | None]:
     explicit_request = config_name is not None or config_file is not None
     path = resolve_config_file(config_name=config_name, config_file=config_file, strict=explicit_request)
     if path is None:
         return deepcopy(DEFAULT_CONFIG_PAYLOAD), None
     payload = json.loads(path.read_text(encoding="utf-8"))
-    merged = _deep_merge(DEFAULT_CONFIG_PAYLOAD, payload)
-    metadata = merged.setdefault("metadata", {})
-    if config_name and not metadata.get("name"):
-        metadata["name"] = config_name
-    return merged, str(path)
+    return resolve_strategy_config_payload(payload, config_name=config_name or path.stem), str(path)
 
 
 def configure_runtime(config_name: str | None = None, config_file: str | Path | None = None) -> RuntimeConfig:
@@ -377,7 +479,7 @@ def list_available_configs() -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     for path in sorted(CONFIGS_DIR.glob("*.json")):
         try:
-            payload, source = load_config_payload(config_file=path)
+            payload, source = load_config_payload(config_name=path.stem)
             runtime = _build_runtime_config(payload, source_path=source)
             configs.append({
                 "name": runtime.name,
@@ -385,6 +487,9 @@ def list_available_configs() -> list[dict[str, Any]]:
                 "description": runtime.description,
                 "path": str(path),
                 "fingerprint": runtime.fingerprint,
+                "pricing_variant": runtime.pricing_variant,
+                "enabled_markets": sorted(runtime.allowed_markets),
+                "updated_at": path.stat().st_mtime,
             })
         except Exception as exc:
             configs.append({
@@ -405,3 +510,236 @@ def save_runtime_snapshot(run_dir: str | Path) -> Path:
     snapshot["resolved_from"] = runtime.source_path
     target.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
     return target
+
+
+def _issue(issues: list[ConfigValidationIssue], severity: str, path: str, message: str) -> None:
+    issues.append(ConfigValidationIssue(severity=severity, path=path, message=message))
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_number(
+    issues: list[ConfigValidationIssue],
+    payload: dict[str, Any],
+    key: str,
+    path: str,
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    positive: bool = False,
+) -> float | None:
+    value = _as_float(payload.get(key))
+    if value is None:
+        _issue(issues, "error", f"{path}.{key}", "deve ser numérico")
+        return None
+    if positive and value <= 0:
+        _issue(issues, "error", f"{path}.{key}", "deve ser positivo")
+    if min_value is not None and value < min_value:
+        _issue(issues, "error", f"{path}.{key}", f"deve ser >= {min_value}")
+    if max_value is not None and value > max_value:
+        _issue(issues, "error", f"{path}.{key}", f"deve ser <= {max_value}")
+    return value
+
+
+def _validate_odd_ranges(issues: list[ConfigValidationIssue], value: Any, path: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        _issue(issues, "error", path, "deve ser uma lista de ranges")
+        return
+    for idx, item in enumerate(value):
+        item_path = f"{path}[{idx}]"
+        if not isinstance(item, dict):
+            _issue(issues, "error", item_path, "range deve ser objeto com min e max")
+            continue
+        min_value = _as_float(item.get("min"))
+        max_value = _as_float(item.get("max"))
+        if min_value is None or max_value is None:
+            _issue(issues, "error", item_path, "range deve ter min e max numéricos")
+            continue
+        if min_value <= 1.0:
+            _issue(issues, "error", f"{item_path}.min", "min deve ser > 1.0")
+        if max_value <= min_value:
+            _issue(issues, "error", f"{item_path}.max", "max deve ser maior que min")
+        if max_value > 10.0:
+            _issue(issues, "error", f"{item_path}.max", "max deve ser <= 10.0")
+
+
+def _validate_optional_positive_int_or_null(issues: list[ConfigValidationIssue], value: Any, path: str) -> None:
+    if value is None:
+        return
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        _issue(issues, "error", path, "deve ser inteiro positivo ou null")
+        return
+    if number <= 0:
+        _issue(issues, "error", path, "deve ser inteiro positivo ou null")
+
+
+def _validate_optional_non_negative_or_null(issues: list[ConfigValidationIssue], value: Any, path: str) -> None:
+    if value is None:
+        return
+    number = _as_float(value)
+    if number is None or number < 0:
+        _issue(issues, "error", path, "deve ser >= 0 ou null")
+
+
+def validate_strategy_config_payload(payload: dict[str, Any], expected_name: str | None = None) -> list[ConfigValidationIssue]:
+    issues: list[ConfigValidationIssue] = []
+    if not isinstance(payload, dict):
+        return [ConfigValidationIssue("error", "$", "payload deve ser um objeto JSON")]
+
+    known_top_level = {
+        "metadata",
+        "pricing_variant",
+        "xg_residual_adjustment",
+        "enabled_markets",
+        "allowed_odd_ranges",
+        "league_filter",
+        "market_priority",
+        "markets",
+        "critical_flags",
+        "confidence_caps",
+        "confidence_penalties",
+        "data_quality",
+        "rules",
+    }
+    for key in sorted(set(payload) - known_top_level):
+        _issue(issues, "warning", key, "campo desconhecido será preservado")
+
+    try:
+        resolved = resolve_strategy_config_payload(payload, config_name=expected_name)
+    except Exception as exc:
+        return [ConfigValidationIssue("error", "$", f"não foi possível resolver defaults: {exc}")]
+
+    metadata = resolved.get("metadata", {})
+    if not isinstance(metadata, dict):
+        _issue(issues, "error", "metadata", "metadata deve ser objeto")
+        metadata = {}
+    name = str(metadata.get("name") or "").strip()
+    label = str(metadata.get("label") or "").strip()
+    if expected_name and name != expected_name:
+        _issue(issues, "error", "metadata.name", "deve ser igual ao nome do arquivo")
+    if not name:
+        _issue(issues, "error", "metadata.name", "é obrigatório")
+    if not label:
+        _issue(issues, "error", "metadata.label", "não pode ficar vazio")
+
+    pricing_variant = str(resolved.get("pricing_variant") or "").strip()
+    if pricing_variant not in AVAILABLE_PRICING_VARIANTS:
+        _issue(issues, "error", "pricing_variant", f"deve ser um de: {', '.join(AVAILABLE_PRICING_VARIANTS)}")
+
+    enabled_markets = payload.get("enabled_markets")
+    if enabled_markets is not None:
+        if not isinstance(enabled_markets, list):
+            _issue(issues, "error", "enabled_markets", "deve ser lista")
+        else:
+            for idx, market in enumerate(enabled_markets):
+                if str(market) not in AVAILABLE_MARKETS:
+                    _issue(issues, "error", f"enabled_markets[{idx}]", "mercado inválido")
+
+    _validate_odd_ranges(issues, payload.get("allowed_odd_ranges"), "allowed_odd_ranges")
+
+    raw_markets = payload.get("markets", {})
+    if raw_markets is not None and not isinstance(raw_markets, dict):
+        _issue(issues, "error", "markets", "markets deve ser objeto")
+        raw_markets = {}
+    for market_type, cfg in (raw_markets or {}).items():
+        if str(market_type) not in AVAILABLE_MARKETS:
+            _issue(issues, "error", f"markets.{market_type}", "mercado inválido")
+        if isinstance(cfg, dict):
+            known_market_fields = {
+                "odd_min",
+                "standard_max",
+                "extended_max",
+                "edge_min",
+                "edge_strong",
+                "edge_premium_extended",
+                "is_primary_market",
+                "allowed_odd_ranges",
+            }
+            for key in sorted(set(cfg) - known_market_fields):
+                _issue(issues, "warning", f"markets.{market_type}.{key}", "campo desconhecido será preservado")
+            _validate_odd_ranges(issues, cfg.get("allowed_odd_ranges"), f"markets.{market_type}.allowed_odd_ranges")
+
+    for market_type, cfg in resolved.get("markets", {}).items():
+        if str(market_type) not in AVAILABLE_MARKETS:
+            continue
+        if not isinstance(cfg, dict):
+            _issue(issues, "error", f"markets.{market_type}", "config do mercado deve ser objeto")
+            continue
+        path = f"markets.{market_type}"
+        odd_min = _validate_number(issues, cfg, "odd_min", path, min_value=1.01, max_value=10.0)
+        standard_max = _validate_number(issues, cfg, "standard_max", path, min_value=1.01, max_value=10.0)
+        extended_max = _validate_number(issues, cfg, "extended_max", path, min_value=1.01, max_value=10.0)
+        if odd_min is not None and standard_max is not None and standard_max <= odd_min:
+            _issue(issues, "error", f"{path}.standard_max", "deve ser maior que odd_min")
+        if odd_min is not None and extended_max is not None and extended_max <= odd_min:
+            _issue(issues, "error", f"{path}.extended_max", "deve ser maior que odd_min")
+        edge_min = _validate_number(issues, cfg, "edge_min", path, min_value=0.0, max_value=1.0)
+        edge_strong = _validate_number(issues, cfg, "edge_strong", path, min_value=0.0, max_value=1.0)
+        _validate_number(issues, cfg, "edge_premium_extended", path, min_value=0.0, max_value=1.0)
+        if edge_min is not None and edge_strong is not None and edge_strong < edge_min:
+            _issue(issues, "error", f"{path}.edge_strong", "deve ser >= edge_min")
+
+    league_filter = payload.get("league_filter")
+    if league_filter is not None:
+        if not isinstance(league_filter, dict):
+            _issue(issues, "error", "league_filter", "deve ser objeto")
+        else:
+            mode = str(league_filter.get("mode") or "disabled")
+            if mode not in {"disabled", "allowlist", "blocklist"}:
+                _issue(issues, "error", "league_filter.mode", "deve ser disabled, allowlist ou blocklist")
+            for key in ("allowed_leagues", "blocked_leagues"):
+                if key in league_filter and not isinstance(league_filter.get(key), list):
+                    _issue(issues, "error", f"league_filter.{key}", "deve ser lista")
+
+    xg = resolved.get("xg_residual_adjustment", {})
+    if xg is not None and not isinstance(xg, dict):
+        _issue(issues, "error", "xg_residual_adjustment", "deve ser objeto")
+        xg = {}
+    if isinstance(xg, dict):
+        if "weight" in xg:
+            _validate_number(issues, xg, "weight", "xg_residual_adjustment", min_value=0.0, max_value=1.0)
+        for key in ("max_residual_abs", "max_lambda_adjustment_pct"):
+            if key in xg:
+                _validate_number(issues, xg, key, "xg_residual_adjustment", positive=True)
+        if "min_games" in xg:
+            value = _as_float(xg.get("min_games"))
+            if value is None or value < 0 or int(value) != value:
+                _issue(issues, "error", "xg_residual_adjustment.min_games", "deve ser inteiro >= 0")
+        if "markets" in xg:
+            if not isinstance(xg.get("markets"), list):
+                _issue(issues, "error", "xg_residual_adjustment.markets", "deve ser lista")
+            else:
+                for idx, market in enumerate(xg.get("markets", [])):
+                    if str(market) not in AVAILABLE_MARKETS:
+                        _issue(issues, "error", f"xg_residual_adjustment.markets[{idx}]", "mercado inválido")
+
+    portfolio = resolved.get("rules", {}).get("portfolio", {})
+    if portfolio is not None and not isinstance(portfolio, dict):
+        _issue(issues, "error", "rules.portfolio", "deve ser objeto")
+        portfolio = {}
+    if isinstance(portfolio, dict):
+        _validate_optional_positive_int_or_null(
+            issues,
+            portfolio.get("max_picks_per_match"),
+            "rules.portfolio.max_picks_per_match",
+        )
+        for key in (
+            "max_picks_per_league",
+            "max_stake_per_league",
+            "max_picks_per_market_family",
+            "max_stake_per_market_family",
+        ):
+            _validate_optional_non_negative_or_null(issues, portfolio.get(key), f"rules.portfolio.{key}")
+
+    return issues

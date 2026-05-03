@@ -31,11 +31,12 @@ class RouteContext:
 
 
 def register_all_routes(app: FastAPI, ctx: RouteContext) -> None:
-    from . import aliases, configs, dashboard, health, jobs, replays, runs, team_registry
+    from . import aliases, config_presets, configs, dashboard, health, jobs, replays, runs, team_registry
 
     for route_module in (
         health,
         configs,
+        config_presets,
         runs,
         replays,
         aliases,

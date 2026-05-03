@@ -194,16 +194,24 @@ def _rejected_candidate_payload(
 
 def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None]:
     market_type = candidate["market_type"]
-    if market_type not in get_allowed_markets():
-        return None, "unsupported_market", None
-
     runtime = get_runtime_config()
+    if market_type not in runtime.markets:
+        return None, "unsupported_market", _rejected_candidate_payload(candidate, reject_reason="unsupported_market")
+    if market_type not in get_allowed_markets():
+        return None, "market_disabled_by_config", _rejected_candidate_payload(candidate, reject_reason="market_disabled_by_config")
+    if not runtime.is_league_allowed(str(candidate.get("league", ""))):
+        return None, "league_disabled_by_config", _rejected_candidate_payload(candidate, reject_reason="league_disabled_by_config")
+
     thresholds = get_market_threshold(market_type)
     odd = float(candidate["odd_entrada"])
     ev_decimal = float(candidate["ev_decimal"])
 
-    if odd < thresholds.odd_min or odd > thresholds.extended_max:
-        return None, "odd_out_of_range", None
+    allowed_odd_ranges = runtime.allowed_odd_ranges_for_market(market_type)
+    if allowed_odd_ranges:
+        if not any(odd_range.contains(odd) for odd_range in allowed_odd_ranges):
+            return None, "odd_outside_allowed_ranges", _rejected_candidate_payload(candidate, reject_reason="odd_outside_allowed_ranges")
+    elif odd < thresholds.odd_min or odd > thresholds.extended_max:
+        return None, "odd_out_of_range", _rejected_candidate_payload(candidate, reject_reason="odd_out_of_range")
     if ev_decimal < thresholds.edge_min:
         return None, "edge_below_min", None
 

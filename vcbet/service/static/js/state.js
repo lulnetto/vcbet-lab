@@ -9,6 +9,7 @@ const state = {
   replayRuns: [], replaySummaries: [], replaySummaryPayload: null, replayPicks: [],
   aliasFiles: [], aliasReview: null,
   teamRegistry: { pending: [], approved: [], leagues: [], pendingByLeague: {}, approvedByLeague: {}, loading: false, syncing: false, error: '', selectedLeague: '', reviewFilter: '', syncResult: null },
+  configPresets: { items: [], selectedName: '', detail: null, issues: [], message: '', loading: false },
   aliasDiagnostics: { scope: 'runs_recent', includeResolved: false },
   dashboardEntries: [], loadErrors: {}, lastRefreshAt: null,
   entities: { configs: [], ledgers: [], runs: [], replays: [], catalogMessages: {} },

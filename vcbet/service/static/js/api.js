@@ -23,6 +23,50 @@ function fetchConfigs() {
   return api('/api/entities/configs');
 }
 
+function fetchConfigPresets() {
+  return api('/api/config-presets');
+}
+
+function fetchConfigPreset(name) {
+  return api(`/api/config-presets/${encodeURIComponent(name)}`);
+}
+
+function createConfigPreset(payload) {
+  return api('/api/config-presets', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function saveConfigPreset(name, payload) {
+  return api(`/api/config-presets/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function validateConfigPreset(name, payload) {
+  return api(`/api/config-presets/${encodeURIComponent(name)}/validate`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function cloneConfigPreset(name, payload) {
+  return api(`/api/config-presets/${encodeURIComponent(name)}/clone`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
+function deleteConfigPreset(name) {
+  return api(`/api/config-presets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
 function fetchLedgers() {
   return api('/api/entities/ledgers');
 }

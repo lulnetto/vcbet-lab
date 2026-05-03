@@ -9,6 +9,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   const target = document.getElementById(`tab-${tab}`);
   if (target) target.classList.add('active');
+  if (tab === 'configs' && typeof loadConfigPresets === 'function') loadConfigPresets();
 }
 
 function bindOperationalInputs() {
