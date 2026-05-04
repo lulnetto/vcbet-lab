@@ -105,6 +105,13 @@ LEDGER_COLUMNS = [
     "settlement_confidence",
     "settlement_note",
     "sofascore_event_id",
+    "match_resolution_status",
+    "match_resolution_reason",
+    "match_resolution_attempts",
+    "last_match_resolution_attempt_at",
+    "resolved_result_provider",
+    "resolved_event_id",
+    "resolved_event_url",
     "override_reason",
     "override_updated_at",
     "result_units_model",
@@ -232,4 +239,3 @@ def normalize_ledger_schema(df: pd.DataFrame) -> pd.DataFrame:
     ordered = [column for column in LEDGER_COLUMNS if column in work.columns]
     extra = [column for column in work.columns if column not in LEDGER_COLUMNS]
     return work[ordered + extra].copy()
-

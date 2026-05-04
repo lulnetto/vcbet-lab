@@ -7,7 +7,16 @@ from pydantic import BaseModel, Field
 
 
 JobStatus = Literal["queued", "running", "success", "failed", "cancelled", "blocked", "interrupted"]
-JobType = Literal["analysis", "closing_odds", "results_collection", "settlement", "results_settlement_cycle", "daily_run", "replay_run"]
+JobType = Literal[
+    "analysis",
+    "closing_odds",
+    "results_collection",
+    "settlement",
+    "results_settlement_cycle",
+    "reconcile_unmatched",
+    "daily_run",
+    "replay_run",
+]
 
 
 class JobPhase(BaseModel):
@@ -93,6 +102,19 @@ class ResultsSettlementRequest(BaseModel):
     results_source: str | None = None
     results_debug: bool = False
     no_overrides: bool = False
+    python_bin: str = "python3"
+
+
+class ReconcileUnmatchedRequest(BaseModel):
+    ledger_file: str = "data/history/bets_ledger.csv"
+    results_file: str = "data/results/results_unmatched_retry.csv"
+    date: str | None = None
+    max_pages: int = 12
+    source: str | None = None
+    debug: bool = False
+    dry_run: bool = False
+    no_overrides: bool = False
+    overrides_file: str | None = None
     python_bin: str = "python3"
 
 

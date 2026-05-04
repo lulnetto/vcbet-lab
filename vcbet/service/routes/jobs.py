@@ -8,6 +8,7 @@ from vcbet.service.commands import (
     build_analysis_command,
     build_closing_odds_command,
     build_daily_commands,
+    build_reconcile_unmatched_command,
     build_replay_command,
     build_replay_catalog_command,
     build_run_catalog_command,
@@ -22,6 +23,7 @@ from vcbet.service.schemas import (
     DailyRunRequest,
     JobCreatedResponse,
     JobListResponse,
+    ReconcileUnmatchedRequest,
     ReplayRunRequest,
     ResultsCollectionRequest,
     ResultsSettlementRequest,
@@ -146,6 +148,21 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
                 job_type="results_settlement_cycle",
                 request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
                 commands=commands,
+                resource_key=ctx.resource_key(ctx.settings.project_root, req.ledger_file),
+            )
+        except ResourceBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return JobCreatedResponse(job_id=job.id, status=job.status, title=job.title)
+
+    @app.post("/jobs/reconcile-unmatched", response_model=JobCreatedResponse)
+    def start_reconcile_unmatched(req: ReconcileUnmatchedRequest) -> JobCreatedResponse:
+        command = build_reconcile_unmatched_command(ctx.settings.project_root, req)
+        try:
+            job = ctx.manager.submit_command_job(
+                title="Reprocessar unmatched",
+                job_type="reconcile_unmatched",
+                request=req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+                command=command,
                 resource_key=ctx.resource_key(ctx.settings.project_root, req.ledger_file),
             )
         except ResourceBusyError as exc:

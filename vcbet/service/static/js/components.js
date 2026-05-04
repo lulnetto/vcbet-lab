@@ -288,6 +288,7 @@ function jobActionContext(job) {
   const req = job?.request || {};
   if (type.includes('replay')) return 'Replay Lab';
   if (type.includes('closing')) return 'Atualizar closing odds';
+  if (type.includes('reconcile_unmatched')) return 'Reprocessar unmatched';
   if (type.includes('results_settlement') || (type.includes('result') && type.includes('settlement'))) return 'Resultados + settlement';
   if (type.includes('result')) return 'Atualizar resultados';
   if (type.includes('settlement')) return 'Liquidar ledger';
@@ -421,7 +422,7 @@ function pipelineStep(name, status, text, actionLabel, action) {
 
 function renderKpis(summary, clv) {
   const items = [
-    ['Entradas', summary.total_entries], ['Abertas', summary.open_entries], ['Liquidadas', summary.settled_entries],
+    ['Entradas', summary.total_entries], ['Abertas', summary.open_entries], ['Unmatched', summary.unmatched_entries], ['Liquidadas', summary.settled_entries],
     ['Executadas', summary.executed_entries], ['Unid. modelo', summary.model_units], ['ROI modelo %', summary.model_roi_percent],
     ['Unid. real', summary.real_units], ['ROI real %', summary.real_roi_percent], ['Hit rate %', summary.hit_rate_percent],
     ['Weighted HR %', summary.weighted_hit_rate_percent], ['Wins', summary.wins], ['Losses', summary.losses],

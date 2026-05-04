@@ -7,6 +7,7 @@ from .schemas import (
     AnalysisRequest,
     ClosingOddsRequest,
     DailyRunRequest,
+    ReconcileUnmatchedRequest,
     ReplayRunRequest,
     ResultsCollectionRequest,
     ResultsSettlementRequest,
@@ -149,6 +150,27 @@ def build_results_settlement_commands(project_root: Path, req: ResultsSettlement
             ),
         ),
     ]
+
+
+def build_reconcile_unmatched_command(project_root: Path, req: ReconcileUnmatchedRequest) -> CommandSpec:
+    script = project_root / "scripts" / "retry_unmatched_settlement.py"
+    args = [
+        req.python_bin,
+        str(script),
+        "--ledger-file", _resolve(project_root, req.ledger_file),
+        "--results-file", _resolve(project_root, req.results_file),
+        "--max-pages", str(req.max_pages),
+    ]
+    if req.date:
+        args += ["--date", req.date]
+    if req.source:
+        args += ["--source", req.source]
+    if req.overrides_file:
+        args += ["--overrides-file", _resolve(project_root, req.overrides_file)]
+    _append_if(args, req.debug, "--debug")
+    _append_if(args, req.dry_run, "--dry-run")
+    _append_if(args, req.no_overrides, "--no-overrides")
+    return CommandSpec(name="reconcile_unmatched", command=args, cwd=project_root)
 
 
 def build_daily_commands(project_root: Path, req: DailyRunRequest) -> list[CommandSpec]:

@@ -16,11 +16,14 @@ import requests
 
 from vcbet.core.config_ligas import obter_sofascore_unique_tournament_id
 from vcbet.core.ledger_manager import normalize_ledger_schema
-from vcbet.paths import DEFAULT_RESULTS_FILE, DEFAULT_RESULTS_DEBUG_DIR
+from vcbet.paths import CONFIGS_DIR, DEFAULT_RESULTS_FILE, DEFAULT_RESULTS_DEBUG_DIR
 
 DEFAULT_DEBUG_DIR = DEFAULT_RESULTS_DEBUG_DIR
 SOFASCORE_BASE = "https://www.sofascore.com/api/v1"
 DEFAULT_SOFASCORE_WARMUP_URL = "https://www.sofascore.com/"
+DEFAULT_SOFASCORE_ALIASES_FILE = CONFIGS_DIR / "team_registry" / "sofascore_result_aliases.csv"
+TERMINAL_STATUS_RAW_TYPES = {"finished", "afterpenalties", "aet"}
+SofascoreAliasMap = dict[tuple[str, str], str]
 
 
 @dataclass
@@ -49,6 +52,16 @@ class MatchResult:
     status_raw: str | None = None
     source_event_id: str | None = None
     match_datetime: str | None = None
+
+
+@dataclass
+class MatchScore:
+    total: int
+    home_score: int
+    away_score: int
+    dt_bonus: int
+    candidate: MatchResult
+    alias_used: bool = False
 
 
 class SofascoreBrowserClient:
@@ -203,6 +216,40 @@ def slug_text(value: str | None) -> str:
     return " ".join(cleaned.split())
 
 
+def load_sofascore_aliases(path: str | Path = DEFAULT_SOFASCORE_ALIASES_FILE) -> SofascoreAliasMap:
+    alias_path = Path(path)
+    if not alias_path.exists() or alias_path.stat().st_size == 0:
+        return {}
+
+    aliases_df = pd.read_csv(alias_path, sep=";")
+    required = {"league", "ledger_name", "sofascore_name"}
+    missing = required - set(aliases_df.columns)
+    if missing:
+        raise ValueError(f"Arquivo de aliases Sofascore sem colunas obrigatórias: {sorted(missing)}")
+
+    aliases: SofascoreAliasMap = {}
+    for _, row in aliases_df.iterrows():
+        league = slug_text(str(row.get("league", "")).strip())
+        ledger_name = slug_text(str(row.get("ledger_name", "")).strip())
+        sofascore_name = str(row.get("sofascore_name", "")).strip()
+        if league and ledger_name and sofascore_name:
+            aliases[(league, ledger_name)] = sofascore_name
+    return aliases
+
+
+def apply_sofascore_alias(
+    league: str,
+    team_name: str,
+    aliases: SofascoreAliasMap | None = None,
+) -> tuple[str, bool]:
+    if not aliases:
+        return team_name, False
+    alias = aliases.get((slug_text(league), slug_text(team_name)))
+    if not alias:
+        return team_name, False
+    return alias, slug_text(alias) != slug_text(team_name)
+
+
 def parse_datetime(value: Any) -> datetime | None:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
@@ -293,6 +340,15 @@ def datetime_match_bonus(target_dt: datetime | None, cand_dt_value: str | None) 
     return 0
 
 
+def status_raw_type(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    return text.split("|", 1)[0].strip() if text else ""
+
+
+def is_terminal_status_raw(value: str | None) -> bool:
+    return status_raw_type(value) in TERMINAL_STATUS_RAW_TYPES
+
+
 def utc_dt_from_timestamp(value: Any) -> datetime | None:
     try:
         return datetime.fromtimestamp(int(value), tz=timezone.utc)
@@ -328,21 +384,41 @@ def infer_open_mask(df: pd.DataFrame) -> pd.Series:
     return pd.Series([True] * len(df), index=df.index)
 
 
-def build_targets(df: pd.DataFrame, *, only_ready: bool, grace_minutes: int) -> List[MatchTarget]:
-    open_mask = infer_open_mask(df)
-    base = df.loc[open_mask].copy()
+def build_targets(
+    df: pd.DataFrame,
+    *,
+    only_ready: bool,
+    grace_minutes: int,
+    only_unmatched: bool = False,
+    date: str | None = None,
+) -> List[MatchTarget]:
+    if only_unmatched:
+        if "final_bet_status" not in df.columns:
+            base = df.iloc[0:0].copy()
+        else:
+            final_status = df["final_bet_status"].astype(str).str.strip().str.lower()
+            base = df.loc[final_status.eq("unmatched")].copy()
+    else:
+        open_mask = infer_open_mask(df)
+        base = df.loc[open_mask].copy()
 
-    if only_ready and "match_datetime" in base.columns:
+    if "match_datetime" in base.columns:
+        base["__match_dt"] = base["match_datetime"].apply(parse_datetime)
+    else:
+        base["__match_dt"] = None
+
+    if date:
+        requested_date = datetime.strptime(date, "%Y-%m-%d").date()
+        base = base[base["__match_dt"].apply(lambda value: value is not None and value.date() == requested_date)]
+
+    if only_ready:
         now = datetime.now()
         ready_cutoff = now - timedelta(minutes=grace_minutes)
-        base["__match_dt"] = base["match_datetime"].apply(parse_datetime)
         base = base[base["__match_dt"].notna()]
         base = base[base["__match_dt"] <= ready_cutoff]
-    else:
-        base["__match_dt"] = base["match_datetime"].apply(parse_datetime) if "match_datetime" in base.columns else None
 
     dedup_cols = [c for c in ["league", "match_name", "home_team", "away_team"] if c in base.columns]
-    unique_rows = base.drop_duplicates(subset=dedup_cols)
+    unique_rows = base.drop_duplicates(subset=dedup_cols) if dedup_cols else base
 
     targets: List[MatchTarget] = []
     for _, row in unique_rows.iterrows():
@@ -503,53 +579,100 @@ def build_candidate_from_event(league: str, event: dict, source_url: str, settle
     )
 
 
-def match_result_for_target(target: MatchTarget, candidates: List[MatchResult], debug: bool = False) -> MatchResult | None:
-    best: MatchResult | None = None
-    best_total = -10**9
-    best_components: tuple[int, int, int] | None = None
-    ranking: List[tuple[int, int, int, int, MatchResult]] = []
+def rank_candidates_for_target(
+    target: MatchTarget,
+    candidates: List[MatchResult],
+    aliases: SofascoreAliasMap | None = None,
+) -> list[MatchScore]:
+    target_home, home_alias_used = apply_sofascore_alias(target.league, target.home_team, aliases)
+    target_away, away_alias_used = apply_sofascore_alias(target.league, target.away_team, aliases)
 
+    ranking: list[MatchScore] = []
     for cand in candidates:
-        home_score = team_similarity_score(target.home_team, cand.home_team)
-        away_score = team_similarity_score(target.away_team, cand.away_team)
+        home_score = team_similarity_score(target_home, cand.home_team)
+        away_score = team_similarity_score(target_away, cand.away_team)
         dt_bonus = datetime_match_bonus(target.match_datetime, cand.match_datetime)
         total_score = home_score + away_score + dt_bonus
 
-        ranking.append((total_score, home_score, away_score, dt_bonus, cand))
-        if total_score > best_total:
-            best_total = total_score
-            best_components = (home_score, away_score, dt_bonus)
-            best = cand
+        ranking.append(
+            MatchScore(
+                total=total_score,
+                home_score=home_score,
+                away_score=away_score,
+                dt_bonus=dt_bonus,
+                candidate=cand,
+                alias_used=home_alias_used or away_alias_used,
+            )
+        )
 
-    ranking.sort(key=lambda item: item[0], reverse=True)
+    return sorted(ranking, key=lambda item: item.total, reverse=True)
+
+
+def match_score_is_accepted(score: MatchScore) -> bool:
+    has_strong_team_match = score.home_score >= 35 and score.away_score >= 35
+    has_very_strong_team_match = score.home_score >= 50 and score.away_score >= 25
+    return (score.total >= 100 and has_strong_team_match) or (score.total >= 110 and has_very_strong_team_match)
+
+
+def match_rejection_reason(score: MatchScore) -> str:
+    if score.total < 100:
+        return "MATCH_REJECTED_LOW_TOTAL_SCORE"
+    return "MATCH_REJECTED_LOW_TEAM_SCORE"
+
+
+def rejected_match_note(target: MatchTarget, candidates: List[MatchResult], aliases: SofascoreAliasMap | None = None) -> str:
+    ranking = rank_candidates_for_target(target, candidates, aliases=aliases)
+    if not ranking:
+        return "jogo não localizado no Sofascore | reason=NO_PROVIDER_CANDIDATES"
+    best = ranking[0]
+    cand = best.candidate
+    return (
+        "jogo não localizado no Sofascore | "
+        f"best={cand.home_team} vs {cand.away_team} | "
+        f"score={best.total} home={best.home_score} away={best.away_score} dt={best.dt_bonus} | "
+        f"reason={match_rejection_reason(best)}"
+    )
+
+
+def match_result_for_target(
+    target: MatchTarget,
+    candidates: List[MatchResult],
+    debug: bool = False,
+    aliases: SofascoreAliasMap | None = None,
+) -> MatchResult | None:
+    ranking = rank_candidates_for_target(target, candidates, aliases=aliases)
 
     if debug:
         print(f"[DEBUG] Match alvo: {target.home_team} vs {target.away_team}")
-        for idx, (score, home_score, away_score, dt_bonus, cand) in enumerate(ranking[:5], start=1):
+        for idx, score in enumerate(ranking[:5], start=1):
+            cand = score.candidate
             away_goals_txt = cand.away_goals if cand.away_goals is not None else "NA"
+            alias_txt = " alias=sofascore_result_alias" if score.alias_used else ""
             print(
-                f"        top{idx}: score={score} (home={home_score}, away={away_score}, dt={dt_bonus}) | "
+                f"        top{idx}: score={score.total} (home={score.home_score}, away={score.away_score}, dt={score.dt_bonus}) | "
                 f"{cand.home_team} vs {cand.away_team} | "
                 f"status={cand.status_raw or '-'} | "
-                f"placar={cand.home_goals}-{away_goals_txt}"
+                f"placar={cand.home_goals}-{away_goals_txt}{alias_txt}"
             )
 
-    if best is None or best_components is None:
+    if not ranking:
         return None
 
-    best_home_score, best_away_score, best_dt_bonus = best_components
-    has_strong_team_match = best_home_score >= 35 and best_away_score >= 35
-    has_very_strong_team_match = best_home_score >= 50 and best_away_score >= 25
-    accepted = (best_total >= 100 and has_strong_team_match) or (best_total >= 110 and has_very_strong_team_match)
-    if not accepted:
+    best_score = ranking[0]
+    if not match_score_is_accepted(best_score):
         return None
 
-    matched = MatchResult(**best.__dict__)
+    matched = MatchResult(**best_score.candidate.__dict__)
     matched.league = target.league
     matched.match_name = target.match_name
+    prefix = "sofascore_result_alias;" if best_score.alias_used else ""
     matched.matched_via = (
-        f"team_score={best_total};home={best_home_score};away={best_away_score};dt={best_dt_bonus}"
+        f"{prefix}team_score={best_score.total};home={best_score.home_score};"
+        f"away={best_score.away_score};dt={best_score.dt_bonus}"
     )
+    if matched.bet_status == "open" and not is_terminal_status_raw(matched.status_raw):
+        matched.settlement_confidence = "high"
+        matched.settlement_note = "evento encontrado no Sofascore, mas ainda não finalizado"
     return matched
 
 
@@ -573,6 +696,7 @@ def _collect_results_generic(
     for target in targets:
         by_league.setdefault(target.league, []).append(target)
 
+    aliases = load_sofascore_aliases()
     all_results: List[MatchResult] = []
 
     for league, league_targets in by_league.items():
@@ -658,7 +782,7 @@ def _collect_results_generic(
             continue
 
         for target in league_targets:
-            matched = match_result_for_target(target, candidates, debug=debug)
+            matched = match_result_for_target(target, candidates, debug=debug, aliases=aliases)
             if matched:
                 all_results.append(matched)
             else:
@@ -675,7 +799,7 @@ def _collect_results_generic(
                         bet_status="unmatched",
                         settlement_source=settlement_source,
                         settlement_confidence="low",
-                        settlement_note="jogo não localizado nos eventos recentes da liga no Sofascore",
+                        settlement_note=rejected_match_note(target, candidates, aliases=aliases),
                         source_url=source_url,
                         match_datetime=format_target_datetime(target.match_datetime),
                     )

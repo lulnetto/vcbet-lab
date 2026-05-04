@@ -66,6 +66,16 @@ async function submitResultsSettlement() {
     results_source: document.getElementById('resultsSource').value || null,
   });
 }
+
+async function submitReconcileUnmatched() {
+  await submitJob('/jobs/reconcile-unmatched', {
+    ledger_file: document.getElementById('resultsLedger').value,
+    results_file: 'data/results/results_unmatched_retry.csv',
+    max_pages: Number(document.getElementById('resultsMaxPages').value || 12),
+    debug: document.getElementById('resultsDebug').checked,
+    source: document.getElementById('resultsSource').value || null,
+  });
+}
 function formatJob(job) {
   const req = job.request || {};
   const config = req.config_name ? ` | config=${req.config_name}` : '';
@@ -174,6 +184,7 @@ Object.assign(window, {
   submitResultsCollection,
   submitSettlement,
   submitResultsSettlement,
+  submitReconcileUnmatched,
   formatJob,
   renderJobsPage,
   nextJobsPage,

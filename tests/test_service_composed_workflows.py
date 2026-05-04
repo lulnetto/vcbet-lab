@@ -9,9 +9,9 @@ from pathlib import Path
 import pandas as pd
 
 from vcbet.service.dashboard import apply_filters
-from vcbet.service.commands import build_daily_commands, build_results_settlement_commands
+from vcbet.service.commands import build_daily_commands, build_reconcile_unmatched_command, build_results_settlement_commands
 from vcbet.service.job_store import JobStore
-from vcbet.service.schemas import DailyRunRequest, ResultsSettlementRequest
+from vcbet.service.schemas import DailyRunRequest, ReconcileUnmatchedRequest, ResultsSettlementRequest
 from vcbet.service.schemas import JobRecord
 
 
@@ -26,6 +26,26 @@ class ServiceComposedWorkflowTest(unittest.TestCase):
         )
 
         self.assertEqual([cmd.name for cmd in commands], ["results_collection", "settlement"])
+
+    def test_reconcile_unmatched_command_calls_retry_script(self) -> None:
+        command = build_reconcile_unmatched_command(
+            Path("/tmp/vcbet"),
+            ReconcileUnmatchedRequest(
+                ledger_file="data/history/bets_ledger.csv",
+                results_file="data/results/results_unmatched_retry.csv",
+                max_pages=12,
+                source="api",
+                debug=True,
+                no_overrides=True,
+            ),
+        )
+
+        self.assertEqual(command.name, "reconcile_unmatched")
+        self.assertIn("/tmp/vcbet/scripts/retry_unmatched_settlement.py", command.command)
+        self.assertIn("--source", command.command)
+        self.assertIn("api", command.command)
+        self.assertIn("--debug", command.command)
+        self.assertIn("--no-overrides", command.command)
 
     def test_daily_cycle_excludes_closing_odds_by_default_and_refreshes_catalogs(self) -> None:
         commands = build_daily_commands(

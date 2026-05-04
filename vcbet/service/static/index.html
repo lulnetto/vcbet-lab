@@ -216,7 +216,10 @@
             <button class="ghost small" onclick="submitSettlement()">Só liquidar ledger</button>
           </div>
         </details>
-        <button class="amber" onclick="submitResultsSettlement()">Atualizar resultados e liquidar</button>
+        <div class="inline" style="margin-top:12px;">
+          <button class="amber" onclick="submitResultsSettlement()">Atualizar resultados e liquidar</button>
+          <button class="ghost" onclick="submitReconcileUnmatched()">Reprocessar unmatched</button>
+        </div>
       </div>
     </div>
     <div class="card"><h3>Retorno da ação</h3><pre id="actionResult">Nenhuma ação executada nesta sessão.</pre></div>

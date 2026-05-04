@@ -34,6 +34,12 @@ TEXT_COLUMNS = [
     "bet_executed",
     "executed_at",
     "execution_note",
+    "match_resolution_status",
+    "match_resolution_reason",
+    "last_match_resolution_attempt_at",
+    "resolved_result_provider",
+    "resolved_event_id",
+    "resolved_event_url",
 ]
 
 NUMERIC_COLUMNS = [
@@ -50,6 +56,7 @@ NUMERIC_COLUMNS = [
     "stake_units_executada",
     "result_units_model",
     "result_units_real",
+    "match_resolution_attempts",
 ]
 
 
@@ -296,17 +303,25 @@ def _parse_match_datetime(value):
 
 
 def _result_row_score(ledger_row: pd.Series, result_row: pd.Series) -> int:
+    result_bet_id = str(_first_present(result_row.get("bet_id"), default="")).strip()
+    bet_id_score = 0
+    if result_bet_id:
+        ledger_bet_id = str(_first_present(ledger_row.get("bet_id"), default="")).strip()
+        if ledger_bet_id != result_bet_id:
+            return -10**9
+        bet_id_score = 1000
+
     ledger_event_id = normalize_sofascore_event_id(ledger_row.get("sofascore_event_id"))
     result_event_id = normalize_sofascore_event_id(
         _first_present(result_row.get("sofascore_event_id"), result_row.get("source_event_id"))
     )
     if ledger_event_id:
         if result_event_id == ledger_event_id:
-            return 10**9
-        if result_event_id:
+            return 10**9 + bet_id_score
+        if result_event_id and not result_bet_id:
             return -10**9
 
-    score = 0
+    score = bet_id_score
 
     ledger_league = _slug_text(ledger_row.get("league"))
     result_league = _slug_text(result_row.get("league"))
@@ -413,6 +428,19 @@ def apply_results_file(ledger_df: pd.DataFrame, results_file: str | Path) -> pd.
             note_parts.append(f"source_event_id={source_event_id}")
             updated.at[idx, "sofascore_event_id"] = normalize_sofascore_event_id(source_event_id)
         updated.at[idx, "settlement_note"] = " | ".join(note_parts) if note_parts else pd.NA
+
+        result_bet_id = _first_present(result_row.get("bet_id"), default=pd.NA)
+        if (
+            not _is_missing(result_bet_id)
+            and _clean_status(auto_bet_status) == "open"
+            and _clean_status(result_row.get("settlement_confidence")) == "high"
+            and not _is_missing(source_event_id)
+        ):
+            updated.at[idx, "match_resolution_status"] = "resolved"
+            updated.at[idx, "match_resolution_reason"] = pd.NA
+            updated.at[idx, "resolved_result_provider"] = result_row.get("settlement_source", "results_file")
+            updated.at[idx, "resolved_event_id"] = normalize_sofascore_event_id(source_event_id)
+            updated.at[idx, "resolved_event_url"] = result_row.get("source_url", pd.NA)
     return updated
 
 
