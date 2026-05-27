@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 JobStatus = Literal["queued", "running", "success", "failed", "cancelled", "blocked", "interrupted"]
 JobType = Literal[
     "analysis",
+    "analysis_batch",
     "closing_odds",
     "results_collection",
     "settlement",
@@ -60,6 +61,22 @@ class AnalysisRequest(BaseModel):
     dry_run: bool = False
     config_file: str | None = None
     config_name: str | None = None
+    xg_source: str = "fotmob"
+
+
+class AnalysisBatchItem(BaseModel):
+    config_name: str
+    ledger_path: str
+
+
+class AnalysisBatchRequest(BaseModel):
+    run_date: str
+    reuse_snapshot: bool = True
+    allow_shared_ledger: bool = False
+    items: list[AnalysisBatchItem] = Field(default_factory=list)
+    output_dir: str = "data/runs"
+    python_bin: str = "python3"
+    json_output: bool = False
     xg_source: str = "fotmob"
 
 
@@ -227,6 +244,18 @@ class JobCreatedResponse(BaseModel):
     job_id: str
     status: JobStatus
     title: str
+
+
+class AnalysisBatchCreatedItem(BaseModel):
+    config_name: str
+    ledger_path: str
+    status: JobStatus = "queued"
+
+
+class AnalysisBatchCreatedResponse(JobCreatedResponse):
+    run_group_id: str
+    source_snapshot_id: str
+    items: list[AnalysisBatchCreatedItem] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

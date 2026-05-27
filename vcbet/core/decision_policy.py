@@ -13,7 +13,12 @@ from vcbet.core.market_thresholds import (
     get_market_threshold,
     get_primary_markets,
 )
+from vcbet.core.market_exceptions import (
+    apply_market_exception_fields,
+    btts_yes_ev_exception_meta,
+)
 from vcbet.core.risk_policy import assess_risk_flags, safety_gate_flags
+from vcbet.core.sport_sense_policy import configured_min_ev_decimal, should_ignore_global_mercado_time
 from vcbet.core.strategy_config import get_runtime_config
 
 
@@ -206,20 +211,39 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
     odd = float(candidate["odd_entrada"])
     ev_decimal = float(candidate["ev_decimal"])
 
+    blocked_odd_ranges = runtime.blocked_odd_ranges_for_market(market_type)
+    if blocked_odd_ranges and any(odd_range.contains(odd) for odd_range in blocked_odd_ranges):
+        return None, "odd_in_blocked_range", _rejected_candidate_payload(
+            candidate,
+            reject_reason="odd_in_blocked_range",
+        )
+
     allowed_odd_ranges = runtime.allowed_odd_ranges_for_market(market_type)
     if allowed_odd_ranges:
         if not any(odd_range.contains(odd) for odd_range in allowed_odd_ranges):
             return None, "odd_outside_allowed_ranges", _rejected_candidate_payload(candidate, reject_reason="odd_outside_allowed_ranges")
     elif odd < thresholds.odd_min or odd > thresholds.extended_max:
         return None, "odd_out_of_range", _rejected_candidate_payload(candidate, reject_reason="odd_out_of_range")
-    if ev_decimal < thresholds.edge_min:
-        return None, "edge_below_min", None
+    min_ev_decimal = configured_min_ev_decimal(runtime, market_type)
+    effective_edge_min = thresholds.edge_min if min_ev_decimal is None else min_ev_decimal
+    market_exception_meta = None
+    if ev_decimal < effective_edge_min:
+        market_exception_meta = btts_yes_ev_exception_meta(
+            candidate,
+            runtime,
+            min_ev_decimal=effective_edge_min,
+        )
+        if market_exception_meta is None:
+            return None, "ev_below_market_min" if min_ev_decimal is not None else "edge_below_min", None
+        candidate = apply_market_exception_fields(candidate, market_exception_meta)
 
     max_ev_percent = float(runtime.rules.get("max_ev_percent", 20.0))
     if ev_decimal * 100 > max_ev_percent:
         return None, "ev_outlier_above_max", _rejected_candidate_payload(candidate, reject_reason="ev_outlier_above_max")
 
     flags = assess_risk_flags(candidate)
+    if market_type == "team_total" and should_ignore_global_mercado_time(runtime):
+        flags = [flag for flag in flags if flag != "MERCADO_TIME"]
     confidence_score, reasons, cap_value = _confidence_score(candidate, flags)
     blocked_flags = safety_gate_flags(flags)
     if blocked_flags:
@@ -265,6 +289,8 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
         stake_units = float(stakes.get("full_unit", 1.0))
     else:
         stake_units = float(stakes.get("half_unit", 0.5))
+    if market_exception_meta is not None and market_exception_meta.get("stake_cap") is not None:
+        stake_units = min(stake_units, float(market_exception_meta["stake_cap"]))
 
     if stake_units <= 0:
         return None, "low_confidence_or_critical_flag", _rejected_candidate_payload(candidate, reject_reason="low_confidence_or_critical_flag", flags=flags, confidence_score=confidence_score, confidence_cap=cap_value)
@@ -273,7 +299,7 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
     fair_odd = round(float(fair_odd), 2) if fair_odd else None
 
     market_priority = get_market_priority()
-    return _round_diagnostic_pricing_fields({
+    payload = _round_diagnostic_pricing_fields({
         **candidate,
         "bet_id": _candidate_identity(candidate),
         "odd_justa": fair_odd,
@@ -294,7 +320,10 @@ def evaluate_pick_candidate_with_details(candidate: dict[str, Any]) -> tuple[dic
         "market_priority": market_priority.get(market_type, 99),
         "strategy_config_name": runtime.name,
         "strategy_config_fingerprint": runtime.fingerprint,
-    }), None, None
+    })
+    if market_exception_meta is not None:
+        payload = apply_market_exception_fields(payload, market_exception_meta)
+    return payload, None, None
 
 
 def evaluate_pick_candidate_with_meta(candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:

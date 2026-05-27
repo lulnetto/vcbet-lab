@@ -84,8 +84,11 @@ function formatJob(job) {
   const canDelete = !canCancel;
   const cancelButton = canCancel ? `<button class="danger small" onclick="cancelJob('${escapeHtml(job.id)}')">cancelar</button>` : '';
   const deleteButton = canDelete ? `<button class="danger small" onclick="deleteJob('${escapeHtml(job.id)}')">deletar</button>` : '';
+  const auditButtons = jobAuditButtons(job);
   const failed = ['failed','error'].includes(String(job.status || '').toLowerCase());
   const requestBits = [
+    req.run_group_id ? `grupo=${req.run_group_id}` : '',
+    req.run_date ? `data=${req.run_date}` : '',
     req.target_date ? `data=${req.target_date}` : '',
     req.source_run_dir ? `run=${req.source_run_dir}` : '',
     config.trim(),
@@ -99,9 +102,19 @@ function formatJob(job) {
     ${phases ? `<div class="muted">fases: ${escapeHtml(phases)}</div>` : ''}
     <div class="inline" style="margin-top:8px;">
       <button class="ghost small" onclick="viewLogs('${escapeHtml(job.id)}')">logs</button>
+      ${auditButtons}
       ${cancelButton}
       ${deleteButton}
     </div></div>`;
+}
+
+function jobAuditButtons(job) {
+  if (!['analysis', 'analysis_batch', 'daily_run'].includes(job.job_type)) return '';
+  const id = escapeHtml(job.id);
+  const summary = job.job_type === 'analysis_batch'
+    ? `<button class="ghost small" onclick="downloadJobAuditSummary('${id}')">Baixar resumo da auditoria</button>`
+    : '';
+  return `<button class="ghost small" onclick="downloadJobAudit('${id}')">Baixar auditoria de candidatos</button>${summary}`;
 }
 
 function renderJobsPage() {
@@ -171,6 +184,14 @@ async function deleteJob(jobId) {
   await loadJobs();
 }
 
+function downloadJobAudit(jobId) {
+  window.location.href = `/jobs/${encodeURIComponent(jobId)}/candidate-audit`;
+}
+
+function downloadJobAuditSummary(jobId) {
+  window.location.href = `/jobs/${encodeURIComponent(jobId)}/candidate-audit-summary`;
+}
+
 async function cleanupFailedJobs() {
   if (!confirm('Remover todos os jobs com erro finalizados?')) return;
   await api('/jobs/cleanup-failed', { method:'POST' });
@@ -186,6 +207,7 @@ Object.assign(window, {
   submitResultsSettlement,
   submitReconcileUnmatched,
   formatJob,
+  jobAuditButtons,
   renderJobsPage,
   nextJobsPage,
   previousJobsPage,
@@ -194,5 +216,7 @@ Object.assign(window, {
   reloadSelectedLogs,
   cancelJob,
   deleteJob,
+  downloadJobAudit,
+  downloadJobAuditSummary,
   cleanupFailedJobs,
 });

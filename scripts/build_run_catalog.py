@@ -58,11 +58,15 @@ def build_record(run_dir: Path, root: Path) -> dict[str, object]:
         "created_at": infer_created_at(run_dir, manifest),
         "updated_at": first_value(manifest, "updated_at", "completed_at"),
         "status": first_value(manifest, "status") or "unknown",
+        "run_group_id": first_value(manifest, "run_group_id"),
         "config_name": first_value(manifest, "config_name", "strategy_config_name"),
         "config_fingerprint": first_value(
             manifest, "config_fingerprint", "strategy_config_fingerprint"
         ),
         "ledger_file": path_from_manifest(manifest.get("ledger_file"), run_dir, root),
+        "ledger_path": path_from_manifest(first_value(manifest, "ledger_path", "ledger_file"), run_dir, root),
+        "source_snapshot_id": first_value(manifest, "source_snapshot_id"),
+        "source_snapshot_ref": first_value(manifest, "source_snapshot_ref"),
         "picks_file": path_from_manifest(
             first_value(manifest, "picks_file") or existing_child(run_dir, "picks_snapshot.csv", "entradas_kelly.csv"),
             run_dir,
@@ -72,6 +76,17 @@ def build_record(run_dir: Path, root: Path) -> dict[str, object]:
         "alias_pending_rows": first_value(manifest, "alias_pending_rows"),
         "quality_report_file": path_from_manifest(
             first_value(manifest, "quality_report_file") or existing_child(run_dir, "quality_report.json"),
+            run_dir,
+            root,
+        ),
+        "candidate_audit_file": path_from_manifest(
+            first_value(manifest, "candidate_audit_file") or existing_child(run_dir, "candidate_audit.csv"),
+            run_dir,
+            root,
+        ),
+        "candidate_audit_rows": first_value(manifest, "candidate_audit_rows"),
+        "candidate_audit_summary_file": path_from_manifest(
+            first_value(manifest, "candidate_audit_summary_file") or existing_child(run_dir, "candidate_audit_summary.csv"),
             run_dir,
             root,
         ),

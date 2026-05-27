@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .schemas import (
+    AnalysisBatchRequest,
     AnalysisRequest,
     ClosingOddsRequest,
     DailyRunRequest,
@@ -59,6 +60,88 @@ def build_analysis_command(project_root: Path, req: AnalysisRequest) -> CommandS
     _append_if(args, req.dry_run, "--dry-run")
     args += ["--xg-source", req.xg_source]
     return CommandSpec(name="analysis", command=args, cwd=project_root)
+
+
+def build_analysis_batch_prepare_command(
+    project_root: Path,
+    req: AnalysisBatchRequest,
+    *,
+    run_group_id: str,
+    source_snapshot_id: str,
+) -> CommandSpec:
+    args = [
+        req.python_bin,
+        "-m",
+        "vcbet.core.analysis_batch_source",
+        "--run-date", req.run_date,
+        "--run-group-id", run_group_id,
+        "--source-snapshot-id", source_snapshot_id,
+        "--output-dir", _resolve(project_root, req.output_dir),
+        "--python-bin", req.python_bin,
+        "--xg-source", req.xg_source,
+    ]
+    _append_if(args, req.reuse_snapshot, "--reuse-snapshot")
+    _append_if(args, req.json_output, "--json")
+    return CommandSpec(name="prepare_batch_source", command=args, cwd=project_root)
+
+
+def build_analysis_batch_commands(
+    project_root: Path,
+    req: AnalysisBatchRequest,
+    *,
+    run_group_id: str,
+    source_snapshot_id: str,
+) -> list[CommandSpec]:
+    output_dir = _resolve(project_root, req.output_dir)
+    source_dir = Path(output_dir) / req.run_date / source_snapshot_id
+    commands = [
+        build_analysis_batch_prepare_command(
+            project_root,
+            req,
+            run_group_id=run_group_id,
+            source_snapshot_id=source_snapshot_id,
+        )
+    ]
+    for item in req.items:
+        run_id = f"{run_group_id}_{item.config_name}"
+        ledger_file = _resolve(project_root, item.ledger_path)
+        commands.append(
+            CommandSpec(
+                name=f"analysis:{item.config_name}",
+                command=[
+                    req.python_bin,
+                    "-m",
+                    "vcbet.core.pipeline_ev",
+                    "--run-id", run_id,
+                    "--odds-file", str(source_dir / "odds_snapshot.csv"),
+                    "--xg-file", str(source_dir / "xg_snapshot.csv"),
+                    "--ledger-file", ledger_file,
+                    "--ledger-path", item.ledger_path,
+                    "--output-dir", output_dir,
+                    "--config-name", item.config_name,
+                    "--run-group-id", run_group_id,
+                    "--source-snapshot-id", source_snapshot_id,
+                ],
+                cwd=project_root,
+            )
+        )
+    commands.append(
+        CommandSpec(
+            name="candidate_audit_summary",
+            command=[
+                req.python_bin,
+                "-m",
+                "vcbet.core.candidate_audit",
+                "--run-group-id", run_group_id,
+                "--run-date", req.run_date,
+                "--source-snapshot-id", source_snapshot_id,
+                "--output-dir", output_dir,
+            ],
+            cwd=project_root,
+        )
+    )
+    commands.append(build_run_catalog_command(project_root))
+    return commands
 
 
 def build_closing_odds_command(project_root: Path, req: ClosingOddsRequest) -> CommandSpec:

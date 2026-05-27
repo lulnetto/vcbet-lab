@@ -481,9 +481,21 @@ def portfolio_selection_score(candidate: dict[str, Any], config: dict[str, Any] 
     safety = selection_safety_bonus(candidate)
     odds_quality = odds_quality_bonus(candidate)
     risk = risk_penalty(candidate)
+    ev_weight = float(weights.get("ev_percent", 1.0))
+    try:
+        from vcbet.core.strategy_config import get_runtime_config
+
+        ev_policy = get_runtime_config().ev_policy
+        cap = _num(ev_policy.get("cap_ev_score_contribution")) if isinstance(ev_policy, dict) else None
+        if cap is not None:
+            ev_weight = min(ev_weight, cap)
+        elif isinstance(ev_policy, dict) and ev_policy.get("use_as_ranker") is False:
+            ev_weight = 0.0
+    except Exception:
+        pass
 
     return round(
-        ev_percent * float(weights.get("ev_percent", 1.0))
+        ev_percent * ev_weight
         + confidence * float(weights.get("confidence_score", 0.75))
         + entry_quality * float(weights.get("entry_quality_score", 0.15))
         + priority * float(weights.get("market_priority", 0.75))

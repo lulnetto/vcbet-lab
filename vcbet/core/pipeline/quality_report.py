@@ -259,6 +259,7 @@ def build_quality_report(
     blocked_candidates_file,
     pick_filter_approved_file,
     portfolio_rejected_file,
+    candidate_audit_file,
     picks_file,
 ) -> dict[str, object]:
     pre_snapshot_summary = build_pre_snapshot_discard_summary(odds_path)
@@ -359,6 +360,7 @@ def build_quality_report(
             "portfolio_rejected_total": int(len(df_portfolio_rejected)),
             "portfolio_rejected_by_reason": to_sorted_dict(Counter(df_portfolio_rejected.get("portfolio_reject_reason", pd.Series(dtype=object)).fillna("missing"))) if not df_portfolio_rejected.empty else {},
             "portfolio_correlation_summary": build_portfolio_correlation_summary(df_final, df_portfolio_rejected),
+            "candidate_audit_rows": int(len(df_raw_candidates)),
             "discard_reason_counts": to_sorted_dict(processing_discard_counts),
         },
         "safety": {
@@ -377,6 +379,7 @@ def build_quality_report(
             "blocked_candidates_file": str(blocked_candidates_file),
             "pick_filter_approved_file": str(pick_filter_approved_file),
             "portfolio_rejected_file": str(portfolio_rejected_file),
+            "candidate_audit_file": str(candidate_audit_file),
             "picks_file": str(picks_file),
         },
     }

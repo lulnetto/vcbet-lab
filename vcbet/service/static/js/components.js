@@ -287,6 +287,7 @@ function jobActionContext(job) {
   const type = String(job?.job_type || job?.title || '').toLowerCase();
   const req = job?.request || {};
   if (type.includes('replay')) return 'Replay Lab';
+  if (type.includes('analysis_batch')) return 'Executar múltiplos perfis';
   if (type.includes('closing')) return 'Atualizar closing odds';
   if (type.includes('reconcile_unmatched')) return 'Reprocessar unmatched';
   if (type.includes('results_settlement') || (type.includes('result') && type.includes('settlement'))) return 'Resultados + settlement';

@@ -8,7 +8,7 @@ from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
 
 
 EXPORT_COLS = [
-    "bet_id", "run_id", "generated_at", "league", "match_datetime", "home_team", "away_team",
+    "bet_id", "run_id", "run_group_id", "generated_at", "league", "match_datetime", "home_team", "away_team",
     "match_name", "market_type", "market_scope", "market_raw", "event_url", "selection_raw",
     "sofascore_event_id", "source_event_id", "line", "side", "target_team_role", "target_team_name", "odd_entrada", "odd_justa",
     "prob_model", "ev_percent",
@@ -30,10 +30,13 @@ EXPORT_COLS = [
     "odd_justa_base", "ev_percent_base", "prob_model_base",
     "odd_justa_adjusted", "ev_percent_adjusted", "prob_model_adjusted",
     "pricing_signal_type", "confidence_score",
-    "confidence_score_type", "confidence_score_scale", "stake_units", "entry_reason",
+    "confidence_score_type", "confidence_score_scale", "stake_units", "stake", "entry_reason",
     "risk_flags", "pick_safety_status", "candidate_stage", "safety_gate_reason",
     "decision_policy_status", "decision_reject_reason", "selection_policy_status",
     "selection_reject_reason",
+    "market_exception_applied", "market_exception_reason",
+    "sport_sense_status", "sport_sense_reason", "team_role", "team_role_source",
+    "stake_policy_applied", "stake_policy_reason", "original_stake",
     "entry_quality_score", "entry_quality_tier", "entry_quality_reasons",
     "entry_quality_market_component", "entry_quality_line_protection_component",
     "entry_quality_odds_component", "entry_quality_data_component",
@@ -45,7 +48,7 @@ EXPORT_COLS = [
     "portfolio_risk_status", "portfolio_risk_reason", "portfolio_exposure_scope",
     "portfolio_exposure_after", "portfolio_exposure_warning", "market_family",
     "strategy_config_name", "strategy_config_fingerprint", "config_name", "config_fingerprint",
-    "config_source_path", "config_snapshot_file", "source_run_id", "source_snapshot_ref",
+    "config_source_path", "config_snapshot_file", "ledger_path", "source_run_id", "source_snapshot_id", "source_snapshot_ref",
     "odds_source_run_id", "xg_source_run_id", "odds_snapshot_file", "xg_snapshot_file",
     "odds_snapshot_hash", "xg_snapshot_hash", "odds_snapshot_time", "xg_asof",
     "temporal_contract_version", "temporal_contract_status", "decision_timestamp", "signal_version",
@@ -59,6 +62,7 @@ def candidate_artifact_paths(run_dir) -> dict[str, object]:
         "raw_candidates_file": run_dir / "raw_candidates.csv",
         "blocked_candidates_file": run_dir / "blocked_candidates.csv",
         "portfolio_rejected_file": run_dir / "portfolio_rejected.csv",
+        "candidate_audit_file": run_dir / "candidate_audit.csv",
     }
 
 
@@ -91,6 +95,9 @@ def manifest_common_fields(
     runtime_config,
     config_snapshot_file,
     run_id: str,
+    run_group_id: str | None,
+    ledger_path: str,
+    source_snapshot_id: str | None,
     odds_path,
     xg_path,
     odds_snapshot_hash: str,
@@ -101,6 +108,8 @@ def manifest_common_fields(
     snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
+    candidate_audit_file=None,
+    candidate_audit_rows: int | None = None,
 ) -> dict[str, object]:
     return {
         "alias_pending_file": str(run_dir / "alias_review_pending.csv"),
@@ -116,7 +125,10 @@ def manifest_common_fields(
         "config_fingerprint": runtime_config.fingerprint,
         "config_source_path": runtime_config.source_path,
         "config_snapshot_file": str(config_snapshot_file),
+        "run_group_id": run_group_id,
+        "ledger_path": ledger_path,
         "source_run_id": run_id,
+        "source_snapshot_id": source_snapshot_id,
         "source_snapshot_ref": f"odds:{odds_path}|xg:{xg_path}",
         "odds_snapshot_hash": odds_snapshot_hash,
         "xg_snapshot_hash": xg_snapshot_hash,
@@ -128,6 +140,8 @@ def manifest_common_fields(
         "snapshot_validation_status": snapshot_validation.get("status"),
         "signal_version": signal_version,
         "pipeline_version": pipeline_version,
+        "candidate_audit_file": str(candidate_audit_file) if candidate_audit_file is not None else None,
+        "candidate_audit_rows": candidate_audit_rows,
     }
 
 
@@ -146,6 +160,9 @@ def write_pipeline_outputs(
     runtime_config,
     config_snapshot_file,
     run_id: str,
+    run_group_id: str | None = None,
+    ledger_path: str | None = None,
+    source_snapshot_id: str | None = None,
     odds_path,
     xg_path,
     odds_snapshot_hash: str,
@@ -156,7 +173,10 @@ def write_pipeline_outputs(
     snapshot_validation: dict[str, object],
     signal_version: str,
     pipeline_version: str,
+    candidate_audit_file=None,
+    candidate_audit_rows: int | None = None,
 ) -> None:
+    selected_ledger_path = str(ledger_path or ledger_file)
     common = manifest_common_fields(
         run_dir=run_dir,
         pending_rows=pending_rows,
@@ -167,6 +187,9 @@ def write_pipeline_outputs(
         runtime_config=runtime_config,
         config_snapshot_file=config_snapshot_file,
         run_id=run_id,
+        run_group_id=run_group_id,
+        ledger_path=selected_ledger_path,
+        source_snapshot_id=source_snapshot_id,
         odds_path=odds_path,
         xg_path=xg_path,
         odds_snapshot_hash=odds_snapshot_hash,
@@ -177,9 +200,14 @@ def write_pipeline_outputs(
         snapshot_validation=snapshot_validation,
         signal_version=signal_version,
         pipeline_version=pipeline_version,
+        candidate_audit_file=candidate_audit_file,
+        candidate_audit_rows=candidate_audit_rows,
     )
     if not df_final.empty:
         export_df = df_final.copy()
+        export_df["run_group_id"] = run_group_id or pd.NA
+        export_df["ledger_path"] = selected_ledger_path
+        export_df["source_snapshot_id"] = source_snapshot_id or pd.NA
         for column in EXPORT_COLS:
             if column not in export_df.columns:
                 export_df[column] = pd.NA

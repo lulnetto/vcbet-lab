@@ -71,6 +71,18 @@ function fetchLedgers() {
   return api('/api/entities/ledgers');
 }
 
+function fetchProfileLedgerBindings() {
+  return api('/api/profile-ledger-bindings');
+}
+
+function saveProfileLedgerBindings(payload) {
+  return api('/api/profile-ledger-bindings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+}
+
 function fetchRuns() {
   return api('/api/entities/runs?limit=300');
 }

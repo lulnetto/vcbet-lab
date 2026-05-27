@@ -198,6 +198,52 @@ class PipelineAuditArtifactsTest(unittest.TestCase):
         self.assertIsNotNone(high_range)
         self.assertIsNone(high_reason)
 
+    def test_btts_yes_market_exception_allows_small_negative_ev_with_stake_cap(self) -> None:
+        payload = deepcopy(DEFAULT_CONFIG_PAYLOAD)
+        payload["enabled_markets"] = ["btts"]
+        payload["allowed_odd_ranges"] = [{"min": 1.65, "max": 2.10}]
+        payload["side_rules"] = {"btts": {"allowed_sides": ["yes"]}}
+        payload["ev_policy"] = {"min_ev_by_market": {"btts": 0.07}}
+        payload["market_exceptions"] = {
+            "btts": {
+                "yes": {
+                    "allow_negative_ev_floor": -0.03,
+                    "min_odd": 1.70,
+                    "max_odd": 2.05,
+                    "requires_sport_sense": True,
+                    "stake_cap": 0.5,
+                },
+                "no": {"blocked": True},
+            }
+        }
+        self._configure_inline_payload(payload)
+
+        candidate = {
+            **self._decision_candidate(market_type="btts", odd=1.80),
+            "selection_raw": "Ambas marcam Sim",
+            "side": "yes",
+            "line": None,
+            "ev_decimal": -0.02,
+        }
+        accepted, reason, rejected = evaluate_pick_candidate_with_details(candidate)
+
+        self.assertIsNotNone(accepted)
+        self.assertIsNone(reason)
+        self.assertIsNone(rejected)
+        self.assertTrue(accepted["market_exception_applied"])
+        self.assertEqual(accepted["market_exception_reason"], "EV_EXCEPTION_BTTS_YES_EXPERIMENTAL")
+        self.assertLessEqual(float(accepted["stake_units"]), 0.5)
+
+        no_candidate = {**candidate, "selection_raw": "Ambas marcam Nao", "side": "no"}
+        blocked, blocked_reason, _ = evaluate_pick_candidate_with_details(no_candidate)
+        self.assertIsNone(blocked)
+        self.assertEqual(blocked_reason, "ev_below_market_min")
+
+        below_floor = {**candidate, "ev_decimal": -0.031}
+        blocked, blocked_reason, _ = evaluate_pick_candidate_with_details(below_floor)
+        self.assertIsNone(blocked)
+        self.assertEqual(blocked_reason, "ev_below_market_min")
+
     def test_league_filter_allowlist_blocks_unlisted_league(self) -> None:
         payload = deepcopy(DEFAULT_CONFIG_PAYLOAD)
         payload["league_filter"] = {
@@ -334,6 +380,8 @@ class PipelineAuditArtifactsTest(unittest.TestCase):
             "entry_quality_data_component",
             "entry_quality_risk_component",
             "entry_quality_ev_component",
+            "market_exception_applied",
+            "market_exception_reason",
         }
         self.assertTrue(expected.issubset(set(EXPORT_COLS)))
 

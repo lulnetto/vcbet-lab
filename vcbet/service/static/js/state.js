@@ -13,6 +13,12 @@ const state = {
   aliasDiagnostics: { scope: 'runs_recent', includeResolved: false },
   dashboardEntries: [], loadErrors: {}, lastRefreshAt: null,
   entities: { configs: [], ledgers: [], runs: [], replays: [], catalogMessages: {} },
+  profileLedgerBindings: {
+    profile_conservative: 'data/ledgers/conservative_bets_ledger.csv',
+    profile_standard: 'data/ledgers/standard_bets_ledger.csv',
+    profile_aggressive: 'data/ledgers/aggressive_bets_ledger.csv',
+  },
+  analysisBatch: { lastResponse: null, statusItems: [] },
   selectedDate: initialLocalDate(),
   selectedConfig: '',
   selectedLedger: 'official',

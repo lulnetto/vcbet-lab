@@ -28,6 +28,8 @@ AVAILABLE_PRICING_VARIANTS: tuple[str, ...] = (
     "xg_residual_adjusted_v1",
 )
 
+NON_STRATEGY_CONFIG_FILES = {"profile_ledger_bindings.json"}
+
 
 DEFAULT_CONFIG_PAYLOAD: dict[str, Any] = {
     "metadata": {
@@ -264,6 +266,12 @@ class RuntimeConfig:
     markets: dict[str, MarketThreshold]
     enabled_markets: set[str] | None
     allowed_odd_ranges: tuple[OddRange, ...]
+    blocked_odd_ranges: tuple[OddRange, ...]
+    side_rules: dict[str, Any]
+    ev_policy: dict[str, Any]
+    market_exceptions: dict[str, Any]
+    stake_policy: dict[str, Any]
+    sport_sense_policy: dict[str, Any]
     league_filter: dict[str, Any]
     market_priority: dict[str, int]
     critical_flags: set[str]
@@ -311,6 +319,9 @@ class RuntimeConfig:
             return market.allowed_odd_ranges
         return self.allowed_odd_ranges
 
+    def blocked_odd_ranges_for_market(self, market_type: str) -> tuple[OddRange, ...]:
+        return self.blocked_odd_ranges
+
     def is_league_allowed(self, league: str) -> bool:
         cfg = self.league_filter if isinstance(self.league_filter, dict) else {}
         mode = str(cfg.get("mode") or "disabled").strip().lower()
@@ -352,15 +363,15 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def _normalize_odd_ranges(value: Any) -> tuple[OddRange, ...]:
+def _normalize_odd_ranges(value: Any, *, field_name: str = "allowed_odd_ranges") -> tuple[OddRange, ...]:
     if not value:
         return ()
     if not isinstance(value, list):
-        raise ValueError("allowed_odd_ranges must be a list")
+        raise ValueError(f"{field_name} must be a list")
     ranges: list[OddRange] = []
     for item in value:
         if not isinstance(item, dict):
-            raise ValueError("allowed_odd_ranges items must be objects")
+            raise ValueError(f"{field_name} items must be objects")
         ranges.append(OddRange(min=float(item["min"]), max=float(item["max"])))
     return tuple(ranges)
 
@@ -393,7 +404,7 @@ def _build_runtime_config(payload: dict[str, Any], source_path: str | None = Non
             edge_strong=float(cfg["edge_strong"]),
             edge_premium_extended=float(cfg["edge_premium_extended"]),
             is_primary_market=bool(cfg.get("is_primary_market", False)),
-            allowed_odd_ranges=_normalize_odd_ranges(cfg.get("allowed_odd_ranges")),
+            allowed_odd_ranges=_normalize_odd_ranges(cfg.get("allowed_odd_ranges"), field_name=f"markets.{market_type}.allowed_odd_ranges"),
         )
         for market_type, cfg in normalized.get("markets", {}).items()
     }
@@ -410,7 +421,13 @@ def _build_runtime_config(payload: dict[str, Any], source_path: str | None = Non
         payload=normalized,
         markets=markets,
         enabled_markets=enabled_markets,
-        allowed_odd_ranges=_normalize_odd_ranges(normalized.get("allowed_odd_ranges")),
+        allowed_odd_ranges=_normalize_odd_ranges(normalized.get("allowed_odd_ranges"), field_name="allowed_odd_ranges"),
+        blocked_odd_ranges=_normalize_odd_ranges(normalized.get("blocked_odd_ranges"), field_name="blocked_odd_ranges"),
+        side_rules=dict(normalized.get("side_rules", {}) if isinstance(normalized.get("side_rules", {}), dict) else {}),
+        ev_policy=dict(normalized.get("ev_policy", {}) if isinstance(normalized.get("ev_policy", {}), dict) else {}),
+        market_exceptions=dict(normalized.get("market_exceptions", {}) if isinstance(normalized.get("market_exceptions", {}), dict) else {}),
+        stake_policy=dict(normalized.get("stake_policy", {}) if isinstance(normalized.get("stake_policy", {}), dict) else {}),
+        sport_sense_policy=dict(normalized.get("sport_sense_policy", {}) if isinstance(normalized.get("sport_sense_policy", {}), dict) else {}),
         league_filter=dict(league_filter),
         market_priority={k: int(v) for k, v in normalized.get("market_priority", {}).items()},
         critical_flags=set(normalized.get("critical_flags", [])),
@@ -478,6 +495,8 @@ def get_runtime_config() -> RuntimeConfig:
 def list_available_configs() -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     for path in sorted(CONFIGS_DIR.glob("*.json")):
+        if path.name in NON_STRATEGY_CONFIG_FILES:
+            continue
         try:
             payload, source = load_config_payload(config_name=path.stem)
             runtime = _build_runtime_config(payload, source_path=source)
@@ -603,6 +622,12 @@ def validate_strategy_config_payload(payload: dict[str, Any], expected_name: str
         "xg_residual_adjustment",
         "enabled_markets",
         "allowed_odd_ranges",
+        "blocked_odd_ranges",
+        "side_rules",
+        "ev_policy",
+        "market_exceptions",
+        "stake_policy",
+        "sport_sense_policy",
         "league_filter",
         "market_priority",
         "markets",
@@ -647,6 +672,116 @@ def validate_strategy_config_payload(payload: dict[str, Any], expected_name: str
                     _issue(issues, "error", f"enabled_markets[{idx}]", "mercado inválido")
 
     _validate_odd_ranges(issues, payload.get("allowed_odd_ranges"), "allowed_odd_ranges")
+    _validate_odd_ranges(issues, payload.get("blocked_odd_ranges"), "blocked_odd_ranges")
+
+    side_rules = payload.get("side_rules")
+    if side_rules is not None:
+        if not isinstance(side_rules, dict):
+            _issue(issues, "error", "side_rules", "deve ser objeto")
+        else:
+            for market_type, cfg in side_rules.items():
+                if str(market_type) not in AVAILABLE_MARKETS:
+                    _issue(issues, "warning", f"side_rules.{market_type}", "mercado desconhecido será preservado")
+                if not isinstance(cfg, dict):
+                    _issue(issues, "error", f"side_rules.{market_type}", "regra deve ser objeto")
+                    continue
+                for key in ("allowed_sides", "blocked_sides"):
+                    if key in cfg and not isinstance(cfg.get(key), list):
+                        _issue(issues, "error", f"side_rules.{market_type}.{key}", "deve ser lista")
+
+    ev_policy = payload.get("ev_policy")
+    if ev_policy is not None:
+        if not isinstance(ev_policy, dict):
+            _issue(issues, "error", "ev_policy", "deve ser objeto")
+        else:
+            if "cap_ev_score_contribution" in ev_policy:
+                _validate_number(issues, ev_policy, "cap_ev_score_contribution", "ev_policy", min_value=0.0, max_value=1.0)
+            min_by_market = ev_policy.get("min_ev_by_market")
+            if min_by_market is not None:
+                if not isinstance(min_by_market, dict):
+                    _issue(issues, "error", "ev_policy.min_ev_by_market", "deve ser objeto")
+                else:
+                    for market_type, value in min_by_market.items():
+                        if str(market_type) not in AVAILABLE_MARKETS:
+                            _issue(issues, "warning", f"ev_policy.min_ev_by_market.{market_type}", "mercado desconhecido será preservado")
+                        if _as_float(value) is None:
+                            _issue(issues, "error", f"ev_policy.min_ev_by_market.{market_type}", "deve ser numérico")
+
+    market_exceptions = payload.get("market_exceptions")
+    if market_exceptions is not None:
+        if not isinstance(market_exceptions, dict):
+            _issue(issues, "error", "market_exceptions", "deve ser objeto")
+        else:
+            btts = market_exceptions.get("btts")
+            if btts is not None:
+                if not isinstance(btts, dict):
+                    _issue(issues, "error", "market_exceptions.btts", "deve ser objeto")
+                else:
+                    yes = btts.get("yes")
+                    if yes is not None:
+                        if not isinstance(yes, dict):
+                            _issue(issues, "error", "market_exceptions.btts.yes", "deve ser objeto")
+                        else:
+                            if "allow_negative_ev_floor" in yes:
+                                _validate_number(issues, yes, "allow_negative_ev_floor", "market_exceptions.btts.yes", min_value=-1.0, max_value=1.0)
+                            for key in ("min_odd", "max_odd"):
+                                if key in yes:
+                                    _validate_number(issues, yes, key, "market_exceptions.btts.yes", min_value=1.01, max_value=10.0)
+                            if "stake_cap" in yes:
+                                _validate_number(issues, yes, "stake_cap", "market_exceptions.btts.yes", min_value=0.0)
+                            min_odd = _as_float(yes.get("min_odd"))
+                            max_odd = _as_float(yes.get("max_odd"))
+                            if min_odd is not None and max_odd is not None and max_odd <= min_odd:
+                                _issue(issues, "error", "market_exceptions.btts.yes.max_odd", "deve ser maior que min_odd")
+                    no = btts.get("no")
+                    if no is not None and not isinstance(no, dict):
+                        _issue(issues, "error", "market_exceptions.btts.no", "deve ser objeto")
+
+    stake_policy = payload.get("stake_policy")
+    if stake_policy is not None:
+        if not isinstance(stake_policy, dict):
+            _issue(issues, "error", "stake_policy", "deve ser objeto")
+        else:
+            for key in ("default_stake", "full_stake", "max_stake", "odds_above_2_50_max_stake"):
+                if key in stake_policy:
+                    _validate_number(issues, stake_policy, key, "stake_policy", min_value=0.0)
+            if "full_stake_only_for" in stake_policy and not isinstance(stake_policy.get("full_stake_only_for"), list):
+                _issue(issues, "error", "stake_policy.full_stake_only_for", "deve ser lista")
+            reduced = stake_policy.get("reduced_stake_for")
+            if reduced is not None:
+                if not isinstance(reduced, dict):
+                    _issue(issues, "error", "stake_policy.reduced_stake_for", "deve ser objeto")
+                else:
+                    for market_type, value in reduced.items():
+                        if str(market_type) not in AVAILABLE_MARKETS:
+                            _issue(issues, "warning", f"stake_policy.reduced_stake_for.{market_type}", "mercado desconhecido será preservado")
+                        if _as_float(value) is None or float(value) < 0:
+                            _issue(issues, "error", f"stake_policy.reduced_stake_for.{market_type}", "deve ser >= 0")
+
+    sport_sense = payload.get("sport_sense_policy")
+    if sport_sense is not None:
+        if not isinstance(sport_sense, dict):
+            _issue(issues, "error", "sport_sense_policy", "deve ser objeto")
+        else:
+            team_total_policy = sport_sense.get("team_total_policy")
+            if team_total_policy is not None:
+                if not isinstance(team_total_policy, dict):
+                    _issue(issues, "error", "sport_sense_policy.team_total_policy", "deve ser objeto")
+                else:
+                    for key in (
+                        "underdog_over_allow_lines_lte",
+                        "underdog_over_block_lines_gte",
+                        "favorite_under_allow_lines_gte",
+                        "favorite_under_block_lines_lte",
+                    ):
+                        if key in team_total_policy:
+                            _validate_number(
+                                issues,
+                                team_total_policy,
+                                key,
+                                "sport_sense_policy.team_total_policy",
+                                min_value=0.0,
+                            )
 
     raw_markets = payload.get("markets", {})
     if raw_markets is not None and not isinstance(raw_markets, dict):

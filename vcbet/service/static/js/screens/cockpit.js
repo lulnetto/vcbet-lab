@@ -8,6 +8,123 @@ function renderNextAction() {
     btn.onclick = action.handler;
   }
 }
+const DEFAULT_PROFILE_LEDGER_BINDINGS = {
+  profile_conservative: 'data/ledgers/conservative_bets_ledger.csv',
+  profile_standard: 'data/ledgers/standard_bets_ledger.csv',
+  profile_aggressive: 'data/ledgers/aggressive_bets_ledger.csv',
+};
+
+function currentBatchLedgerValues() {
+  const values = {};
+  document.querySelectorAll('.batch-ledger-input').forEach(input => {
+    const configName = input.dataset.config || '';
+    if (configName) values[configName] = input.value || '';
+  });
+  return values;
+}
+
+function batchBindingForConfig(configName, currentValues = {}) {
+  return currentValues[configName]
+    || state.profileLedgerBindings?.[configName]
+    || DEFAULT_PROFILE_LEDGER_BINDINGS[configName]
+    || 'data/history/bets_ledger.csv';
+}
+
+function renderBatchLedgerOptions() {
+  const list = document.getElementById('batchLedgerOptions');
+  if (!list) return;
+  const paths = [...new Set((state.entities.ledgers || []).map(item => item.path).filter(Boolean))];
+  list.innerHTML = paths.map(path => `<option value="${escapeHtml(path)}"></option>`).join('');
+}
+
+function renderBatchProfileRows() {
+  const root = document.getElementById('batchProfileRows');
+  if (!root) return;
+  renderBatchLedgerOptions();
+  const currentValues = currentBatchLedgerValues();
+  const configs = state.entities.configs || [];
+  root.innerHTML = configs.map(cfg => {
+    const configName = cfg.name || cfg.id || '';
+    const checked = Object.prototype.hasOwnProperty.call(DEFAULT_PROFILE_LEDGER_BINDINGS, configName);
+    const ledgerPath = batchBindingForConfig(configName, currentValues);
+    return `<div class="batch-profile-row">
+      <label class="batch-check"><input type="checkbox" class="batch-config-check" data-config="${escapeHtml(configName)}" ${checked ? 'checked' : ''} onchange="updateBatchSelectionMeta()"></label>
+      <div class="batch-config-name"><strong>${escapeHtml(cfg.label || configName)}</strong><span>${escapeHtml(configName)}</span></div>
+      <div><label>Ledger</label><input class="batch-ledger-input" data-config="${escapeHtml(configName)}" list="batchLedgerOptions" value="${escapeHtml(ledgerPath)}" onchange="updateBatchSelectionMeta()"></div>
+    </div>`;
+  }).join('') || '<div class="state-box"><strong>Nenhuma config encontrada.</strong>Atualize os presets antes de executar o batch.</div>';
+  updateBatchSelectionMeta();
+}
+
+function selectedBatchItems() {
+  return [...document.querySelectorAll('.batch-config-check:checked')].map(check => {
+    const configName = check.dataset.config || '';
+    const input = [...document.querySelectorAll('.batch-ledger-input')].find(item => item.dataset.config === configName);
+    return { config_name: configName, ledger_path: (input?.value || '').trim() };
+  }).filter(item => item.config_name);
+}
+
+function updateBatchSelectionMeta() {
+  const items = selectedBatchItems();
+  const meta = document.getElementById('batchProfilesMeta');
+  if (meta) meta.textContent = `${items.length} selecionado(s)`;
+}
+
+function batchPhaseStatus(job, configName) {
+  const phase = (job?.phases || []).find(item => item.name === `analysis:${configName}`);
+  return phase?.status || job?.status || 'queued';
+}
+
+function renderBatchProfileStatus() {
+  const el = document.getElementById('batchProfileStatus');
+  if (!el) return;
+  const last = state.analysisBatch?.lastResponse;
+  if (!last) return;
+  const job = state.jobs.find(item => item.id === last.job_id) || null;
+  const items = last.items || [];
+  const bits = items.map(item => `${item.config_name}: ${batchPhaseStatus(job, item.config_name)}`);
+  el.textContent = `job_id=${last.job_id} | run_group_id=${last.run_group_id} | ${bits.join(' | ')}`;
+}
+
+async function submitAnalysisBatch() {
+  const items = selectedBatchItems();
+  const result = document.getElementById('actionResult');
+  if (!items.length) {
+    if (result) result.textContent = 'Erro: selecione ao menos uma config.';
+    return;
+  }
+  if (items.some(item => !item.ledger_path)) {
+    if (result) result.textContent = 'Erro: cada config selecionada precisa de um ledger.';
+    return;
+  }
+  const duplicateLedgers = items
+    .map(item => item.ledger_path)
+    .filter((path, index, arr) => arr.indexOf(path) !== index);
+  if (duplicateLedgers.length) {
+    if (result) result.textContent = `Erro: ledger duplicado no batch: ${[...new Set(duplicateLedgers)].join(', ')}`;
+    return;
+  }
+  const payload = {
+    run_date: document.getElementById('batchRunDate')?.value || operationalDate(),
+    reuse_snapshot: document.getElementById('batchReuseSnapshot')?.value !== 'false',
+    items,
+  };
+  try {
+    const res = await api('/jobs/analysis-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    state.analysisBatch.lastResponse = res;
+    state.analysisBatch.statusItems = res.items || [];
+    if (result) result.textContent = JSON.stringify(res, null, 2);
+    await loadJobs();
+    renderBatchProfileStatus();
+  } catch (err) {
+    if (result) result.textContent = `Erro: ${err.message}`;
+  }
+}
+
 function registryPendingCount() {
   return (state.teamRegistry?.pending || []).filter(item =>
     String(item.status || 'pending_review') === 'pending_review'
@@ -119,6 +236,7 @@ function renderTodayCockpit() {
   document.getElementById('todayJobs').innerHTML = state.loadErrors.jobs
     ? '<div class="state-box"><strong>Jobs não verificados.</strong>O restante do cockpit continua disponível.</div>'
     : (relevantJobs.map(job => `<div class="compact-job ${statusClass(job.status)}"><div class="inline"><strong>${escapeHtml(job.title)}</strong>${statusPill(job.status)}</div><div class="muted">${escapeHtml(jobActionContext(job))} | ${escapeHtml(job.job_type)} | ${escapeHtml(job.id)}</div></div>`).join('') || '<div class="state-box"><strong>Nenhum job recente.</strong>Abra o Monitor para acompanhar novas execuções.</div>');
+  renderBatchProfileStatus();
   renderNextAction();
 }
 async function refreshTodayCockpit() {
@@ -146,4 +264,7 @@ Object.assign(window, {
   todayStatus,
   renderTodayCockpit,
   refreshTodayCockpit,
+  renderBatchProfileRows,
+  updateBatchSelectionMeta,
+  submitAnalysisBatch,
 });

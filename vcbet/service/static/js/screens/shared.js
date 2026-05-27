@@ -14,16 +14,18 @@ async function loadConfigs() {
 }
 
 async function loadEntities() {
-  const [configs, ledgers, runs, replays] = await Promise.all([
+  const [configs, ledgers, runs, replays, bindings] = await Promise.all([
     fetchConfigs(),
     fetchLedgers(),
     fetchRuns(),
     fetchReplays(),
+    fetchProfileLedgerBindings().catch(() => ({items: state.profileLedgerBindings || {}})),
   ]);
   state.entities.configs = configs.items || [];
   state.entities.ledgers = ledgers.items || [];
   state.entities.runs = runs.items || [];
   state.entities.replays = replays.items || [];
+  state.profileLedgerBindings = bindings.items || state.profileLedgerBindings || {};
   state.entities.catalogMessages = {
     runs: runs.message || '',
     replays: replays.message || '',
@@ -38,7 +40,7 @@ async function loadEntities() {
 }
 
 function setupEntitySelectors() {
-  ['analysisDate','dailyDate'].forEach(id => renderDatePicker(id));
+  ['analysisDate','dailyDate','batchRunDate'].forEach(id => renderDatePicker(id));
   ['dashDateFrom','dashDateTo'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.type = 'date';
@@ -54,6 +56,7 @@ function setupEntitySelectors() {
   ].forEach(([selectId, inputId]) => renderLedgerSelect(selectId, inputId));
   renderRunSelect('replaySourceRunSelect', 'replaySourceRun');
   renderReplaySelect('replaySummarySelect');
+  if (typeof renderBatchProfileRows === 'function') renderBatchProfileRows();
 }
 async function submitJob(path, payload) {
   try {

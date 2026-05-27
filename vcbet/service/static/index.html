@@ -121,6 +121,23 @@
     </div>
 
     <div class="grid">
+      <div class="card batch-profiles-card">
+        <div class="section-title">
+          <h2>Executar múltiplos perfis</h2>
+          <span class="muted" id="batchProfilesMeta">0 selecionados</span>
+        </div>
+        <div class="row">
+          <div><label>Data</label><input id="batchRunDate" type="date"></div>
+          <div><label>Snapshot</label><select id="batchReuseSnapshot"><option value="true" selected>reutilizar</option><option value="false">novo</option></select></div>
+        </div>
+        <datalist id="batchLedgerOptions"></datalist>
+        <div id="batchProfileRows" class="batch-profile-rows"></div>
+        <div class="inline" style="margin-top:12px;">
+          <button class="green" onclick="submitAnalysisBatch()">Executar perfis selecionados</button>
+          <span class="muted" id="batchProfileStatus">Nenhum batch executado nesta sessão.</span>
+        </div>
+      </div>
+
       <div class="card">
         <h2>Gerar/Atualizar análise do dia</h2>
         <p class="muted">Executa a análise do dia e produz a carteira sugerida.</p>

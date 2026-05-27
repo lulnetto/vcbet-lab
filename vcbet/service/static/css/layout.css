@@ -13,6 +13,12 @@
 .inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .section-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .config-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+.batch-profiles-card { grid-column:1 / -1; }
+.batch-profile-rows { display:grid; gap:8px; margin-top:12px; }
+.batch-profile-row { display:grid; grid-template-columns:42px minmax(180px,.8fr) minmax(260px,1.2fr); gap:12px; align-items:center; border-top:1px solid var(--border); padding-top:10px; }
+.batch-check { margin:0; display:flex; justify-content:center; }
+.batch-config-name { display:grid; gap:2px; overflow-wrap:anywhere; }
+.batch-config-name span { color:var(--muted); font-size:12px; }
 .cockpit { display:grid; gap:16px; }
 .cockpit-hero { display:grid; gap:16px; grid-template-columns:minmax(360px,1.2fr) minmax(280px,.8fr); }
 .meta-grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); margin-top:14px; }
@@ -30,4 +36,4 @@ details.advanced { margin-top:12px; border-top:1px solid var(--border); padding-
 details.advanced + button { margin-top:12px; }
 details.advanced > summary { cursor:pointer; color:var(--muted); font-size:13px; }
 
-@media (max-width: 900px) { .jobs-grid, .cockpit-hero, .config-presets-layout { grid-template-columns:1fr; } #jobLogs { max-height:68vh; } }
+@media (max-width: 900px) { .jobs-grid, .cockpit-hero, .config-presets-layout, .batch-profile-row { grid-template-columns:1fr; } .batch-check { justify-content:flex-start; } #jobLogs { max-height:68vh; } }

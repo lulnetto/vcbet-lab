@@ -19,6 +19,7 @@ from . import RouteContext
 
 CONFIG_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 PROTECTED_CONFIGS = {"legacy_v2", "gd_experimental_v1"}
+NON_PRESET_CONFIG_FILES = {"profile_ledger_bindings.json"}
 
 
 class ConfigPresetCreateRequest(BaseModel):
@@ -129,6 +130,8 @@ def _config_detail(name: str, *, extra: dict[str, Any] | None = None) -> dict[st
 def _list_presets() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for path in sorted(_configs_dir().glob("*.json")):
+        if path.name in NON_PRESET_CONFIG_FILES:
+            continue
         name = path.stem
         try:
             raw, _source = strategy_config.load_raw_config_payload(config_name=name)

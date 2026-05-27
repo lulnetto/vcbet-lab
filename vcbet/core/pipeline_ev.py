@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from vcbet.core.candidate_audit import build_candidate_audit, empty_candidate_audit, write_candidate_audit
 from vcbet.core.data_health import validate_snapshot_health
 from vcbet.core.ledger_manager import DEFAULT_LEDGER_FILE
 from vcbet.core.pipeline.filtering_stage import build_normalization_filter, select_and_annotate_final_picks
@@ -50,6 +51,9 @@ def processar_pipeline(
     config_name: str | None = None,
     snapshot_reference_timestamp: str | None = None,
     dry_run: bool = False,
+    run_group_id: str | None = None,
+    ledger_path: str | None = None,
+    source_snapshot_id: str | None = None,
 ):
     runtime_config = configure_runtime(config_name=config_name, config_file=config_file)
     loaded = load_pipeline_inputs(
@@ -64,6 +68,8 @@ def processar_pipeline(
 
     odds_manifest_path = Path(loaded["run_dir"]) / "odds_collection_manifest.json"
     odds_manifest = load_json_file(odds_manifest_path) if odds_manifest_path.exists() else None
+    selected_ledger_path = str(ledger_path or ledger_file)
+    resolved_source_snapshot_id = source_snapshot_id or loaded["odds_run_id"] or loaded["xg_run_id"] or loaded["run_id"]
 
     snapshot_health = validate_snapshot_health(
         df_betano,
@@ -73,6 +79,8 @@ def processar_pipeline(
         odds_manifest=odds_manifest,
     )
     if not snapshot_health["is_valid"]:
+        artifact_paths = candidate_artifact_paths(loaded["run_dir"])
+        write_candidate_audit(empty_candidate_audit(), artifact_paths["candidate_audit_file"])
         generated_at = now_str()
         temporal_status = temporal_contract_status(
             decision_timestamp=generated_at,
@@ -124,7 +132,10 @@ def processar_pipeline(
             config_fingerprint=runtime_config.fingerprint,
             config_source_path=runtime_config.source_path,
             config_snapshot_file=str(loaded["config_snapshot_file"]),
+            run_group_id=run_group_id,
+            ledger_path=selected_ledger_path,
             source_run_id=loaded["run_id"],
+            source_snapshot_id=resolved_source_snapshot_id,
             source_snapshot_ref=f"odds:{loaded['odds_path']}|xg:{loaded['xg_path']}",
             odds_snapshot_hash=loaded["odds_snapshot_hash"],
             xg_snapshot_hash=loaded["xg_snapshot_hash"],
@@ -135,6 +146,8 @@ def processar_pipeline(
             snapshot_validation_status="rejected",
             signal_version=SIGNAL_VERSION,
             pipeline_version=PIPELINE_VERSION,
+            candidate_audit_file=str(artifact_paths["candidate_audit_file"]),
+            candidate_audit_rows=0,
         )
         error_codes = ", ".join(str(item.get("code")) for item in snapshot_health["errors"])
         raise ValueError(f"Snapshot health check failed: {error_codes}")
@@ -155,6 +168,8 @@ def processar_pipeline(
     )
     snapshot_validation = snapshot_validation_result.to_dict()
     if not snapshot_validation_result.is_valid:
+        artifact_paths = candidate_artifact_paths(loaded["run_dir"])
+        write_candidate_audit(empty_candidate_audit(), artifact_paths["candidate_audit_file"])
         quality_report = build_snapshot_rejection_report(
             run_id=loaded["run_id"],
             target_date=loaded["target_date"],
@@ -190,7 +205,10 @@ def processar_pipeline(
             config_fingerprint=runtime_config.fingerprint,
             config_source_path=runtime_config.source_path,
             config_snapshot_file=str(loaded["config_snapshot_file"]),
+            run_group_id=run_group_id,
+            ledger_path=selected_ledger_path,
             source_run_id=loaded["run_id"],
+            source_snapshot_id=resolved_source_snapshot_id,
             source_snapshot_ref=f"odds:{loaded['odds_path']}|xg:{loaded['xg_path']}",
             odds_snapshot_hash=loaded["odds_snapshot_hash"],
             xg_snapshot_hash=loaded["xg_snapshot_hash"],
@@ -201,6 +219,8 @@ def processar_pipeline(
             snapshot_validation_status=snapshot_validation["status"],
             signal_version=SIGNAL_VERSION,
             pipeline_version=PIPELINE_VERSION,
+            candidate_audit_file=str(artifact_paths["candidate_audit_file"]),
+            candidate_audit_rows=0,
         )
         error_codes = ", ".join(str(item.get("code")) for item in snapshot_validation["errors"])
         raise ValueError(f"SnapshotValidator rejected snapshots: {error_codes}")
@@ -234,6 +254,9 @@ def processar_pipeline(
         runtime_config=runtime_config,
         config_snapshot_file=loaded["config_snapshot_file"],
         run_id=loaded["run_id"],
+        run_group_id=run_group_id,
+        ledger_path=selected_ledger_path,
+        source_snapshot_id=resolved_source_snapshot_id,
         odds_path=loaded["odds_path"],
         xg_path=loaded["xg_path"],
         odds_snapshot_hash=loaded["odds_snapshot_hash"],
@@ -244,13 +267,41 @@ def processar_pipeline(
         signal_version=SIGNAL_VERSION,
         pipeline_version=PIPELINE_VERSION,
     )
-    write_candidate_artifacts(
+    df_blocked_for_artifacts = pd.concat(
+        [
+            df
+            for df in (df_blocked_candidates, selection["df_profile_policy_blocked"])
+            if isinstance(df, pd.DataFrame) and not df.empty
+        ],
+        ignore_index=True,
+    ) if (
+        not df_blocked_candidates.empty
+        or (
+            isinstance(selection["df_profile_policy_blocked"], pd.DataFrame)
+            and not selection["df_profile_policy_blocked"].empty
+        )
+    ) else pd.DataFrame()
+    df_candidate_audit = build_candidate_audit(
         df_raw_candidates=df_raw_candidates,
         df_candidates=df_candidates,
         df_blocked_candidates=df_blocked_candidates,
+        df_profile_policy_blocked=selection["df_profile_policy_blocked"],
+        df_portfolio_rejected=selection["df_portfolio_rejected"],
+        df_final=selection["df_final"],
+        runtime_config=runtime_config,
+        run_id=loaded["run_id"],
+        run_group_id=run_group_id,
+        ledger_path=selected_ledger_path,
+        source_snapshot_id=resolved_source_snapshot_id,
+    )
+    write_candidate_artifacts(
+        df_raw_candidates=df_raw_candidates,
+        df_candidates=df_candidates,
+        df_blocked_candidates=df_blocked_for_artifacts,
         df_portfolio_rejected=selection["df_portfolio_rejected"],
         artifact_paths=artifact_paths,
     )
+    write_candidate_audit(df_candidate_audit, artifact_paths["candidate_audit_file"])
     print_pricing_summary(
         priced_market_counts=pricing["priced_market_counts"],
         df_candidates=df_candidates,
@@ -297,7 +348,7 @@ def processar_pipeline(
         priced_market_counts=pricing["priced_market_counts"],
         df_candidates=df_candidates,
         approved_market_counts=pricing["approved_market_counts"],
-        df_blocked_candidates=df_blocked_candidates,
+        df_blocked_candidates=df_blocked_for_artifacts,
         safety_gate_blocked_total=selection["safety_gate_blocked_total"],
         df_portfolio_rejected=selection["df_portfolio_rejected"],
         run_safety_status=selection["run_safety_status"],
@@ -311,6 +362,7 @@ def processar_pipeline(
         blocked_candidates_file=artifact_paths["blocked_candidates_file"],
         pick_filter_approved_file=artifact_paths["pick_filter_approved_file"],
         portfolio_rejected_file=artifact_paths["portfolio_rejected_file"],
+        candidate_audit_file=artifact_paths["candidate_audit_file"],
         picks_file=loaded["picks_file"],
     )
     quality_report_file = save_run_quality_report(loaded["run_dir"], quality_report)
@@ -328,6 +380,9 @@ def processar_pipeline(
         runtime_config=runtime_config,
         config_snapshot_file=loaded["config_snapshot_file"],
         run_id=loaded["run_id"],
+        run_group_id=run_group_id,
+        ledger_path=selected_ledger_path,
+        source_snapshot_id=resolved_source_snapshot_id,
         odds_path=loaded["odds_path"],
         xg_path=loaded["xg_path"],
         odds_snapshot_hash=loaded["odds_snapshot_hash"],
@@ -338,6 +393,8 @@ def processar_pipeline(
         snapshot_validation=snapshot_validation,
         signal_version=SIGNAL_VERSION,
         pipeline_version=PIPELINE_VERSION,
+        candidate_audit_file=artifact_paths["candidate_audit_file"],
+        candidate_audit_rows=len(df_candidate_audit),
     )
 
 
@@ -353,6 +410,9 @@ if __name__ == "__main__":
     parser.add_argument("--config-file", help="Arquivo JSON de configuração de estratégia")
     parser.add_argument("--config-name", help="Nome do preset em ./configs sem .json")
     parser.add_argument("--snapshot-reference-timestamp", help="Timestamp de referência para validação temporal de snapshots, usado por replay histórico")
+    parser.add_argument("--run-group-id", help="Identificador do grupo de runs em batch")
+    parser.add_argument("--ledger-path", help="Caminho de ledger selecionado pelo usuário para metadados")
+    parser.add_argument("--source-snapshot-id", help="Identificador do snapshot/artifact set de origem")
     args = parser.parse_args()
 
     processar_pipeline(
@@ -366,4 +426,7 @@ if __name__ == "__main__":
         config_name=args.config_name,
         snapshot_reference_timestamp=args.snapshot_reference_timestamp,
         dry_run=args.dry_run,
+        run_group_id=args.run_group_id,
+        ledger_path=args.ledger_path,
+        source_snapshot_id=args.source_snapshot_id,
     )

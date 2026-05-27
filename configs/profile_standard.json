@@ -1,0 +1,211 @@
+{
+  "metadata": {
+    "name": "profile_standard",
+    "label": "Padrão",
+    "description": "Perfil padrão baseado em xg_residual_adjusted_v1, tentando replicar a seleção manual: BTTS Yes, handicap, team total semântico e odds altas controladas."
+  },
+  "pricing_variant": "xg_residual_adjusted_v1",
+  "xg_residual_adjustment": {
+    "enabled": true,
+    "weight": 0.25,
+    "max_residual_abs": 0.35,
+    "max_lambda_adjustment_pct": 0.07,
+    "shrink_prior_games": 12,
+    "min_games": 8,
+    "markets": [
+      "draw_no_bet",
+      "asian_handicap",
+      "asian_total",
+      "total_goals",
+      "team_total",
+      "btts"
+    ]
+  },
+  "data_quality": {
+    "max_snapshot_age_hours": 36
+  },
+  "enabled_markets": [
+    "asian_handicap",
+    "btts",
+    "team_total",
+    "asian_total"
+  ],
+  "allowed_odd_ranges": [
+    {
+      "min": 1.65,
+      "max": 2.05
+    },
+    {
+      "min": 2.45,
+      "max": 3.05
+    }
+  ],
+  "blocked_odd_ranges": [
+    {
+      "min": 2.05,
+      "max": 2.4
+    }
+  ],
+  "side_rules": {
+    "btts": {
+      "allowed_sides": [
+        "yes"
+      ]
+    }
+  },
+  "ev_policy": {
+    "use_as_ranker": false,
+    "cap_ev_score_contribution": 0.2,
+    "min_ev_by_market": {
+      "asian_handicap": 0.06,
+      "asian_total": 0.07,
+      "btts": 0.07,
+      "team_total": 0.08
+    }
+  },
+  "market_exceptions": {
+    "btts": {
+      "yes": {
+        "allow_negative_ev_floor": -0.03,
+        "min_odd": 1.70,
+        "max_odd": 2.05,
+        "requires_sport_sense": true,
+        "stake_cap": 0.5
+      },
+      "no": {
+        "blocked": true
+      }
+    }
+  },
+  "stake_policy": {
+    "default_stake": 0.5,
+    "full_stake": 1,
+    "max_stake": 1,
+    "full_stake_only_for": [
+      "asian_handicap",
+      "btts"
+    ],
+    "reduced_stake_for": {
+      "asian_total": 0.5,
+      "team_total": 0.5,
+      "btts": 0.5
+    },
+    "odds_above_2_50_max_stake": 0.5
+  },
+  "sport_sense_policy": {
+    "enabled": true,
+    "avoid_anti_home_bias": true,
+    "avoid_anti_goal_bias": true,
+    "allow_against_home_if_favorite_strength_gap": true,
+    "team_total_policy": {
+      "enabled": true,
+      "block_global_mercado_time_flag": true,
+      "underdog_over_allow_lines_lte": 0.5,
+      "underdog_over_block_lines_gte": 1.5,
+      "favorite_under_allow_lines_gte": 2.5,
+      "favorite_under_prefer_push_lines": true,
+      "favorite_under_block_lines_lte": 1.5
+    }
+  },
+  "market_priority": {
+    "btts": 1,
+    "asian_handicap": 2,
+    "team_total": 3,
+    "asian_total": 4,
+    "total_goals": 7,
+    "draw_no_bet": 8
+  },
+  "markets": {
+    "asian_handicap": {
+      "odd_min": 1.65,
+      "standard_max": 2.05,
+      "extended_max": 3.5,
+      "edge_min": 0.06,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "btts": {
+      "odd_min": 1.65,
+      "standard_max": 2.05,
+      "extended_max": 3.5,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "team_total": {
+      "odd_min": 1.65,
+      "standard_max": 2.05,
+      "extended_max": 3.5,
+      "edge_min": 0.08,
+      "edge_strong": 0.12,
+      "edge_premium_extended": 0.14,
+      "is_primary_market": false
+    },
+    "asian_total": {
+      "odd_min": 1.65,
+      "standard_max": 2.05,
+      "extended_max": 3.5,
+      "edge_min": 0.07,
+      "edge_strong": 0.11,
+      "edge_premium_extended": 0.13,
+      "is_primary_market": false
+    },
+    "total_goals": {
+      "odd_min": 1.65,
+      "standard_max": 2.6,
+      "extended_max": 3.2,
+      "edge_min": 0.06,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": true
+    },
+    "draw_no_bet": {
+      "odd_min": 1.7,
+      "standard_max": 2.6,
+      "extended_max": 3.5,
+      "edge_min": 0.07,
+      "edge_strong": 0.1,
+      "edge_premium_extended": 0.12,
+      "is_primary_market": false
+    }
+  },
+  "rules": {
+    "confidence": {
+      "min_to_keep": 3,
+      "full_unit_min": 5,
+      "full_unit_requires_no_flags": false,
+      "full_unit_requires_not_extended": true
+    },
+    "extended_range": {
+      "enabled": true,
+      "min_confidence": 4,
+      "require_no_flags": false,
+      "require_no_critical_flags": true
+    },
+    "portfolio": {
+      "max_picks_per_match": 1,
+      "max_picks_per_league": 3,
+      "max_stake_per_league": null,
+      "max_picks_per_market_family": 8,
+      "max_stake_per_market_family": null,
+      "correlation_selection": {
+        "enabled": true,
+        "max_picks_per_high_correlation_cluster": 1,
+        "ev_gap_override_pp": 4
+      }
+    }
+  },
+  "confidence_caps": {
+    "CORRELACAO_JOGO": 4,
+    "LINHA_EXTREMA": 4,
+    "POISSON_MARGIN_RISK": 4
+  },
+  "league_filter": {
+    "enabled": false,
+    "mode": "disabled",
+    "allowed_leagues": [],
+    "blocked_leagues": []
+  }
+}

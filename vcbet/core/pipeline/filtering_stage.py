@@ -5,7 +5,13 @@ from collections import Counter
 import pandas as pd
 
 from vcbet.core.config_ligas import obter_nomes_ligas_ativas
+from vcbet.core.market_exceptions import (
+    EV_EXCEPTION_BTTS_YES_EXPERIMENTAL,
+    apply_market_exception_fields,
+    btts_yes_ev_exception_meta,
+)
 from vcbet.core.line_selector import select_top_picks
+from vcbet.core.sport_sense_policy import apply_sport_sense_policy
 from vcbet.core.temporal_contract import TEMPORAL_CONTRACT_VERSION
 
 
@@ -70,6 +76,42 @@ def build_normalization_filter(df_betano: pd.DataFrame, df_xg: pd.DataFrame, sup
     }
 
 
+def apply_profile_policies(df_candidates: pd.DataFrame, runtime_config) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if df_candidates.empty:
+        return df_candidates.copy(), pd.DataFrame()
+
+    approved_rows: list[dict] = []
+    blocked_rows: list[dict] = []
+    for row in df_candidates.to_dict("records"):
+        evaluated = apply_sport_sense_policy(row, runtime_config)
+        if evaluated.get("sport_sense_status") == "blocked":
+            exception_meta = None
+            if str(evaluated.get("sport_sense_reason") or "").upper() == "EV_BELOW_MARKET_MIN":
+                exception_meta = btts_yes_ev_exception_meta(evaluated, runtime_config)
+            if exception_meta is not None:
+                evaluated = apply_market_exception_fields(evaluated, exception_meta)
+                evaluated["sport_sense_status"] = "approved"
+                evaluated["sport_sense_reason"] = EV_EXCEPTION_BTTS_YES_EXPERIMENTAL
+                approved_rows.append(evaluated)
+                continue
+            blocked = dict(evaluated)
+            reason = str(blocked.get("sport_sense_reason") or "SPORT_SENSE_BLOCKED")
+            blocked["candidate_stage"] = "profile_policy_blocked_candidate"
+            blocked["pick_safety_status"] = "blocked"
+            blocked["decision_policy_status"] = "blocked_by_profile_policy"
+            blocked["decision_reject_reason"] = reason
+            blocked["selection_policy_status"] = "blocked_by_profile_policy"
+            blocked["selection_reject_reason"] = reason
+            blocked["safety_reject_reason"] = reason
+            blocked_rows.append(blocked)
+        else:
+            approved_rows.append(evaluated)
+
+    approved_df = pd.DataFrame(approved_rows)
+    blocked_df = pd.DataFrame(blocked_rows)
+    return approved_df, blocked_df
+
+
 def select_and_annotate_final_picks(
     *,
     df_candidates: pd.DataFrame,
@@ -78,6 +120,9 @@ def select_and_annotate_final_picks(
     runtime_config,
     config_snapshot_file,
     run_id: str,
+    run_group_id: str | None = None,
+    ledger_path: str | None = None,
+    source_snapshot_id: str | None = None,
     odds_path,
     xg_path,
     odds_snapshot_hash: str,
@@ -88,8 +133,9 @@ def select_and_annotate_final_picks(
     signal_version: str,
     pipeline_version: str,
 ) -> dict[str, object]:
-    if not df_candidates.empty:
-        df_final, df_portfolio_rejected = select_top_picks(df_candidates, return_meta=True)
+    df_policy_candidates, df_profile_policy_blocked = apply_profile_policies(df_candidates, runtime_config)
+    if not df_policy_candidates.empty:
+        df_final, df_portfolio_rejected = select_top_picks(df_policy_candidates, return_meta=True)
     else:
         df_final = pd.DataFrame()
         df_portfolio_rejected = pd.DataFrame()
@@ -102,7 +148,10 @@ def select_and_annotate_final_picks(
         df_final["config_fingerprint"] = runtime_config.fingerprint
         df_final["config_source_path"] = runtime_config.source_path or ""
         df_final["config_snapshot_file"] = str(config_snapshot_file)
+        df_final["run_group_id"] = run_group_id or ""
+        df_final["ledger_path"] = ledger_path or ""
         df_final["source_run_id"] = run_id
+        df_final["source_snapshot_id"] = source_snapshot_id or ""
         df_final["source_snapshot_ref"] = f"odds:{odds_path}|xg:{xg_path}"
         df_final["odds_snapshot_file"] = str(odds_path)
         df_final["xg_snapshot_file"] = str(xg_path)
@@ -127,6 +176,7 @@ def select_and_annotate_final_picks(
     return {
         "df_final": df_final,
         "df_portfolio_rejected": df_portfolio_rejected,
+        "df_profile_policy_blocked": df_profile_policy_blocked,
         "safety_gate_blocked_total": safety_gate_blocked_total,
         "official_unsafe_total": official_unsafe_total,
         "run_safety_status": run_safety_status,

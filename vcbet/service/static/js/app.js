@@ -13,7 +13,7 @@ function switchTab(tab) {
 }
 
 function bindOperationalInputs() {
-  ['analysisDate','dailyDate','analysisConfig','dailyConfig'].forEach(id => {
+  ['analysisDate','dailyDate','batchRunDate','analysisConfig','dailyConfig'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.onchange = () => {
       if (id.endsWith('Date')) state.selectedDate = el.value || todayIsoDate();

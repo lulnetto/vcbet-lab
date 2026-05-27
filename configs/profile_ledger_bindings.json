@@ -1,0 +1,6 @@
+{
+  "profile_conservative": "data/ledgers/conservative_bets_ledger.csv",
+  "profile_standard": "data/ledgers/standard_bets_ledger.csv",
+  "profile_aggressive": "data/ledgers/aggressive_bets_ledger.csv",
+  "gd_experimental_v12_copy": "data/ledgers/bets_ledger.csv"
+}
